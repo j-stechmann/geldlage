@@ -2,14 +2,15 @@ import { describe, it, expect, beforeAll } from "vitest"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { eq } from "drizzle-orm"
-import {
-  createTestDb,
-  setTestDb,
-  type Db,
-} from "@/lib/db"
+import { createTestDb, setTestDb, type Db } from "@/lib/db"
 import { seedUser } from "./helpers"
 import { parseDkbCsv } from "@/lib/csv/parser"
-import { accounts, importBatches, transactions, categories } from "@/lib/db/schema"
+import {
+  accounts,
+  importBatches,
+  transactions,
+  categories,
+} from "@/lib/db/schema"
 import { computeDedupe } from "@/lib/db/dedupe"
 import {
   parseFilters,
