@@ -11,6 +11,11 @@ import {
   type TableFilters,
 } from "@/lib/filters"
 
+// echoes older than this are dead: an interrupted/coalesced navigation never
+// commits, and a lingering key would swallow a later genuine navigation to
+// the same URL
+const ECHO_TTL_MS = 10_000
+
 function TransactionsPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -25,7 +30,7 @@ function TransactionsPageInner() {
   // racing against async router.replace commits
   const [filters, setFiltersState] = React.useState(urlFilters)
   const lastUrlKey = React.useRef(urlKey)
-  const echoKeys = React.useRef<Set<string>>(new Set())
+  const echoKeys = React.useRef<Map<string, number>>(new Map())
 
   React.useEffect(() => {
     if (lastUrlKey.current === urlKey) return
@@ -33,7 +38,13 @@ function TransactionsPageInner() {
     // adopt only external URL changes (back/forward, shared links); echoes
     // of our own router.replace calls must not clobber newer local state
     if (echoKeys.current.has(urlKey)) {
+      const consumedAt = echoKeys.current.get(urlKey)!
       echoKeys.current.delete(urlKey)
+      // consuming an echo also clears newer keys: they were queued behind a
+      // navigation that just committed, so their URL state is already shown
+      for (const [key, ts] of echoKeys.current) {
+        if (ts > consumedAt) echoKeys.current.delete(key)
+      }
     } else {
       setFiltersState(urlFilters)
     }
@@ -43,10 +54,12 @@ function TransactionsPageInner() {
     (next: TableFilters) => {
       const qs = filtersToParams(next).toString()
       if (qs !== lastUrlKey.current) {
-        echoKeys.current.add(qs)
-        if (echoKeys.current.size > 8) {
-          const oldest = echoKeys.current.values().next().value
-          if (oldest !== undefined) echoKeys.current.delete(oldest)
+        echoKeys.current.set(qs, Date.now())
+        // evict only stale entries (interrupted navigations whose commits
+        // never happened), never pending ones — capping by count risks
+        // dropping a still-queued echo whose URL later commits
+        for (const [key, ts] of echoKeys.current) {
+          if (Date.now() - ts > ECHO_TTL_MS) echoKeys.current.delete(key)
         }
       }
       setFiltersState(next)

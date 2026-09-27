@@ -94,6 +94,7 @@ export function FilterBar({
     queryKey: ["accounts"],
     queryFn: async () => {
       const res = await apiFetch("/api/accounts")
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = (await res.json()) as { accounts: AccountOption[] }
       return data.accounts
     },
