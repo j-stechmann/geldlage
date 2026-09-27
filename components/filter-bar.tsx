@@ -15,6 +15,7 @@ import {
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
+  DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { EMPTY_FILTERS, type TableFilters } from "@/lib/filters"
@@ -54,12 +55,27 @@ export function FilterBar({
   const [qDraft, setQDraft] = React.useState(filters.q)
   const lastEmitted = React.useRef(filters.q)
 
-  // debounce search input → propagate to parent via timeout callback
+  // resync the draft when filters.q changes externally (back/forward,
+  // shared links); our own debounced emits are already reflected in the draft
+  const lastSyncedQ = React.useRef(filters.q)
+  React.useEffect(() => {
+    if (filters.q === lastSyncedQ.current) return
+    lastSyncedQ.current = filters.q
+    if (filters.q !== lastEmitted.current) {
+      lastEmitted.current = filters.q
+      setQDraft(filters.q)
+    }
+  }, [filters.q])
+
+  // debounce search input → propagate to parent via timeout callback;
+  // emit the trimmed value so the URL round-trip (paramsToFilters trims q)
+  // stays stable and echo keys match
   React.useEffect(() => {
     const t = setTimeout(() => {
-      if (qDraft !== lastEmitted.current) {
-        lastEmitted.current = qDraft
-        onChange({ ...filters, q: qDraft })
+      const q = qDraft.trim()
+      if (q !== lastEmitted.current) {
+        lastEmitted.current = q
+        onChange({ ...filters, q })
       }
     }, 300)
     return () => clearTimeout(t)
@@ -163,7 +179,8 @@ export function FilterBar({
               {categoryLabel}
             </Button>
           }
-        >
+        />
+        <DropdownMenuContent>
           {(categories ?? []).map((c) => (
             <DropdownMenuCheckboxItem
               key={c.id}
@@ -179,7 +196,7 @@ export function FilterBar({
               {c.name}
             </DropdownMenuCheckboxItem>
           ))}
-        </DropdownMenuTrigger>
+        </DropdownMenuContent>
       </DropdownMenu>
 
       <Select

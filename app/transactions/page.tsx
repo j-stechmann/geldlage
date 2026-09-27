@@ -15,14 +15,41 @@ function TransactionsPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
-  const filters = React.useMemo(
+  const urlFilters = React.useMemo(
     () => paramsToFilters(new URLSearchParams(searchParams.toString())),
     [searchParams]
   )
+  const urlKey = filtersToParams(urlFilters).toString()
+
+  // synchronous mirror of the URL filters: rapid changes compose instead of
+  // racing against async router.replace commits
+  const [filters, setFiltersState] = React.useState(urlFilters)
+  const lastUrlKey = React.useRef(urlKey)
+  const echoKeys = React.useRef<Set<string>>(new Set())
+
+  React.useEffect(() => {
+    if (lastUrlKey.current === urlKey) return
+    lastUrlKey.current = urlKey
+    // adopt only external URL changes (back/forward, shared links); echoes
+    // of our own router.replace calls must not clobber newer local state
+    if (echoKeys.current.has(urlKey)) {
+      echoKeys.current.delete(urlKey)
+    } else {
+      setFiltersState(urlFilters)
+    }
+  }, [urlKey, urlFilters])
 
   const setFilters = React.useCallback(
     (next: TableFilters) => {
       const qs = filtersToParams(next).toString()
+      if (qs !== lastUrlKey.current) {
+        echoKeys.current.add(qs)
+        if (echoKeys.current.size > 8) {
+          const oldest = echoKeys.current.values().next().value
+          if (oldest !== undefined) echoKeys.current.delete(oldest)
+        }
+      }
+      setFiltersState(next)
       router.replace(qs ? `/transactions?${qs}` : "/transactions", {
         scroll: false,
       })

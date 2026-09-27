@@ -17,6 +17,8 @@ import { Input } from "@/components/ui/input"
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
@@ -493,18 +495,21 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
                 <Columns3 className="size-4" /> Spalten
               </Button>
             }
-          >
-            <DropdownMenuLabel>Spalten anzeigen</DropdownMenuLabel>
-            {COLUMNS.map((c) => (
-              <DropdownMenuCheckboxItem
-                key={c.key}
-                checked={show(c.key)}
-                onCheckedChange={() => toggleColumn(c.key)}
-              >
-                {c.label}
-              </DropdownMenuCheckboxItem>
-            ))}
-          </DropdownMenuTrigger>
+          />
+          <DropdownMenuContent>
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Spalten anzeigen</DropdownMenuLabel>
+              {COLUMNS.map((c) => (
+                <DropdownMenuCheckboxItem
+                  key={c.key}
+                  checked={show(c.key)}
+                  onCheckedChange={() => toggleColumn(c.key)}
+                >
+                  {c.label}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
         </DropdownMenu>
       </div>
 
