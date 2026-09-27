@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useQuery } from "@tanstack/react-query"
-import { Search, RotateCcw } from "lucide-react"
+import { Search, RotateCcw, Tags } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import {
@@ -12,14 +12,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { EMPTY_FILTERS, type DashboardFilters } from "@/lib/filters"
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { EMPTY_FILTERS, type TableFilters } from "@/lib/filters"
 import { resolveCategoryColor } from "@/lib/category-colors"
 import { apiFetch } from "@/lib/api-fetch"
+import { cn } from "@/lib/utils"
 
 interface CategoryOption {
   id: number
   name: string
   color: string | null
+}
+
+interface AccountOption {
+  id: number
+  name: string
+  iban: string
 }
 
 function CategoryDot({ id, color }: { id: number; color: string | null }) {
@@ -36,8 +48,8 @@ export function FilterBar({
   filters,
   onChange,
 }: {
-  filters: DashboardFilters
-  onChange: (f: DashboardFilters) => void
+  filters: TableFilters
+  onChange: (f: TableFilters) => void
 }) {
   const [qDraft, setQDraft] = React.useState(filters.q)
   const lastEmitted = React.useRef(filters.q)
@@ -62,20 +74,28 @@ export function FilterBar({
     },
   })
 
-  const categoryItems = React.useMemo(() => {
-    const items: Record<string, React.ReactNode> = {
-      all: "Alle Kategorien",
-    }
-    for (const c of categories ?? []) {
-      items[String(c.id)] = c.name
-    }
-    return items
-  }, [categories])
+  const { data: accounts } = useQuery<AccountOption[]>({
+    queryKey: ["accounts"],
+    queryFn: async () => {
+      const res = await apiFetch("/api/accounts")
+      const data = (await res.json()) as { accounts: AccountOption[] }
+      return data.accounts
+    },
+  })
 
-  const selectedCategory =
-    filters.categoryIds.length === 1
-      ? (categories ?? []).find((c) => c.id === filters.categoryIds[0])
-      : undefined
+  const categoryLabel =
+    filters.categoryIds.length === 0
+      ? "Alle Kategorien"
+      : filters.categoryIds.length === 1
+        ? ((categories ?? []).find((c) => c.id === filters.categoryIds[0])
+            ?.name ?? "Kategorie")
+        : `${filters.categoryIds.length} Kategorien`
+
+  const selectedAccountLabel =
+    filters.accountId !== null
+      ? ((accounts ?? []).find((a) => a.id === filters.accountId)?.name ??
+        "Konto")
+      : null
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -115,10 +135,7 @@ export function FilterBar({
         items={{ all: "Alle", Eingang: "Eingang", Ausgang: "Ausgang" }}
         value={filters.type}
         onValueChange={(v) =>
-          onChange({
-            ...filters,
-            type: String(v) as DashboardFilters["type"],
-          })
+          onChange({ ...filters, type: String(v) as TableFilters["type"] })
         }
       >
         <SelectTrigger className="w-32">
@@ -131,37 +148,115 @@ export function FilterBar({
         </SelectContent>
       </Select>
 
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant="outline"
+              size="sm"
+              className={cn(
+                "max-w-48",
+                filters.categoryIds.length > 0 && "font-medium"
+              )}
+            >
+              <Tags className="size-4" />
+              {categoryLabel}
+            </Button>
+          }
+        >
+          {(categories ?? []).map((c) => (
+            <DropdownMenuCheckboxItem
+              key={c.id}
+              checked={filters.categoryIds.includes(c.id)}
+              onCheckedChange={(checked) => {
+                const next = checked
+                  ? [...filters.categoryIds, c.id]
+                  : filters.categoryIds.filter((id) => id !== c.id)
+                onChange({ ...filters, categoryIds: next })
+              }}
+            >
+              <CategoryDot id={c.id} color={c.color} />
+              {c.name}
+            </DropdownMenuCheckboxItem>
+          ))}
+        </DropdownMenuTrigger>
+      </DropdownMenu>
+
       <Select
-        items={categoryItems}
-        value={
-          filters.categoryIds.length === 1
-            ? String(filters.categoryIds[0])
-            : "all"
-        }
+        items={(accounts ?? []).reduce<Record<string, React.ReactNode>>(
+          (acc, a) => {
+            acc[String(a.id)] = a.name
+            return acc
+          },
+          { all: "Alle Konten" }
+        )}
+        value={filters.accountId !== null ? String(filters.accountId) : "all"}
         onValueChange={(v) =>
           onChange({
             ...filters,
-            categoryIds: v === "all" ? [] : [Number.parseInt(String(v), 10)],
+            accountId: v === "all" ? null : Number.parseInt(String(v), 10),
           })
         }
       >
-        <SelectTrigger className="w-48">
-          {selectedCategory && (
-            <CategoryDot
-              id={selectedCategory.id}
-              color={selectedCategory.color}
-            />
-          )}
-          <SelectValue placeholder="Kategorie" />
+        <SelectTrigger className="w-44">
+          <SelectValue placeholder="Konto">
+            {selectedAccountLabel ?? "Alle Konten"}
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="all">Alle Kategorien</SelectItem>
-          {(categories ?? []).map((c) => (
-            <SelectItem key={c.id} value={String(c.id)}>
-              <CategoryDot id={c.id} color={c.color} />
-              {c.name}
+          <SelectItem value="all">Alle Konten</SelectItem>
+          {(accounts ?? []).map((a) => (
+            <SelectItem key={a.id} value={String(a.id)}>
+              {a.name}
             </SelectItem>
           ))}
+        </SelectContent>
+      </Select>
+
+      <Select
+        items={{
+          Gebucht: "Gebucht",
+          "Nicht gebucht": "Nicht gebucht",
+          all: "Alle Status",
+        }}
+        value={filters.status}
+        onValueChange={(v) =>
+          onChange({ ...filters, status: String(v) as TableFilters["status"] })
+        }
+      >
+        <SelectTrigger className="w-40">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="Gebucht">Gebucht</SelectItem>
+          <SelectItem value="Nicht gebucht">Nicht gebucht</SelectItem>
+          <SelectItem value="all">Alle Status</SelectItem>
+        </SelectContent>
+      </Select>
+
+      <Select
+        items={{
+          all: "Alle Labels",
+          pending: "offen",
+          labeled: "gelabelt",
+          failed: "fehlgeschlagen",
+        }}
+        value={filters.labelStatus}
+        onValueChange={(v) =>
+          onChange({
+            ...filters,
+            labelStatus: String(v) as TableFilters["labelStatus"],
+          })
+        }
+      >
+        <SelectTrigger className="w-40">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">Alle Labels</SelectItem>
+          <SelectItem value="pending">offen</SelectItem>
+          <SelectItem value="labeled">gelabelt</SelectItem>
+          <SelectItem value="failed">fehlgeschlagen</SelectItem>
         </SelectContent>
       </Select>
 

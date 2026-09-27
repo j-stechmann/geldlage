@@ -9,22 +9,20 @@ import {
   SavingsChart,
   TopCategoriesChart,
 } from "@/components/analytics-charts"
-import { TransactionsTable } from "@/components/transactions-table"
 import { ErrorState } from "@/components/error-state"
-import { EMPTY_FILTERS, type DashboardFilters } from "@/lib/filters"
+import {
+  EMPTY_FILTERS,
+  filtersToParams,
+  type TableFilters,
+} from "@/lib/filters"
 
 export default function DashboardPage() {
-  const [filters, setFilters] = React.useState<DashboardFilters>(EMPTY_FILTERS)
+  const [filters, setFilters] = React.useState<TableFilters>(EMPTY_FILTERS)
 
-  const params = React.useMemo(() => {
-    const sp = new URLSearchParams()
-    if (filters.q) sp.set("q", filters.q)
-    if (filters.dateFrom) sp.set("dateFrom", filters.dateFrom)
-    if (filters.dateTo) sp.set("dateTo", filters.dateTo)
-    if (filters.type !== "all") sp.set("type", filters.type)
-    for (const id of filters.categoryIds) sp.append("categoryId", String(id))
-    return sp.toString()
-  }, [filters])
+  const params = React.useMemo(
+    () => filtersToParams(filters).toString(),
+    [filters]
+  )
 
   const {
     data: analytics,
@@ -74,11 +72,6 @@ export default function DashboardPage() {
             loading={showLoading}
           />
         </div>
-      </div>
-
-      <div>
-        <h2 className="mb-3 font-serif text-lg font-semibold">Transaktionen</h2>
-        <TransactionsTable filters={filters} />
       </div>
     </div>
   )

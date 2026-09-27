@@ -2,11 +2,12 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { BarChart3, Tags, Upload } from "lucide-react"
+import { BarChart3, Tags, Upload, List } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export const NAV_ITEMS = [
   { href: "/", label: "Dashboard", icon: BarChart3 },
+  { href: "/transactions", label: "Transaktionen", icon: List },
   { href: "/labels", label: "Labels", icon: Tags },
   { href: "/imports", label: "Imports", icon: Upload },
 ]

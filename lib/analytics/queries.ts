@@ -12,7 +12,10 @@ import {
   type SQL,
 } from "drizzle-orm"
 import { getDb } from "@/lib/db"
-import { categories, transactions } from "@/lib/db/schema"
+import { accounts, categories, transactions } from "@/lib/db/schema"
+
+export type SortField =
+  "booking_date" | "value_date" | "amount_cents" | "payee" | "status"
 
 export interface TransactionFilters {
   q?: string
@@ -24,7 +27,7 @@ export interface TransactionFilters {
   labelStatus?: "pending" | "labeled" | "failed"
   /** default 'Gebucht'; 'all' disables the filter */
   status?: string
-  sort?: "booking_date" | "amount_cents" | "payee"
+  sort?: SortField
   dir?: "asc" | "desc"
 }
 
@@ -55,8 +58,13 @@ export function parseFilters(sp: URLSearchParams): TransactionFilters {
       : undefined
   const status = sp.get("status") || "Gebucht"
   const sortRaw = sp.get("sort")
-  const sort =
-    sortRaw === "amount_cents" || sortRaw === "payee" ? sortRaw : "booking_date"
+  const sort: SortField =
+    sortRaw === "amount_cents" ||
+    sortRaw === "payee" ||
+    sortRaw === "value_date" ||
+    sortRaw === "status"
+      ? sortRaw
+      : "booking_date"
   const dir = sp.get("dir") === "asc" ? "asc" : "desc"
   return {
     q,
@@ -116,6 +124,10 @@ export function buildOrderBy(f: TransactionFilters) {
       return [dir(transactions.amountCents), desc(transactions.bookingDate)]
     case "payee":
       return [dir(transactions.payee), desc(transactions.bookingDate)]
+    case "value_date":
+      return [dir(transactions.valueDate), desc(transactions.bookingDate)]
+    case "status":
+      return [dir(transactions.status), desc(transactions.bookingDate)]
     default:
       return [dir(transactions.bookingDate), desc(transactions.amountCents)]
   }
@@ -133,6 +145,11 @@ export interface TransactionPage {
     type: string
     counterpartyIban: string | null
     amountCents: number
+    creditorId: string | null
+    mandateRef: string | null
+    customerRef: string | null
+    accountId: number
+    accountName: string | null
     categoryId: number | null
     categoryName: string | null
     categoryColor: string | null
@@ -171,6 +188,11 @@ export function queryTransactions(
       type: transactions.type,
       counterpartyIban: transactions.counterpartyIban,
       amountCents: transactions.amountCents,
+      creditorId: transactions.creditorId,
+      mandateRef: transactions.mandateRef,
+      customerRef: transactions.customerRef,
+      accountId: transactions.accountId,
+      accountName: accounts.name,
       categoryId: transactions.categoryId,
       categoryName: categories.name,
       categoryColor: categories.color,
@@ -178,6 +200,7 @@ export function queryTransactions(
     })
     .from(transactions)
     .leftJoin(categories, eq(transactions.categoryId, categories.id))
+    .leftJoin(accounts, eq(transactions.accountId, accounts.id))
     .where(where)
     .orderBy(...buildOrderBy(f))
     .limit(pageSize)
