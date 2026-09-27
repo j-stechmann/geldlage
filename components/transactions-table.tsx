@@ -15,6 +15,14 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Input } from "@/components/ui/input"
 import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
   Dialog,
   DialogContent,
   DialogFooter,
@@ -30,9 +38,10 @@ import {
   CircleDashed,
   Plus,
   Tag,
+  Columns3,
 } from "lucide-react"
 import { toast } from "sonner"
-import { filtersToParams, type DashboardFilters } from "@/lib/filters"
+import { filtersToParams, type TableFilters } from "@/lib/filters"
 import { resolveCategoryColor } from "@/lib/category-colors"
 import { ErrorState } from "@/components/error-state"
 import { cn } from "@/lib/utils"
@@ -49,6 +58,11 @@ interface TxRow {
   type: string
   counterpartyIban: string | null
   amountCents: number
+  creditorId: string | null
+  mandateRef: string | null
+  customerRef: string | null
+  accountId: number
+  accountName: string | null
   categoryId: number | null
   categoryName: string | null
   categoryColor: string | null
@@ -69,7 +83,64 @@ function euro(cents: number): string {
   return `${cents < 0 ? "−" : ""}${int.toLocaleString("de-DE")},${frac} €`
 }
 
-type SortKey = "bookingDate" | "amountCents" | "payee"
+type SortKey = "bookingDate" | "valueDate" | "amountCents" | "payee" | "status"
+
+const SORT_TO_FIELD: Record<SortKey, string> = {
+  bookingDate: "booking_date",
+  valueDate: "value_date",
+  amountCents: "amount_cents",
+  payee: "payee",
+  status: "status",
+}
+
+type ColumnKey =
+  | "bookingDate"
+  | "valueDate"
+  | "status"
+  | "counterparty"
+  | "purpose"
+  | "counterpartyIban"
+  | "type"
+  | "account"
+  | "category"
+  | "creditorId"
+  | "mandateRef"
+  | "customerRef"
+  | "labelStatus"
+  | "amountCents"
+
+const COLUMNS: Array<{ key: ColumnKey; label: string; defaultOn: boolean }> = [
+  { key: "bookingDate", label: "Buchung", defaultOn: true },
+  { key: "valueDate", label: "Wertstellung", defaultOn: false },
+  { key: "status", label: "Status", defaultOn: false },
+  { key: "counterparty", label: "Vertragspartner", defaultOn: true },
+  { key: "purpose", label: "Verwendungszweck", defaultOn: true },
+  { key: "counterpartyIban", label: "IBAN", defaultOn: false },
+  { key: "type", label: "Typ", defaultOn: true },
+  { key: "account", label: "Konto", defaultOn: true },
+  { key: "category", label: "Kategorie", defaultOn: true },
+  { key: "labelStatus", label: "Label-Status", defaultOn: false },
+  { key: "creditorId", label: "Gläubiger-ID", defaultOn: false },
+  { key: "mandateRef", label: "Mandatsreferenz", defaultOn: false },
+  { key: "customerRef", label: "Kundenreferenz", defaultOn: false },
+  { key: "amountCents", label: "Betrag", defaultOn: true },
+]
+
+const DEFAULT_VISIBLE = COLUMNS.filter((c) => c.defaultOn).map((c) => c.key)
+
+const STORAGE_KEY = "geldlage.table.columns"
+
+function loadVisible(): ColumnKey[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return DEFAULT_VISIBLE
+    const parsed = JSON.parse(raw) as ColumnKey[]
+    const valid = parsed.filter((k) => COLUMNS.some((c) => c.key === k))
+    return valid.length > 0 ? valid : DEFAULT_VISIBLE
+  } catch {
+    return DEFAULT_VISIBLE
+  }
+}
 
 function CategoryCell({ row }: { row: TxRow }) {
   if (row.labelStatus === "pending") {
@@ -106,6 +177,28 @@ function CategoryCell({ row }: { row: TxRow }) {
       }
     >
       {row.categoryName}
+    </Badge>
+  )
+}
+
+function LabelStatusCell({ status }: { status: string }) {
+  if (status === "pending") {
+    return (
+      <Badge variant="outline" className="font-normal text-muted-foreground">
+        offen
+      </Badge>
+    )
+  }
+  if (status === "failed") {
+    return (
+      <Badge variant="outline" className="font-normal text-destructive">
+        fehlgeschlagen
+      </Badge>
+    )
+  }
+  return (
+    <Badge variant="outline" className="font-normal text-muted-foreground">
+      gelabelt
     </Badge>
   )
 }
@@ -320,19 +413,41 @@ function SortHeader({
   )
 }
 
-export function TransactionsTable({ filters }: { filters: DashboardFilters }) {
+export function TransactionsTable({ filters }: { filters: TableFilters }) {
   const [page, setPage] = React.useState(1)
   const [sort, setSort] = React.useState<{ key: SortKey; desc: boolean }>({
     key: "bookingDate",
     desc: true,
   })
   const [assignTarget, setAssignTarget] = React.useState<TxRow | null>(null)
+  const [visible, setVisible] = React.useState<ColumnKey[] | null>(() =>
+    typeof window === "undefined" ? null : loadVisible()
+  )
+  const effectiveVisible = visible ?? DEFAULT_VISIBLE
+
+  const toggleColumn = (key: ColumnKey) => {
+    const prev = effectiveVisible
+    const next = prev.includes(key)
+      ? prev.filter((k) => k !== key)
+      : [
+          ...COLUMNS.map((c) => c.key).filter(
+            (k) => prev.includes(k) || k === key
+          ),
+        ]
+    if (next.length === 0) return
+    setVisible(next)
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+    } catch {
+      // ignore persistence failures
+    }
+  }
 
   const params = React.useMemo(() => {
     const sp = filtersToParams(filters)
     sp.set("page", String(page))
     sp.set("pageSize", "25")
-    sp.set("sort", sort.key === "amountCents" ? "amount_cents" : sort.key)
+    sp.set("sort", SORT_TO_FIELD[sort.key])
     sp.set("dir", sort.desc ? "desc" : "asc")
     return sp
   }, [filters, page, sort])
@@ -367,47 +482,109 @@ export function TransactionsTable({ filters }: { filters: DashboardFilters }) {
   }
 
   const rows = data?.rows ?? []
+  const show = (key: ColumnKey) => effectiveVisible.includes(key)
+  const visibleCount = COLUMNS.filter((c) => show(c.key)).length
 
   return (
     <div className="space-y-3">
+      <div className="flex items-center justify-end">
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button variant="outline" size="sm">
+                <Columns3 className="size-4" /> Spalten
+              </Button>
+            }
+          />
+          <DropdownMenuContent>
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Spalten anzeigen</DropdownMenuLabel>
+              {COLUMNS.map((c) => (
+                <DropdownMenuCheckboxItem
+                  key={c.key}
+                  checked={show(c.key)}
+                  onCheckedChange={() => toggleColumn(c.key)}
+                >
+                  {c.label}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
       <div
-        className={`rounded-lg border transition-opacity ${isFetching ? "opacity-70" : ""}`}
+        className={`overflow-x-auto rounded-lg border transition-opacity ${isFetching ? "opacity-70" : ""}`}
       >
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>
-                <SortHeader
-                  label="Buchung"
-                  sortKey="bookingDate"
-                  sort={sort}
-                  onToggle={toggleSort}
-                />
-              </TableHead>
-              <TableHead>
-                <SortHeader
-                  label="Vertragspartner"
-                  sortKey="payee"
-                  sort={sort}
-                  onToggle={toggleSort}
-                />
-              </TableHead>
-              <TableHead>Kategorie</TableHead>
-              <TableHead className="text-right">
-                <SortHeader
-                  label="Betrag"
-                  sortKey="amountCents"
-                  sort={sort}
-                  onToggle={toggleSort}
-                />
-              </TableHead>
+              {show("bookingDate") && (
+                <TableHead>
+                  <SortHeader
+                    label="Buchung"
+                    sortKey="bookingDate"
+                    sort={sort}
+                    onToggle={toggleSort}
+                  />
+                </TableHead>
+              )}
+              {show("valueDate") && (
+                <TableHead>
+                  <SortHeader
+                    label="Wertstellung"
+                    sortKey="valueDate"
+                    sort={sort}
+                    onToggle={toggleSort}
+                  />
+                </TableHead>
+              )}
+              {show("status") && (
+                <TableHead>
+                  <SortHeader
+                    label="Status"
+                    sortKey="status"
+                    sort={sort}
+                    onToggle={toggleSort}
+                  />
+                </TableHead>
+              )}
+              {show("counterparty") && (
+                <TableHead>
+                  <SortHeader
+                    label="Vertragspartner"
+                    sortKey="payee"
+                    sort={sort}
+                    onToggle={toggleSort}
+                  />
+                </TableHead>
+              )}
+              {show("purpose") && <TableHead>Verwendungszweck</TableHead>}
+              {show("counterpartyIban") && <TableHead>IBAN</TableHead>}
+              {show("type") && <TableHead>Typ</TableHead>}
+              {show("account") && <TableHead>Konto</TableHead>}
+              {show("category") && <TableHead>Kategorie</TableHead>}
+              {show("labelStatus") && <TableHead>Label-Status</TableHead>}
+              {show("creditorId") && <TableHead>Gläubiger-ID</TableHead>}
+              {show("mandateRef") && <TableHead>Mandatsreferenz</TableHead>}
+              {show("customerRef") && <TableHead>Kundenreferenz</TableHead>}
+              {show("amountCents") && (
+                <TableHead className="text-right">
+                  <SortHeader
+                    label="Betrag"
+                    sortKey="amountCents"
+                    sort={sort}
+                    onToggle={toggleSort}
+                  />
+                </TableHead>
+              )}
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading && rows.length === 0 ? (
               Array.from({ length: 8 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: 4 }).map((_, j) => (
+                  {Array.from({ length: visibleCount }).map((_, j) => (
                     <TableCell key={j}>
                       <Skeleton className="h-5 w-full" />
                     </TableCell>
@@ -416,7 +593,7 @@ export function TransactionsTable({ filters }: { filters: DashboardFilters }) {
               ))
             ) : isError ? (
               <TableRow>
-                <TableCell colSpan={4} className="h-32">
+                <TableCell colSpan={visibleCount} className="h-32">
                   <ErrorState
                     onRetry={() => void refetch()}
                     className="justify-center border-none bg-transparent"
@@ -426,7 +603,7 @@ export function TransactionsTable({ filters }: { filters: DashboardFilters }) {
             ) : rows.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={4}
+                  colSpan={visibleCount}
                   className="h-32 text-center text-muted-foreground"
                 >
                   Keine Transaktionen gefunden. CSV-Datei in das Fenster ziehen,
@@ -439,42 +616,97 @@ export function TransactionsTable({ filters }: { filters: DashboardFilters }) {
                   row.type === "Ausgang" ? row.payee : row.payer
                 return (
                   <TableRow key={row.id}>
-                    <TableCell className="whitespace-nowrap tabular-nums">
-                      {row.bookingDate}
-                    </TableCell>
-                    <TableCell>
-                      <div className="max-w-md min-w-0">
-                        <p className="truncate font-medium">
-                          {counterparty || "—"}
-                        </p>
-                        {row.purpose && (
-                          <p
-                            className="truncate text-xs text-muted-foreground"
-                            title={row.purpose}
-                          >
-                            {row.purpose}
+                    {show("bookingDate") && (
+                      <TableCell className="whitespace-nowrap tabular-nums">
+                        {row.bookingDate}
+                      </TableCell>
+                    )}
+                    {show("valueDate") && (
+                      <TableCell className="whitespace-nowrap tabular-nums">
+                        {row.valueDate ?? "—"}
+                      </TableCell>
+                    )}
+                    {show("status") && (
+                      <TableCell className="whitespace-nowrap">
+                        {row.status}
+                      </TableCell>
+                    )}
+                    {show("counterparty") && (
+                      <TableCell>
+                        <div className="max-w-md min-w-0">
+                          <p className="truncate font-medium">
+                            {counterparty || "—"}
                           </p>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <button
-                        className="inline-flex cursor-pointer items-center rounded-md transition-colors hover:bg-accent/60"
-                        onClick={() => setAssignTarget(row)}
-                        title="Kategorie zuweisen"
+                        </div>
+                      </TableCell>
+                    )}
+                    {show("purpose") && (
+                      <TableCell>
+                        <p
+                          className="max-w-md truncate text-sm text-muted-foreground"
+                          title={row.purpose ?? undefined}
+                        >
+                          {row.purpose || "—"}
+                        </p>
+                      </TableCell>
+                    )}
+                    {show("counterpartyIban") && (
+                      <TableCell className="font-mono text-xs whitespace-nowrap">
+                        {row.counterpartyIban || "—"}
+                      </TableCell>
+                    )}
+                    {show("type") && (
+                      <TableCell className="whitespace-nowrap">
+                        {row.type}
+                      </TableCell>
+                    )}
+                    {show("account") && (
+                      <TableCell className="whitespace-nowrap">
+                        {row.accountName ?? "—"}
+                      </TableCell>
+                    )}
+                    {show("category") && (
+                      <TableCell>
+                        <button
+                          className="inline-flex cursor-pointer items-center rounded-md transition-colors hover:bg-accent/60"
+                          onClick={() => setAssignTarget(row)}
+                          title="Kategorie zuweisen"
+                        >
+                          <CategoryCell row={row} />
+                        </button>
+                      </TableCell>
+                    )}
+                    {show("labelStatus") && (
+                      <TableCell className="whitespace-nowrap">
+                        <LabelStatusCell status={row.labelStatus} />
+                      </TableCell>
+                    )}
+                    {show("creditorId") && (
+                      <TableCell className="font-mono text-xs whitespace-nowrap">
+                        {row.creditorId || "—"}
+                      </TableCell>
+                    )}
+                    {show("mandateRef") && (
+                      <TableCell className="max-w-40 truncate font-mono text-xs">
+                        {row.mandateRef || "—"}
+                      </TableCell>
+                    )}
+                    {show("customerRef") && (
+                      <TableCell className="max-w-40 truncate font-mono text-xs">
+                        {row.customerRef || "—"}
+                      </TableCell>
+                    )}
+                    {show("amountCents") && (
+                      <TableCell
+                        className={`text-right font-medium whitespace-nowrap tabular-nums ${
+                          row.amountCents < 0
+                            ? "text-foreground"
+                            : "text-emerald-600 dark:text-emerald-400"
+                        }`}
                       >
-                        <CategoryCell row={row} />
-                      </button>
-                    </TableCell>
-                    <TableCell
-                      className={`text-right font-medium whitespace-nowrap tabular-nums ${
-                        row.amountCents < 0
-                          ? "text-foreground"
-                          : "text-emerald-600 dark:text-emerald-400"
-                      }`}
-                    >
-                      {euro(row.amountCents)}
-                    </TableCell>
+                        {euro(row.amountCents)}
+                      </TableCell>
+                    )}
                   </TableRow>
                 )
               })
