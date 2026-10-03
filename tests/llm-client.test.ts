@@ -423,6 +423,179 @@ describe("LlmClient.labelBatch", () => {
     warnSpy.mockRestore()
   })
 
+  it("reserves the reasoning budget in max_tokens when reasoning is on", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+    process.env.LLM_REASONING = "true"
+    process.env.LLM_REASONING_BUDGET = "2048"
+    resetConfigCache()
+    let captured: unknown
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init) => {
+        captured = JSON.parse(String(init?.body))
+        return chatResponse({ results: [{ index: 0, label: "Miete" }] })
+      })
+    )
+
+    try {
+      await new LlmClient("http://test").labelBatch([tx({ id: "a" })])
+      // floor 1024 + reasoning budget 2048 — the thinking trace shares
+      // max_tokens, so without the reserve the JSON would truncate
+      expect((captured as { max_tokens: number }).max_tokens).toBe(3072)
+      // the thinking cap is pinned per request to the reserved budget
+      expect(
+        (captured as { reasoning_budget_tokens: number })
+          .reasoning_budget_tokens
+      ).toBe(2048)
+    } finally {
+      // setup.ts pins LLM_REASONING=false for the reasoning-off tests —
+      // restore instead of delete or the next test would see the
+      // reasoning-on default
+      process.env.LLM_REASONING = "false"
+      delete process.env.LLM_REASONING_BUDGET
+      resetConfigCache()
+      warnSpy.mockRestore()
+    }
+  })
+
+  it("treats LLM_REASONING=on like true (both spellings are normalized)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+    process.env.LLM_REASONING = "on"
+    process.env.LLM_REASONING_BUDGET = "2048"
+    resetConfigCache()
+    let captured: unknown
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init) => {
+        captured = JSON.parse(String(init?.body))
+        return chatResponse({ results: [{ index: 0, label: "Miete" }] })
+      })
+    )
+
+    try {
+      await new LlmClient("http://test").labelBatch([tx({ id: "a" })])
+      expect((captured as { max_tokens: number }).max_tokens).toBe(3072)
+      expect(
+        (captured as { reasoning_budget_tokens: number })
+          .reasoning_budget_tokens
+      ).toBe(2048)
+    } finally {
+      process.env.LLM_REASONING = "false"
+      delete process.env.LLM_REASONING_BUDGET
+      resetConfigCache()
+      warnSpy.mockRestore()
+    }
+  })
+
+  it("does not add the reasoning reserve when reasoning is off", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+    process.env.LLM_REASONING = "false"
+    process.env.LLM_REASONING_BUDGET = "2048"
+    resetConfigCache()
+    let captured: unknown
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init) => {
+        captured = JSON.parse(String(init?.body))
+        return chatResponse({ results: [{ index: 0, label: "Miete" }] })
+      })
+    )
+
+    try {
+      await new LlmClient("http://test").labelBatch([tx({ id: "a" })])
+      // budget set but reasoning off → plain floor, no reserve added
+      expect((captured as { max_tokens: number }).max_tokens).toBe(1024)
+      // and no per-request thinking cap is pinned at all
+      expect("reasoning_budget_tokens" in (captured as object)).toBe(false)
+    } finally {
+      process.env.LLM_REASONING = "false"
+      delete process.env.LLM_REASONING_BUDGET
+      resetConfigCache()
+      warnSpy.mockRestore()
+    }
+  })
+
+  it("treats LLM_REASONING=off like false (both spellings are normalized)", async () => {
+    process.env.LLM_REASONING = "off"
+    process.env.LLM_REASONING_BUDGET = "2048"
+    resetConfigCache()
+    let captured: unknown
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init) => {
+        captured = JSON.parse(String(init?.body))
+        return chatResponse({ results: [{ index: 0, label: "Miete" }] })
+      })
+    )
+
+    try {
+      await new LlmClient("http://test").labelBatch([tx({ id: "a" })])
+      expect((captured as { max_tokens: number }).max_tokens).toBe(1024)
+      expect("reasoning_budget_tokens" in (captured as object)).toBe(false)
+    } finally {
+      process.env.LLM_REASONING = "false"
+      delete process.env.LLM_REASONING_BUDGET
+      resetConfigCache()
+    }
+  })
+
+  it("accepts a zero reasoning budget when reasoning is off", async () => {
+    process.env.LLM_REASONING = "false"
+    process.env.LLM_REASONING_BUDGET = "0"
+    resetConfigCache()
+    let captured: unknown
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init) => {
+        captured = JSON.parse(String(init?.body))
+        return chatResponse({ results: [{ index: 0, label: "Miete" }] })
+      })
+    )
+
+    try {
+      // the budget is unused with reasoning off — 0 is accepted and the
+      // request proceeds with the plain floor
+      await new LlmClient("http://test").labelBatch([tx({ id: "a" })])
+      expect((captured as { max_tokens: number }).max_tokens).toBe(1024)
+    } finally {
+      process.env.LLM_REASONING = "false"
+      delete process.env.LLM_REASONING_BUDGET
+      resetConfigCache()
+    }
+  })
+
+  it("rejects a zero reasoning budget when reasoning is on", async () => {
+    process.env.LLM_REASONING = "true"
+    process.env.LLM_REASONING_BUDGET = "0"
+    resetConfigCache()
+
+    try {
+      await expect(
+        new LlmClient("http://test").labelBatch([tx()])
+      ).rejects.toThrow(/LLM_REASONING_BUDGET.*must be >= 1/)
+    } finally {
+      process.env.LLM_REASONING = "false"
+      delete process.env.LLM_REASONING_BUDGET
+      resetConfigCache()
+    }
+  })
+
+  it("rejects a zero reasoning budget when reasoning defaults to on", async () => {
+    delete process.env.LLM_REASONING // app default is now true
+    process.env.LLM_REASONING_BUDGET = "0"
+    resetConfigCache()
+
+    try {
+      await expect(
+        new LlmClient("http://test").labelBatch([tx()])
+      ).rejects.toThrow(/LLM_REASONING_BUDGET.*must be >= 1/)
+    } finally {
+      process.env.LLM_REASONING = "false"
+      delete process.env.LLM_REASONING_BUDGET
+      resetConfigCache()
+    }
+  })
+
   it("warns when prompt + completion exceed the context window", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
     vi.stubGlobal(

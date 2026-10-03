@@ -52,6 +52,8 @@ interface ChatBody {
     type: "json_schema"
     json_schema: { schema: Record<string, unknown> }
   }
+  /** llama.cpp extension: pins the server's per-request thinking cap. */
+  reasoning_budget_tokens?: number
 }
 
 export class LlmClient {
@@ -106,8 +108,23 @@ export class LlmClient {
       temperature: 0,
       // 96 tokens/item: labels cap at 64 UTF-8 bytes (sanitizeLabel) plus
       // index overhead — the old 24/item truncated large batches mid-JSON,
-      // and at temperature 0 a deterministic truncation burns every attempt
-      max_tokens: Math.max(1024, items.length * 96),
+      // and at temperature 0 a deterministic truncation burns every attempt.
+      // When the server runs with `--reasoning on`, the thinking phase
+      // shares this budget: the reserved tokens must be added or the trace
+      // alone fills max_tokens and the JSON truncates deterministically.
+      max_tokens:
+        (cfg.LLM_REASONING ? cfg.LLM_REASONING_BUDGET : 0) +
+        Math.max(1024, items.length * 96),
+      // Enforcement of the reserve: pin the server's per-request thinking
+      // cap (llama.cpp's `reasoning_budget_tokens`, which overrides the
+      // `--reasoning-budget` server flag) to exactly the budget reserved
+      // above — the trace can then never outgrow max_tokens' reserve, no
+      // matter what flags an already-running server or Docker container
+      // was started with. A backend without thinking support (or with
+      // reasoning off) ignores it; it is only sent when reasoning is on.
+      ...(cfg.LLM_REASONING && {
+        reasoning_budget_tokens: cfg.LLM_REASONING_BUDGET,
+      }),
       response_format: {
         type: "json_schema",
         json_schema: { schema: responseSchema(items.length) },
@@ -119,7 +136,8 @@ export class LlmClient {
     // clamped silently and the truncated JSON burns every attempt at
     // temperature 0. Clamping max_tokens here would truncate deterministically
     // anyway, so exceeding ctx stays an operator error surfaced by this
-    // warning (chars/4 is a rough token estimate).
+    // warning (chars/4 is a rough token estimate). With reasoning enabled
+    // the reserved thinking tokens are part of max_tokens (see above).
     const promptTokens = Math.ceil(
       (body.messages[0].content.length + body.messages[1].content.length) / 4
     )
