@@ -23,7 +23,9 @@ Three coordinated mechanisms in [lib/llm/client.ts](../../lib/llm/client.ts) /
    once per request when `promptTokens + max_tokens > LLM_CTX`. Exceeding
    the context stays an operator error surfaced by this warning (clamping
    `max_tokens` locally would truncate deterministically anyway).
-   `max_tokens = max(1024, items.length * 96)`.
+   `max_tokens = max(1024, items.length * 96)` plus
+   `LLM_REASONING_BUDGET` when `LLM_REASONING=true` (the thinking trace
+   shares the completion budget when llama-server runs `--reasoning on`).
 3. **Retry taxonomy** (ported from a Rust client): timeouts are **never**
    retried (including mid-body-read aborts); network errors, 429/5xx, and
    malformed payloads are retried with backoff `200ms · 4^(attempt-1) +

@@ -423,6 +423,33 @@ describe("LlmClient.labelBatch", () => {
     warnSpy.mockRestore()
   })
 
+  it("reserves the reasoning budget in max_tokens when reasoning is on", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+    process.env.LLM_REASONING = "true"
+    process.env.LLM_REASONING_BUDGET = "2048"
+    resetConfigCache()
+    let captured: unknown
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init) => {
+        captured = JSON.parse(String(init?.body))
+        return chatResponse({ results: [{ index: 0, label: "Miete" }] })
+      })
+    )
+
+    try {
+      await new LlmClient("http://test").labelBatch([tx({ id: "a" })])
+      // floor 1024 + reasoning budget 2048 — the thinking trace shares
+      // max_tokens, so without the reserve the JSON would truncate
+      expect((captured as { max_tokens: number }).max_tokens).toBe(3072)
+    } finally {
+      delete process.env.LLM_REASONING
+      delete process.env.LLM_REASONING_BUDGET
+      resetConfigCache()
+      warnSpy.mockRestore()
+    }
+  })
+
   it("warns when prompt + completion exceed the context window", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
     vi.stubGlobal(

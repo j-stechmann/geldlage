@@ -91,12 +91,18 @@ Start llama-server by hand instead:
 ```bash
 llama-server -m <model.gguf> \
   -c 8192 -np 1 -fa on -ctk q8_0 -ctv q8_0 \
-  -ngl auto --fit on --reasoning off \
+  -ngl auto --fit on --reasoning on --reasoning-budget 2048 \
   --host 127.0.0.1 --port 8080 --no-webui
 ```
 
-`--reasoning off` disables thinking (mandatory for thinking models —
-otherwise the token budget is burned before any label is produced).
+`--reasoning on` enables the model's thinking phase, `--reasoning-budget`
+caps it server-side. When enabling it, the app must know: set
+`LLM_REASONING=true` (plus `LLM_REASONING_BUDGET`, matching the server
+flag) so the client reserves thinking tokens in `max_tokens` — the trace
+shares the completion budget, and without the reserve the JSON truncates
+deterministically. `make llm LLM_REASONING=on LLM_REASONING_BUDGET=2048`
+starts the server configured accordingly (default remains
+`--reasoning off`).
 
 Environment (all optional):
 
@@ -111,6 +117,8 @@ Environment (all optional):
 | `LLM_CTX`                | `8192`                  | llama-server context window used by the client-side budget guard                                                                           |
 | `LLM_MAX_ATTEMPTS`       | `5`                     | per-transaction labeling attempt cap                                                                                                       |
 | `LLM_MAX_LABELS_PROMPT`  | `200`                   | max existing labels injected into the prompt                                                                                               |
+| `LLM_REASONING`          | `false`                 | `true` when llama-server runs with `--reasoning on` — the client then reserves thinking tokens in `max_tokens`                             |
+| `LLM_REASONING_BUDGET`   | `2048`                  | thinking tokens reserved per request when `LLM_REASONING=true`; keep in sync with the server's `--reasoning-budget`                        |
 | `OIDC_ISSUER_URL`        | — (required)            | OIDC issuer URL (any compliant provider)                                                                                                   |
 | `LEGACY_OIDC_ISSUER_URL` | — (optional)            | Pre-rebrand issuer URL; set only when upgrading from v1.10.x so users keyed on the old issuer are migrated once at startup (see CHANGELOG) |
 | `OIDC_CLIENT_ID`         | — (required)            | OIDC client id                                                                                                                             |

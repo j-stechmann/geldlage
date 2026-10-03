@@ -37,8 +37,13 @@ Key llama-server flags and why:
 
 - `-c $(LLM_CTX)` — context window (default 8192); must match the app's
   `LLM_CTX` env (the client-side budget guard reads the same variable).
-- `--reasoning off` — **mandatory for thinking models**; otherwise the token
-  budget is burned before any label is produced.
+- `--reasoning $(LLM_REASONING)` (default `off`) — thinking is disabled so
+  the whole `max_tokens` budget goes to the JSON. Enable with
+  `make llm LLM_REASONING=on` **and** set `LLM_REASONING=true` in the app:
+  the thinking trace shares `max_tokens`, so the client must reserve
+  `LLM_REASONING_BUDGET` thinking tokens or the JSON truncates
+  deterministically. `--reasoning-budget` (server) caps the trace
+  server-side and should match `LLM_REASONING_BUDGET`.
 - `-fa on -ctk q8_0 -ctv q8_0` — flash attention with quantized KV cache;
   `-np 1` — single parallel slot (the app sends one batch at a time).
 - `--no-webui` — API only.
@@ -65,6 +70,8 @@ All configuration is environment-based, read once via zod-validated
 | `LLM_CTX`                | `8192`                      | must match the server's `-c` flag (budget guard)                                                                                                                                                                                               |
 | `LLM_MAX_ATTEMPTS`       | `5`                         | per-transaction labeling attempt cap                                                                                                                                                                                                           |
 | `LLM_MAX_LABELS_PROMPT`  | `200` (0 disables)          | existing labels injected into prompts                                                                                                                                                                                                          |
+| `LLM_REASONING`          | `false`                     | `true` when llama-server runs `--reasoning on`; the client then reserves thinking tokens in `max_tokens`                                                                                                                                       |
+| `LLM_REASONING_BUDGET`   | `2048`                      | thinking tokens reserved per request when `LLM_REASONING=true`; keep in sync with the server's `--reasoning-budget` flag                                                                                                                       |
 | `OIDC_ISSUER_URL`        | — (required)                | OIDC issuer (well-known discovery); any compliant provider. Dev default from `make oidc`: `http://localhost:8081/application/o/geldlage/` (plain-HTTP issuers opt into `allowInsecureRequests` automatically; HTTPS issuers are unaffected)    |
 | `LEGACY_OIDC_ISSUER_URL` | — (optional)                | Pre-rebrand issuer URL (v1.10.x dev default `…/application/o/dkb-analytics/`); set only when upgrading so users still keyed on the old issuer are rewritten to `OIDC_ISSUER_URL` once at startup (lib/db, see CHANGELOG). Unset → no migration |
 | `OIDC_CLIENT_ID`         | — (required)                | OIDC client id (dev: `geldlage`, provisioned by `make oidc`)                                                                                                                                                                                   |

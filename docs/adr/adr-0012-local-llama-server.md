@@ -15,8 +15,10 @@ Talk **OpenAI-compatible chat completions** to a local llama.cpp
 GGUF model (downloaded at a pinned Hugging Face revision by `make model`).
 **No Ollama is involved anywhere** — the Makefile is explicit about this and
 only reuses Ollama's _binary_ when a user opts in via `Makefile.local`.
-Server flags are standardized (`--reasoning off` is mandatory for thinking
-models; `-fa on -ctk q8_0 -ctv q8_0`; `-c` must match the app's `LLM_CTX`).
+Server flags are standardized (`--reasoning` configurable via
+`LLM_REASONING`, default `off` — thinking must be opt-in because the trace
+shares the request's token budget; `-fa on -ctk q8_0 -ctv q8_0`; `-c` must
+match the app's `LLM_CTX`).
 
 GPU support is auto-detected at runtime (`--list-devices`), falling back to
 CPU with a loud warning.

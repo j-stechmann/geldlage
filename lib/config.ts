@@ -13,6 +13,18 @@ const envSchema = z.object({
   LLM_CTX: z.coerce.number().int().min(1024).default(8192),
   LLM_MAX_ATTEMPTS: z.coerce.number().int().min(1).default(5),
   LLM_MAX_LABELS_PROMPT: z.coerce.number().int().min(0).default(200),
+  /** Whether the llama-server behind LLM_BASE_URL runs with `--reasoning on`. */
+  LLM_REASONING: z
+    .string()
+    .regex(/^(true|false)$/)
+    .default("false")
+    .transform((v) => v === "true"),
+  /**
+   * Thinking tokens reserved per request when LLM_REASONING is enabled: the
+   * model's reasoning counts against max_tokens, so the budget must be
+   * added on top of the label budget or the JSON truncates deterministically.
+   */
+  LLM_REASONING_BUDGET: z.coerce.number().int().min(0).default(2048),
   OIDC_ISSUER_URL: z.string().url(),
   /** Pre-rebrand issuer; when set, users still keyed on it are migrated once (lib/db). */
   LEGACY_OIDC_ISSUER_URL: z.string().url().optional(),

@@ -24,6 +24,13 @@ MODEL_FILE        ?= .llm-model
 LLM_HOST          ?= 127.0.0.1
 LLM_PORT          ?= 8080
 LLM_CTX           ?= 8192
+# Thinking models: `on` lets the model reason before answering (the client
+# reserves LLM_REASONING_BUDGET thinking tokens in max_tokens, so enable
+# it there too); `off` disables the thinking phase entirely. `auto` defers
+# to the model's chat template.
+LLM_REASONING     ?= off
+# Server-side cap on thinking tokens (--reasoning-budget); 0 means no cap.
+LLM_REASONING_BUDGET ?= 0
 
 # ── Dev OIDC provider (Authentik in Docker) ─────────────────────────────────
 # Throwaway Authentik stack (compose.dev.yaml) for the mandatory OIDC login
@@ -67,6 +74,7 @@ help:
 	@echo "  make oidc-logs  tail the dev OIDC provider logs"
 	@echo "  make model      download the pinned model ($(MODEL_HF_FILE), ~$$(($(MODEL_SIZE) / 1000000000)) GB) — run once"
 	@echo "  make llm        start llama-server in the background (log: /tmp/llama-server.log)"
+	@echo "                  reasoning: make llm LLM_REASONING=on LLM_REASONING_BUDGET=2048"
 	@echo "  make stop       interactive teardown: llama-server + dev OIDC provider"
 	@echo "  make llm-stop   llama-server-only teardown (no OIDC)"
 	@echo "  make llm-status health + GPU usage check"
@@ -185,7 +193,11 @@ llm:
 		fi; \
 	fi; \
 	echo "Starting llama-server ($$model) on :$(LLM_PORT)…"; \
-	$(LLAMA_ENV) nohup $(LLAMA_SERVER) -m "$$model" -c $(LLM_CTX) -np 1 -fa on -ctk q8_0 -ctv q8_0 $$gpu_args --reasoning off --host $(LLM_HOST) --port $(LLM_PORT) --no-webui > /tmp/llama-server.log 2>&1 & \
+	reasoning_args="--reasoning $(LLM_REASONING)"; \
+	if [ "$(LLM_REASONING_BUDGET)" != "0" ]; then \
+		reasoning_args="$$reasoning_args --reasoning-budget $(LLM_REASONING_BUDGET)"; \
+	fi; \
+	$(LLAMA_ENV) nohup $(LLAMA_SERVER) -m "$$model" -c $(LLM_CTX) -np 1 -fa on -ctk q8_0 -ctv q8_0 $$gpu_args $$reasoning_args --host $(LLM_HOST) --port $(LLM_PORT) --no-webui > /tmp/llama-server.log 2>&1 & \
 	pid=$$!; \
 	echo "pid $$pid — log: /tmp/llama-server.log"; \
 	echo $$pid > /tmp/llama-server.pid; \
