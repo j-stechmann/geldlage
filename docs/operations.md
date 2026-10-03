@@ -1,6 +1,6 @@
 # Operations
 
-_Last reviewed against v1.11.0 (rebrand: renamed compose project, `make oidc-teardown-legacy`, `LEGACY_OIDC_ISSUER_URL`)._
+_Last reviewed against v1.11.0 (rebrand: renamed compose project, `make oidc-teardown-legacy`, `LEGACY_OIDC_ISSUER_URL`); reasoning section reflects the feature/llm-reasoning changes (default-on reasoning, 900 s timeout, budget validation)._
 
 Running, configuring, and shipping the app. Setup basics live in the root
 [README](../README.md); this guide covers what is behind the commands and
@@ -37,18 +37,22 @@ Key llama-server flags and why:
 
 - `-c $(LLM_CTX)` — context window (default 8192); must match the app's
   `LLM_CTX` env (the client-side budget guard reads the same variable).
-- `--reasoning $(LLM_REASONING)` (default `off`; only `on`/`off` — the
-  Makefile rejects anything else, `auto` included) — thinking is disabled
-  so the whole `max_tokens` budget goes to the JSON. Enable with
-  `make llm LLM_REASONING=on` **and** set `LLM_REASONING=true` in the app:
-  the thinking trace shares `max_tokens`, so the client must reserve
-  `LLM_REASONING_BUDGET` thinking tokens or the JSON truncates
-  deterministically. `--reasoning-budget` (server) caps the trace
-  server-side; both sides default to 1024, sized for the reference machine
-  (Ryzen 5 5600X, 32 GB RAM, RTX 3070 Ti — 27B Q4_K_M at ~3.5–4 t/s):
-  the model's typical traces fit, and a worst-case request (full cap +
-  label JSON + prompt eval) stays inside the app's 600 s `LLM_TIMEOUT_MS`
-  (timeouts are never retried). Keep the two in sync.
+- `--reasoning $(LLM_REASONING)` (default `on`; only `on`/`off` — the
+  Makefile rejects anything else, `auto` included) — the thinking trace
+  shares `max_tokens`, so the app must reserve for it:
+  `LLM_REASONING=true` in the app env (the default) plus
+  `LLM_REASONING_BUDGET` matching the server, or the JSON truncates
+  deterministically. To disable thinking run `make llm LLM_REASONING=off`
+  **and** set `LLM_REASONING=false` in the app. `--reasoning-budget`
+  (server) caps the trace server-side; both sides default to 1024, sized
+  for the reference machine (Ryzen 5 5600X, 32 GB RAM, RTX 3070 Ti — 27B
+  Q4_K_M at ~3.5–4 t/s): the model's typical traces fit, and the
+  theoretical worst case (full cap + 96-token/item label JSON + prompt
+  eval) stays inside the app's 900 s `LLM_TIMEOUT_MS` (timeouts are never
+  retried; a substantially raised `LLM_BATCH_SIZE` can push past it).
+  With reasoning on the budget must be ≥ 1 on both sides — `0` (uncapped)
+  cannot be expressed app-side and is rejected by the Makefile and the
+  app's config validation. Keep the two in sync.
 - `-fa on -ctk q8_0 -ctv q8_0` — flash attention with quantized KV cache;
   `-np 1` — single parallel slot (the app sends one batch at a time).
 - `--no-webui` — API only.
@@ -75,12 +79,12 @@ All configuration is environment-based, read once via zod-validated
 | `LLM_LANGUAGE`           | `de`                        | ISO 639-1 label language                                                                                                                                                                                                                       |
 | `LLM_BATCH_SIZE`         | `20` (1–100)                | items per LLM request; > ~40 risks exceeding `LLM_CTX`                                                                                                                                                                                         |
 | `LLM_MAX_RETRIES`        | `2`                         | transient-failure retries (timeouts never retry)                                                                                                                                                                                               |
-| `LLM_TIMEOUT_MS`         | `600000`                    | per-request timeout; sized for the reference machine (~3.5–4 t/s) — a worst-case reasoning request must fit, timeouts are never retried                                                                                                        |
+| `LLM_TIMEOUT_MS`         | `900000`                    | per-request timeout; sized for the reference machine (~3.5–4 t/s) — the theoretical worst-case reasoning request at the default batch size must fit, timeouts are never retried                                                                |
 | `LLM_CTX`                | `8192`                      | must match the server's `-c` flag (budget guard)                                                                                                                                                                                               |
 | `LLM_MAX_ATTEMPTS`       | `5`                         | per-transaction labeling attempt cap                                                                                                                                                                                                           |
 | `LLM_MAX_LABELS_PROMPT`  | `200` (0 disables)          | existing labels injected into prompts                                                                                                                                                                                                          |
-| `LLM_REASONING`          | `false`                     | `true` when llama-server runs `--reasoning on`; the client then reserves thinking tokens in `max_tokens`                                                                                                                                       |
-| `LLM_REASONING_BUDGET`   | `1024`                      | thinking tokens reserved per request when `LLM_REASONING=true`; must match the server's `--reasoning-budget` (Makefile default: same)                                                                                                          |
+| `LLM_REASONING`          | `true`                      | matches llama-server's `--reasoning` flag (`false` when the server runs `--reasoning off`); the client reserves thinking tokens in `max_tokens` when `true`                                                                                    |
+| `LLM_REASONING_BUDGET`   | `1024`                      | thinking tokens reserved per request when `LLM_REASONING=true` (must be ≥ 1 then — 0 is rejected); must match the server's `--reasoning-budget` (Makefile default: same)                                                                       |
 | `OIDC_ISSUER_URL`        | — (required)                | OIDC issuer (well-known discovery); any compliant provider. Dev default from `make oidc`: `http://localhost:8081/application/o/geldlage/` (plain-HTTP issuers opt into `allowInsecureRequests` automatically; HTTPS issuers are unaffected)    |
 | `LEGACY_OIDC_ISSUER_URL` | — (optional)                | Pre-rebrand issuer URL (v1.10.x dev default `…/application/o/dkb-analytics/`); set only when upgrading so users still keyed on the old issuer are rewritten to `OIDC_ISSUER_URL` once at startup (lib/db, see CHANGELOG). Unset → no migration |
 | `OIDC_CLIENT_ID`         | — (required)                | OIDC client id (dev: `geldlage`, provisioned by `make oidc`)                                                                                                                                                                                   |

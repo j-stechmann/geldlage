@@ -16,9 +16,11 @@ GGUF model (downloaded at a pinned Hugging Face revision by `make model`).
 **No Ollama is involved anywhere** — the Makefile is explicit about this and
 only reuses Ollama's _binary_ when a user opts in via `Makefile.local`.
 Server flags are standardized (`--reasoning` configurable via
-`LLM_REASONING`, default `off`, `on`/`off` only — thinking must be opt-in
-because the trace shares the request's token budget, and `auto` would let
-the model decide per request, which the client cannot reserve for;
+`LLM_REASONING`, default `on`, `on`/`off` only — both sides must agree
+because the trace shares the request's token budget and the client must
+reserve for it (`LLM_REASONING=true` / `LLM_REASONING_BUDGET` matching
+the server's `--reasoning-budget`); `auto` would let the model decide per
+request, which the client cannot reserve for;
 `-fa on -ctk q8_0 -ctv q8_0`; `-c` must
 match the app's `LLM_CTX`).
 
@@ -31,7 +33,7 @@ CPU with a loud warning.
   third parties and costs per call; unacceptable here.
 - **Ollama as the runtime** — convenient, but pins its own model management
   and versioning; llama-server's flags give the control the labeller needs
-  (grammar-constrained decoding, reasoning off).
+  (grammar-constrained decoding, explicit reasoning on/off).
 - **Local transformer via JS (transformers.js)** — slower, weaker models for
   this task.
 

@@ -4,17 +4,21 @@
 
 ### Added
 
-- **Opt-in LLM reasoning support**: `make llm` accepts `LLM_REASONING=on`
-  (passes `--reasoning on`; only `on`/`off` are supported) and
-  `LLM_REASONING_BUDGET` (passes `--reasoning-budget`, capping the trace
-  server-side; default 1024). The app reads
-  `LLM_REASONING=true` / `LLM_REASONING_BUDGET` (default 1024) to reserve
-  thinking tokens in `max_tokens` — the trace shares the completion budget,
-  so without the reserve the JSON truncates deterministically. Both
-  defaults are sized for the reference machine (Ryzen 5 5600X, 32 GB RAM,
-  RTX 3070 Ti; 27B Q4_K_M at ~3.5–4 t/s); `LLM_TIMEOUT_MS` rises from
-  300 s to 600 s so a worst-case reasoning request fits (timeouts are
-  never retried). The reasoning default itself remains `off`.
+- **LLM reasoning on by default**: `make llm` passes `--reasoning on` and
+  `--reasoning-budget` (capping the trace server-side; default 1024; only
+  `on`/`off` are supported — `auto` is rejected). The app defaults to
+  `LLM_REASONING=true` / `LLM_REASONING_BUDGET` (1024) and reserves
+  thinking tokens in `max_tokens` — the trace shares the completion
+  budget, so without the reserve the JSON truncates deterministically.
+  Both sides must stay in sync: disabling thinking requires
+  `make llm LLM_REASONING=off` **and** `LLM_REASONING=false` in the app
+  env. All defaults are sized for the reference machine (Ryzen 5 5600X,
+  32 GB RAM, RTX 3070 Ti; 27B Q4_K_M at ~3.5–4 t/s); `LLM_TIMEOUT_MS`
+  rises from 300 s to 900 s so the theoretical worst-case reasoning
+  request fits (timeouts are never retried). `LLM_REASONING=true` with
+  `LLM_REASONING_BUDGET=0` is rejected at startup (Makefile and app
+  config) — a zero reserve would let the trace consume all of
+  `max_tokens`.
 
 ## v1.12.0
 

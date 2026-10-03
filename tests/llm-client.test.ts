@@ -443,10 +443,71 @@ describe("LlmClient.labelBatch", () => {
       // max_tokens, so without the reserve the JSON would truncate
       expect((captured as { max_tokens: number }).max_tokens).toBe(3072)
     } finally {
-      delete process.env.LLM_REASONING
+      // setup.ts pins LLM_REASONING=false for the reasoning-off tests —
+      // restore instead of delete or the next test would see the
+      // reasoning-on default
+      process.env.LLM_REASONING = "false"
       delete process.env.LLM_REASONING_BUDGET
       resetConfigCache()
       warnSpy.mockRestore()
+    }
+  })
+
+  it("does not add the reasoning reserve when reasoning is off", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+    process.env.LLM_REASONING = "false"
+    process.env.LLM_REASONING_BUDGET = "2048"
+    resetConfigCache()
+    let captured: unknown
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init) => {
+        captured = JSON.parse(String(init?.body))
+        return chatResponse({ results: [{ index: 0, label: "Miete" }] })
+      })
+    )
+
+    try {
+      await new LlmClient("http://test").labelBatch([tx({ id: "a" })])
+      // budget set but reasoning off → plain floor, no reserve added
+      expect((captured as { max_tokens: number }).max_tokens).toBe(1024)
+    } finally {
+      process.env.LLM_REASONING = "false"
+      delete process.env.LLM_REASONING_BUDGET
+      resetConfigCache()
+      warnSpy.mockRestore()
+    }
+  })
+
+  it("rejects a zero reasoning budget when reasoning is on", async () => {
+    process.env.LLM_REASONING = "true"
+    process.env.LLM_REASONING_BUDGET = "0"
+    resetConfigCache()
+
+    try {
+      await expect(
+        new LlmClient("http://test").labelBatch([tx()])
+      ).rejects.toThrow(/LLM_REASONING_BUDGET.*must be >= 1/)
+    } finally {
+      process.env.LLM_REASONING = "false"
+      delete process.env.LLM_REASONING_BUDGET
+      resetConfigCache()
+    }
+  })
+
+  it("rejects a zero reasoning budget when reasoning defaults to on", async () => {
+    delete process.env.LLM_REASONING // app default is now true
+    process.env.LLM_REASONING_BUDGET = "0"
+    resetConfigCache()
+
+    try {
+      await expect(
+        new LlmClient("http://test").labelBatch([tx()])
+      ).rejects.toThrow(/LLM_REASONING_BUDGET.*must be >= 1/)
+    } finally {
+      process.env.LLM_REASONING = "false"
+      delete process.env.LLM_REASONING_BUDGET
+      resetConfigCache()
     }
   })
 

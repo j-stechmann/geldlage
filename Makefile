@@ -25,17 +25,19 @@ LLM_HOST          ?= 127.0.0.1
 LLM_PORT          ?= 8080
 LLM_CTX           ?= 8192
 # Thinking models: `on` lets the model reason before answering (the client
-# reserves LLM_REASONING_BUDGET thinking tokens in max_tokens, so enable
-# it there too); `off` disables the thinking phase entirely. Only `on` and
-# `off` are supported: `auto` would let the model's chat template decide
-# per request whether to think, and the client cannot reserve max_tokens
-# for a maybe-thinking model.
-LLM_REASONING     ?= off
-# Server-side cap on thinking tokens (--reasoning-budget); 0 means no cap.
-# Default 1024: sized for the reference machine (Ryzen 5 5600X, 32 GB RAM,
-# RTX 3070 Ti — 27B Q4_K_M at ~3.5-4 t/s): covers the model's typical
-# traces while a worst-case request (full cap + label JSON + prompt eval)
-# fits the app's 600 s LLM_TIMEOUT_MS (timeouts are never retried). The
+# reserves LLM_REASONING_BUDGET thinking tokens in max_tokens, and the app
+# env must set LLM_REASONING=true to match); `off` disables the thinking
+# phase entirely. Only `on` and `off` are supported: `auto` would let the
+# model's chat template decide per request whether to think, and the
+# client cannot reserve max_tokens for a maybe-thinking model.
+LLM_REASONING     ?= on
+# Server-side cap on thinking tokens (--reasoning-budget). Default 1024:
+# sized for the reference machine (Ryzen 5 5600X, 32 GB RAM, RTX 3070 Ti —
+# 27B Q4_K_M at ~3.5-4 t/s): covers the model's typical traces while the
+# theoretical worst case (full cap + 96-token/item label JSON + prompt
+# eval) fits the app's 900 s LLM_TIMEOUT_MS (timeouts are never retried).
+# 0 (uncapped) is only valid with LLM_REASONING=off — with reasoning on
+# the app-side reserve would be 0 and the JSON would truncate. The
 # app-side LLM_REASONING_BUDGET reserve should match.
 LLM_REASONING_BUDGET ?= 1024
 
@@ -81,7 +83,7 @@ help:
 	@echo "  make oidc-logs  tail the dev OIDC provider logs"
 	@echo "  make model      download the pinned model ($(MODEL_HF_FILE), ~$$(($(MODEL_SIZE) / 1000000000)) GB) — run once"
 	@echo "  make llm        start llama-server in the background (log: /tmp/llama-server.log)"
-	@echo "                  reasoning: make llm LLM_REASONING=on (budget defaults to $(LLM_REASONING_BUDGET))"
+	@echo "                  reasoning: on by default — disable with make llm LLM_REASONING=off"
 	@echo "  make stop       interactive teardown: llama-server + dev OIDC provider"
 	@echo "  make llm-stop   llama-server-only teardown (no OIDC)"
 	@echo "  make llm-status health + GPU usage check"
@@ -169,6 +171,14 @@ llm:
 		echo "LLM_REASONING must be 'on' or 'off' (got '$(LLM_REASONING)') — 'auto' is not supported: the client cannot reserve thinking tokens for a maybe-thinking model"; \
 		exit 1; \
 	fi; \
+	if ! [[ "$(LLM_REASONING_BUDGET)" =~ ^[0-9]+$$ ]]; then \
+		echo "LLM_REASONING_BUDGET must be a non-negative integer (got '$(LLM_REASONING_BUDGET)')"; \
+		exit 1; \
+	fi; \
+	if [ "$(LLM_REASONING)" = "on" ] && [ "$(LLM_REASONING_BUDGET)" = "0" ]; then \
+		echo "LLM_REASONING_BUDGET=0 with LLM_REASONING=on is invalid: the client would reserve 0 thinking tokens, the trace would consume all of max_tokens and the JSON would truncate deterministically (uncapped thinking cannot be expressed app-side)"; \
+		exit 1; \
+	fi; \
 	if curl -s -m 2 http://$(LLM_HOST):$(LLM_PORT)/health >/dev/null 2>&1; then \
 		echo "llama-server already running on :$(LLM_PORT)"; \
 		rm -f /tmp/llama-server.pid /tmp/llama-server.managed; \
@@ -203,12 +213,15 @@ llm:
 			echo "  LLAMA_ENV = GGML_BACKEND_PATH=/usr/lib/ollama/cuda_v13/libggml-cuda.so LD_LIBRARY_PATH=/usr/lib/ollama/cuda_v13"; \
 		fi; \
 	fi; \
-	if [ "$(LLM_REASONING)" = "on" ]; then \
-		echo "reasoning on — set LLM_REASONING=true in the app env too (.env), or the client won't reserve LLM_REASONING_BUDGET thinking tokens and the JSON truncates"; \
+	app_reasoning="$$(grep -oP '^LLM_REASONING=\K.*' .env 2>/dev/null || echo '')"; \
+	if [ "$(LLM_REASONING)" = "on" ] && [ "$$app_reasoning" = "false" ]; then \
+		echo "WARNING: server starts with reasoning on but the app env (.env) sets LLM_REASONING=false — the client won't reserve LLM_REASONING_BUDGET thinking tokens and the JSON truncates"; \
+	elif [ "$(LLM_REASONING)" = "off" ] && [ "$$app_reasoning" != "false" ]; then \
+		echo "reasoning off — set LLM_REASONING=false in the app env too (.env); both sides default to reasoning on"; \
 	fi; \
 	echo "Starting llama-server ($$model) on :$(LLM_PORT)…"; \
 	reasoning_args="--reasoning $(LLM_REASONING)"; \
-	if [ "$(LLM_REASONING_BUDGET)" != "0" ]; then \
+	if [ "$(LLM_REASONING)" = "on" ]; then \
 		reasoning_args="$$reasoning_args --reasoning-budget $(LLM_REASONING_BUDGET)"; \
 	fi; \
 	$(LLAMA_ENV) nohup $(LLAMA_SERVER) -m "$$model" -c $(LLM_CTX) -np 1 -fa on -ctk q8_0 -ctv q8_0 $$gpu_args $$reasoning_args --host $(LLM_HOST) --port $(LLM_PORT) --no-webui > /tmp/llama-server.log 2>&1 & \
