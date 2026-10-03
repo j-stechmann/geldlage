@@ -36,9 +36,10 @@ LLM_REASONING     ?= on
 # 27B Q4_K_M at ~3.5-4 t/s): covers the model's typical traces while the
 # theoretical worst case (full cap + 96-token/item label JSON + prompt
 # eval) fits the app's 900 s LLM_TIMEOUT_MS (timeouts are never retried).
-# 0 (uncapped) is only valid with LLM_REASONING=off — with reasoning on
-# the app-side reserve would be 0 and the JSON would truncate. The
-# app-side LLM_REASONING_BUDGET reserve should match.
+# With LLM_REASONING=on the budget must be >= 1: 0 makes llama-server end
+# thinking immediately (use LLM_REASONING=off for no thinking), and -1
+# (uncapped) is rejected — the client cannot reserve max_tokens for an
+# unbounded trace. The app-side LLM_REASONING_BUDGET reserve should match.
 LLM_REASONING_BUDGET ?= 1024
 
 # ── Dev OIDC provider (Authentik in Docker) ─────────────────────────────────
@@ -113,6 +114,7 @@ dev:
 		touch /tmp/llama-server.managed; \
 	else \
 		echo "llama-server already running on :$(LLM_PORT) (left running after exit)"; \
+		$(reasoning_sync_note); \
 		rm -f /tmp/llama-server.managed; \
 	fi; \
 	if curl -sf -m 2 http://localhost:$(OIDC_PORT)/-/health/ready/ >/dev/null 2>&1 || docker compose --env-file compose.dev.env -f $(OIDC_COMPOSE) ps --quiet 2>/dev/null | grep -q .; then \
@@ -165,6 +167,19 @@ define model_offer
 	esac
 endef
 
+# Hint for when llama-server is already running and `dev`/`llm` must leave
+# it as-is: the running server's actual reasoning flag is unknowable from
+# the outside, so compare what is visible — this invocation's
+# LLM_REASONING and the app env (.env) — and phrase the rest conditionally.
+define reasoning_sync_note
+	app_reasoning="$$(grep -oP '^LLM_REASONING=\K.*' .env 2>/dev/null || echo '')"; \
+	if [ "$(LLM_REASONING)" = "off" ]; then \
+		echo "note: LLM_REASONING=off was not applied — the running llama-server keeps the reasoning flag it was started with; make llm-stop && make llm LLM_REASONING=off to switch, and set LLM_REASONING=false in the app env"; \
+	elif [ "$$app_reasoning" = "false" ]; then \
+		echo "WARNING: the app env (.env) sets LLM_REASONING=false — if the running llama-server has reasoning on (the default), the client won't reserve thinking tokens and the JSON truncates"; \
+	fi
+endef
+
 # ── llama-server ────────────────────────────────────────────────────────────
 llm:
 	@if [ "$(LLM_REASONING)" != "on" ] && [ "$(LLM_REASONING)" != "off" ]; then \
@@ -172,15 +187,16 @@ llm:
 		exit 1; \
 	fi; \
 	if ! [[ "$(LLM_REASONING_BUDGET)" =~ ^[0-9]+$$ ]]; then \
-		echo "LLM_REASONING_BUDGET must be a non-negative integer (got '$(LLM_REASONING_BUDGET)')"; \
+		echo "LLM_REASONING_BUDGET must be a non-negative integer (got '$(LLM_REASONING_BUDGET)') — -1 (llama-server's uncapped value) is unsupported: the client cannot reserve max_tokens for an unbounded trace"; \
 		exit 1; \
 	fi; \
 	if [ "$(LLM_REASONING)" = "on" ] && [ "$(LLM_REASONING_BUDGET)" = "0" ]; then \
-		echo "LLM_REASONING_BUDGET=0 with LLM_REASONING=on is invalid: the client would reserve 0 thinking tokens, the trace would consume all of max_tokens and the JSON would truncate deterministically (uncapped thinking cannot be expressed app-side)"; \
+		echo "LLM_REASONING_BUDGET=0 with LLM_REASONING=on is invalid: 0 ends thinking immediately (llama-server semantics) — use LLM_REASONING=off for no thinking; with reasoning on the budget must be >= 1"; \
 		exit 1; \
 	fi; \
 	if curl -s -m 2 http://$(LLM_HOST):$(LLM_PORT)/health >/dev/null 2>&1; then \
 		echo "llama-server already running on :$(LLM_PORT)"; \
+		$(reasoning_sync_note); \
 		rm -f /tmp/llama-server.pid /tmp/llama-server.managed; \
 		exit 0; \
 	fi; \

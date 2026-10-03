@@ -52,9 +52,10 @@ const envSchema = z.object({
 })
 
 /**
- * A zero reasoning budget with reasoning on would spend the entire
- * max_tokens on the thinking trace (no reserve) and truncate the JSON
- * deterministically on every request — reject it at startup instead.
+ * With reasoning on, budget 0 is rejected: as a client-side reserve, 0
+ * leaves max_tokens unreserved — the thinking trace eats into the label
+ * JSON and truncates it — and a server-side budget of 0 is llama-server's
+ * end-thinking-immediately, which LLM_REASONING=false already expresses.
  * (With reasoning off the budget is unused; 0 is then accepted.)
  */
 const schemaWithCrossFieldChecks = envSchema.superRefine((cfg, ctx) => {
@@ -63,7 +64,7 @@ const schemaWithCrossFieldChecks = envSchema.superRefine((cfg, ctx) => {
       code: "custom",
       path: ["LLM_REASONING_BUDGET"],
       message:
-        "must be >= 1 when LLM_REASONING=true (a 0 reserve lets the thinking trace consume all of max_tokens — the JSON would truncate deterministically); set LLM_REASONING=false instead",
+        "must be >= 1 when LLM_REASONING=true (a 0 reserve lets the thinking trace eat into the label JSON and truncate it; server-side budget 0 ends thinking immediately — set LLM_REASONING=false for that)",
     })
   }
 })

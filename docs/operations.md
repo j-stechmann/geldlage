@@ -50,9 +50,11 @@ Key llama-server flags and why:
   theoretical worst case (full cap + 96-token/item label JSON + prompt
   eval) stays inside the app's 900 s `LLM_TIMEOUT_MS` (timeouts are never
   retried; a substantially raised `LLM_BATCH_SIZE` can push past it).
-  With reasoning on the budget must be ≥ 1 on both sides — `0` (uncapped)
-  cannot be expressed app-side and is rejected by the Makefile and the
-  app's config validation. Keep the two in sync.
+  With reasoning on the budget must be ≥ 1 on both sides — `0` (llama-server:
+  end thinking immediately) is rejected by the Makefile and the app's config
+  validation (that is what `LLM_REASONING=off` is for), and uncapped
+  thinking (`-1`) is unsupported as well: the client cannot reserve
+  `max_tokens` for an unbounded trace. Keep the two in sync.
 - `-fa on -ctk q8_0 -ctv q8_0` — flash attention with quantized KV cache;
   `-np 1` — single parallel slot (the app sends one batch at a time).
 - `--no-webui` — API only.
