@@ -1,6 +1,6 @@
 # Labelling
 
-_Last reviewed against v1.9.0._
+_Last reviewed against v1.13.0 (default-on reasoning, client-side thinking-token reserve, per-request budget pin)._
 
 Transaction categorization runs as a background worker loop that claims
 pending rows in small batches, asks a local llama.cpp `llama-server` for
@@ -73,7 +73,13 @@ completions to `${LLM_BASE_URL}/v1/chat/completions`
   otherwise burn every attempt identically.
 - `max_tokens: max(1024, items.length * 96)` — labels cap at 64 UTF-8 bytes
   plus index overhead; the old 24/item budget truncated large batches
-  mid-JSON.
+  mid-JSON. When `LLM_REASONING=true` (llama-server running
+  `--reasoning on`), `LLM_REASONING_BUDGET` thinking tokens are added on
+  top — the trace shares the completion budget, and without the reserve
+  the JSON would truncate before any label is produced. The client also
+  pins llama-server's per-request thinking cap (`reasoning_budget_tokens`)
+  to the same value, so the trace can never outgrow the reserve no matter
+  what `--reasoning-budget` the server was started with.
 - **Grammar-constrained decoding**: `response_format: { type: "json_schema" }`
   with a schema that bounds the array to exactly `itemCount` items and the
   echoed `index` to `[0, itemCount-1]` — the grammar itself cannot produce
