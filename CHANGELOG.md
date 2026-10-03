@@ -5,12 +5,16 @@
 ### Added
 
 - **Opt-in LLM reasoning support**: `make llm` accepts `LLM_REASONING=on`
-  (passes `--reasoning on`) and `LLM_REASONING_BUDGET` (passes
-  `--reasoning-budget`, capping the trace server-side). The app reads
-  `LLM_REASONING=true` / `LLM_REASONING_BUDGET` (default 2048) to reserve
+  (passes `--reasoning on`; only `on`/`off` are supported) and
+  `LLM_REASONING_BUDGET` (passes `--reasoning-budget`, capping the trace
+  server-side; default 1024). The app reads
+  `LLM_REASONING=true` / `LLM_REASONING_BUDGET` (default 1024) to reserve
   thinking tokens in `max_tokens` — the trace shares the completion budget,
-  so without the reserve the JSON truncates deterministically. Defaults are
-  unchanged (`--reasoning off`, no reserve).
+  so without the reserve the JSON truncates deterministically. Both
+  defaults are sized for the reference machine (Ryzen 5 5600X, 32 GB RAM,
+  RTX 3070 Ti; 27B Q4_K_M at ~3.5–4 t/s); `LLM_TIMEOUT_MS` rises from
+  300 s to 600 s so a worst-case reasoning request fits (timeouts are
+  never retried). The reasoning default itself remains `off`.
 
 ## v1.12.0
 

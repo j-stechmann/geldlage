@@ -91,42 +91,50 @@ Start llama-server by hand instead:
 ```bash
 llama-server -m <model.gguf> \
   -c 8192 -np 1 -fa on -ctk q8_0 -ctv q8_0 \
-  -ngl auto --fit on --reasoning on --reasoning-budget 2048 \
+  -ngl auto --fit on --reasoning on --reasoning-budget 1024 \
   --host 127.0.0.1 --port 8080 --no-webui
 ```
 
-`--reasoning on` enables the model's thinking phase, `--reasoning-budget`
-caps it server-side. When enabling it, the app must know: set
-`LLM_REASONING=true` (plus `LLM_REASONING_BUDGET`, matching the server
+`--reasoning on` enables the model's thinking phase (only `on`/`off` are
+supported — `auto` leaves the per-request thinking decision to the model's
+chat template, which the client cannot reserve for), `--reasoning-budget`
+caps it server-side (default 1024). When enabling it, the app must know:
+set `LLM_REASONING=true` (plus `LLM_REASONING_BUDGET`, matching the server
 flag) so the client reserves thinking tokens in `max_tokens` — the trace
 shares the completion budget, and without the reserve the JSON truncates
-deterministically. `make llm LLM_REASONING=on LLM_REASONING_BUDGET=2048`
-starts the server configured accordingly (default remains
-`--reasoning off`).
+deterministically. `make llm LLM_REASONING=on` starts the server
+configured accordingly (default remains `--reasoning off`).
+
+Both defaults (`LLM_REASONING_BUDGET` 1024, `LLM_TIMEOUT_MS` 600 s) are
+sized for the reference machine — Ryzen 5 5600X, 32 GB RAM, RTX 3070 Ti
+(8 GB VRAM): the 27B Q4_K_M partially offloads (~8 GB of ~18 GB), leaving
+the CPU-bound generation at ~3.5–4 t/s, so a worst-case reasoning request
+(full thinking trace + label JSON + prompt eval) still completes inside
+the never-retried timeout.
 
 Environment (all optional):
 
-| Variable                 | Default                 | Purpose                                                                                                                                    |
-| ------------------------ | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `DATABASE_PATH`          | `./data/geldlage.db`    | SQLite database file                                                                                                                       |
-| `LLM_BASE_URL`           | `http://127.0.0.1:8080` | llama-server base URL                                                                                                                      |
-| `LLM_LANGUAGE`           | `de`                    | ISO 639-1 label language                                                                                                                   |
-| `LLM_BATCH_SIZE`         | `20`                    | max items per LLM request                                                                                                                  |
-| `LLM_MAX_RETRIES`        | `2`                     | retries for transient LLM failures                                                                                                         |
-| `LLM_TIMEOUT_MS`         | `300000`                | per-request timeout (hybrid models are slow)                                                                                               |
-| `LLM_CTX`                | `8192`                  | llama-server context window used by the client-side budget guard                                                                           |
-| `LLM_MAX_ATTEMPTS`       | `5`                     | per-transaction labeling attempt cap                                                                                                       |
-| `LLM_MAX_LABELS_PROMPT`  | `200`                   | max existing labels injected into the prompt                                                                                               |
-| `LLM_REASONING`          | `false`                 | `true` when llama-server runs with `--reasoning on` — the client then reserves thinking tokens in `max_tokens`                             |
-| `LLM_REASONING_BUDGET`   | `2048`                  | thinking tokens reserved per request when `LLM_REASONING=true`; keep in sync with the server's `--reasoning-budget`                        |
-| `OIDC_ISSUER_URL`        | — (required)            | OIDC issuer URL (any compliant provider)                                                                                                   |
-| `LEGACY_OIDC_ISSUER_URL` | — (optional)            | Pre-rebrand issuer URL; set only when upgrading from v1.10.x so users keyed on the old issuer are migrated once at startup (see CHANGELOG) |
-| `OIDC_CLIENT_ID`         | — (required)            | OIDC client id                                                                                                                             |
-| `OIDC_CLIENT_SECRET`     | — (required)            | OIDC client secret                                                                                                                         |
-| `OIDC_SCOPES`            | `openid profile email`  | requested scopes                                                                                                                           |
-| `SESSION_TTL_SECONDS`    | `604800`                | session cookie lifetime (7 days)                                                                                                           |
-| `SESSION_SECRET`         | client secret fallback  | HS256 session-cookie key (min 32 chars)                                                                                                    |
-| `APP_ORIGIN`             | derived from request    | public origin behind a reverse proxy                                                                                                       |
+| Variable                 | Default                 | Purpose                                                                                                                                            |
+| ------------------------ | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_PATH`          | `./data/geldlage.db`    | SQLite database file                                                                                                                               |
+| `LLM_BASE_URL`           | `http://127.0.0.1:8080` | llama-server base URL                                                                                                                              |
+| `LLM_LANGUAGE`           | `de`                    | ISO 639-1 label language                                                                                                                           |
+| `LLM_BATCH_SIZE`         | `20`                    | max items per LLM request                                                                                                                          |
+| `LLM_MAX_RETRIES`        | `2`                     | retries for transient LLM failures                                                                                                                 |
+| `LLM_TIMEOUT_MS`         | `600000`                | per-request timeout; sized for the reference machine (~3.5–4 t/s generation) — a worst-case reasoning request must fit, timeouts are never retried |
+| `LLM_CTX`                | `8192`                  | llama-server context window used by the client-side budget guard                                                                                   |
+| `LLM_MAX_ATTEMPTS`       | `5`                     | per-transaction labeling attempt cap                                                                                                               |
+| `LLM_MAX_LABELS_PROMPT`  | `200`                   | max existing labels injected into the prompt                                                                                                       |
+| `LLM_REASONING`          | `false`                 | `true` when llama-server runs with `--reasoning on` — the client then reserves thinking tokens in `max_tokens`                                     |
+| `LLM_REASONING_BUDGET`   | `1024`                  | thinking tokens reserved per request when `LLM_REASONING=true`; must match the server's `--reasoning-budget` (Makefile default: same)              |
+| `OIDC_ISSUER_URL`        | — (required)            | OIDC issuer URL (any compliant provider)                                                                                                           |
+| `LEGACY_OIDC_ISSUER_URL` | — (optional)            | Pre-rebrand issuer URL; set only when upgrading from v1.10.x so users keyed on the old issuer are migrated once at startup (see CHANGELOG)         |
+| `OIDC_CLIENT_ID`         | — (required)            | OIDC client id                                                                                                                                     |
+| `OIDC_CLIENT_SECRET`     | — (required)            | OIDC client secret                                                                                                                                 |
+| `OIDC_SCOPES`            | `openid profile email`  | requested scopes                                                                                                                                   |
+| `SESSION_TTL_SECONDS`    | `604800`                | session cookie lifetime (7 days)                                                                                                                   |
+| `SESSION_SECRET`         | client secret fallback  | HS256 session-cookie key (min 32 chars)                                                                                                            |
+| `APP_ORIGIN`             | derived from request    | public origin behind a reverse proxy                                                                                                               |
 
 Raising `LLM_BATCH_SIZE` substantially (> ~40) can make the completion
 budget exceed the server's context window (`-c` in `make llm`, 8192 by
