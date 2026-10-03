@@ -76,7 +76,10 @@ completions to `${LLM_BASE_URL}/v1/chat/completions`
   mid-JSON. When `LLM_REASONING=true` (llama-server running
   `--reasoning on`), `LLM_REASONING_BUDGET` thinking tokens are added on
   top — the trace shares the completion budget, and without the reserve
-  the JSON would truncate before any label is produced.
+  the JSON would truncate before any label is produced. The client also
+  pins llama-server's per-request thinking cap (`reasoning_budget_tokens`)
+  to the same value, so the trace can never outgrow the reserve no matter
+  what `--reasoning-budget` the server was started with.
 - **Grammar-constrained decoding**: `response_format: { type: "json_schema" }`
   with a schema that bounds the array to exactly `itemCount` items and the
   echoed `index` to `[0, itemCount-1]` — the grammar itself cannot produce

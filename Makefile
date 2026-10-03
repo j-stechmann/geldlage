@@ -27,9 +27,13 @@ LLM_CTX           ?= 8192
 # Thinking models: `on` lets the model reason before answering (the client
 # reserves LLM_REASONING_BUDGET thinking tokens in max_tokens, and the app
 # env must set LLM_REASONING=true to match); `off` disables the thinking
-# phase entirely. Only `on` and `off` are supported: `auto` would let the
-# model's chat template decide per request whether to think, and the
-# client cannot reserve max_tokens for a maybe-thinking model.
+# phase entirely. Both spellings are accepted everywhere — `on`/`off`
+# (llama-server's flag vocabulary) and `true`/`false` (the app env's) —
+# and normalized onto `on`/`off`, so an exported LLM_REASONING=on works for
+# the Makefile and the app alike (the app's config normalizes the same
+# way). Only on/off/true/false are supported: `auto` would let the model's
+# chat template decide per request whether to think, and the client cannot
+# reserve max_tokens for a maybe-thinking model.
 LLM_REASONING     ?= on
 # Server-side cap on thinking tokens (--reasoning-budget). Default 1024:
 # sized for the reference machine (Ryzen 5 5600X, 32 GB RAM, RTX 3070 Ti —
@@ -39,7 +43,11 @@ LLM_REASONING     ?= on
 # With LLM_REASONING=on the budget must be >= 1: 0 makes llama-server end
 # thinking immediately (use LLM_REASONING=off for no thinking), and -1
 # (uncapped) is rejected — the client cannot reserve max_tokens for an
-# unbounded trace. The app-side LLM_REASONING_BUDGET reserve should match.
+# unbounded trace. For app requests this flag is only a fallback cap: the
+# client pins its per-request thinking cap (llama.cpp's
+# `reasoning_budget_tokens` body field) to the app env's
+# LLM_REASONING_BUDGET, so a mismatch cannot truncate app JSON — keep both
+# sides aligned anyway so non-app traffic gets a sensible cap.
 LLM_REASONING_BUDGET ?= 1024
 
 # ── Dev OIDC provider (Authentik in Docker) ─────────────────────────────────
@@ -56,6 +64,12 @@ MODEL_PATH = $(MODEL_DIR)/$(MODEL_HF_FILE)
 
 # Local overrides (LLAMA_SERVER, LLAMA_ENV, MODEL_FILE, …)
 -include Makefile.local
+
+# llama-server's --reasoning flag only takes on/off; LLM_REASONING itself
+# also feeds the app env, which accepts true/false as well. Normalize here
+# (after Makefile.local / env / command-line overrides are settled) so both
+# spellings work everywhere; the app's config normalizes the same way.
+LLM_REASONING_FLAG := $(if $(filter on true,$(LLM_REASONING)),on,$(if $(filter off false,$(LLM_REASONING)),off,invalid))
 
 # llama-server binary: LLAMA_SERVER (env/Makefile.local) wins, else PATH.
 # GPU support is auto-detected at launch via --list-devices: a CUDA/Vulkan/
@@ -84,7 +98,7 @@ help:
 	@echo "  make oidc-logs  tail the dev OIDC provider logs"
 	@echo "  make model      download the pinned model ($(MODEL_HF_FILE), ~$$(($(MODEL_SIZE) / 1000000000)) GB) — run once"
 	@echo "  make llm        start llama-server in the background (log: /tmp/llama-server.log)"
-	@echo "                  reasoning: on by default — disable with make llm LLM_REASONING=off"
+	@echo "                  reasoning: on by default — disable with make llm LLM_REASONING=off (true/false also accepted)"
 	@echo "  make stop       interactive teardown: llama-server + dev OIDC provider"
 	@echo "  make llm-stop   llama-server-only teardown (no OIDC)"
 	@echo "  make llm-status health + GPU usage check"
@@ -168,29 +182,39 @@ define model_offer
 endef
 
 # Hint for when llama-server is already running and `dev`/`llm` must leave
-# it as-is: the running server's actual reasoning flag is unknowable from
+# it as-is: the running server's actual reasoning flags are unknowable from
 # the outside, so compare what is visible — this invocation's
-# LLM_REASONING and the app env (.env) — and phrase the rest conditionally.
+# LLM_REASONING / LLM_REASONING_BUDGET and the app env (.env) — and phrase
+# the rest conditionally. The budget comparison is informational only: the
+# client pins its per-request thinking cap to its own LLM_REASONING_BUDGET,
+# so app traffic is safe regardless of what the running server was started
+# with.
 define reasoning_sync_note
 	app_reasoning="$$(grep -oP '^LLM_REASONING=\K.*' .env 2>/dev/null || echo '')"; \
-	if [ "$(LLM_REASONING)" = "off" ]; then \
+	app_reasoning_off=0; \
+	case "$$app_reasoning" in false|off) app_reasoning_off=1 ;; esac; \
+	app_budget="$$(grep -oP '^LLM_REASONING_BUDGET=\K[0-9]+' .env 2>/dev/null || echo '')"; \
+	if [ -z "$$app_budget" ]; then app_budget=1024; fi; \
+	if [ "$(LLM_REASONING_FLAG)" = "off" ]; then \
 		echo "note: LLM_REASONING=off was not applied — the running llama-server keeps the reasoning flag it was started with; make llm-stop && make llm LLM_REASONING=off to switch, and set LLM_REASONING=false in the app env"; \
-	elif [ "$$app_reasoning" = "false" ]; then \
-		echo "WARNING: the app env (.env) sets LLM_REASONING=false — if the running llama-server has reasoning on (the default), the client won't reserve thinking tokens and the JSON truncates"; \
+	elif [ "$$app_reasoning_off" -eq 1 ]; then \
+		echo "WARNING: the app env (.env) sets LLM_REASONING=$$app_reasoning — if the running llama-server has reasoning on (the default), the client won't reserve thinking tokens and the JSON truncates"; \
+	elif [ "$$app_budget" != "$(LLM_REASONING_BUDGET)" ]; then \
+		echo "note: LLM_REASONING_BUDGET=$(LLM_REASONING_BUDGET) (this invocation) differs from the app env's LLM_REASONING_BUDGET=$$app_budget — app requests are safe either way (the client pins the server's per-request thinking cap to its own budget), but align them so the server flag stays a sensible fallback cap"; \
 	fi
 endef
 
 # ── llama-server ────────────────────────────────────────────────────────────
 llm:
-	@if [ "$(LLM_REASONING)" != "on" ] && [ "$(LLM_REASONING)" != "off" ]; then \
-		echo "LLM_REASONING must be 'on' or 'off' (got '$(LLM_REASONING)') — 'auto' is not supported: the client cannot reserve thinking tokens for a maybe-thinking model"; \
+	@if [ "$(LLM_REASONING_FLAG)" = "invalid" ]; then \
+		echo "LLM_REASONING must be one of on/off/true/false (got '$(LLM_REASONING)') — 'auto' is not supported: the client cannot reserve thinking tokens for a maybe-thinking model"; \
 		exit 1; \
 	fi; \
 	if ! [[ "$(LLM_REASONING_BUDGET)" =~ ^[0-9]+$$ ]]; then \
 		echo "LLM_REASONING_BUDGET must be a non-negative integer (got '$(LLM_REASONING_BUDGET)') — -1 (llama-server's uncapped value) is unsupported: the client cannot reserve max_tokens for an unbounded trace"; \
 		exit 1; \
 	fi; \
-	if [ "$(LLM_REASONING)" = "on" ] && [ "$(LLM_REASONING_BUDGET)" = "0" ]; then \
+	if [ "$(LLM_REASONING_FLAG)" = "on" ] && [ "$(LLM_REASONING_BUDGET)" = "0" ]; then \
 		echo "LLM_REASONING_BUDGET=0 with LLM_REASONING=on is invalid: 0 ends thinking immediately (llama-server semantics) — use LLM_REASONING=off for no thinking; with reasoning on the budget must be >= 1"; \
 		exit 1; \
 	fi; \
@@ -230,14 +254,20 @@ llm:
 		fi; \
 	fi; \
 	app_reasoning="$$(grep -oP '^LLM_REASONING=\K.*' .env 2>/dev/null || echo '')"; \
-	if [ "$(LLM_REASONING)" = "on" ] && [ "$$app_reasoning" = "false" ]; then \
-		echo "WARNING: server starts with reasoning on but the app env (.env) sets LLM_REASONING=false — the client won't reserve LLM_REASONING_BUDGET thinking tokens and the JSON truncates"; \
-	elif [ "$(LLM_REASONING)" = "off" ] && [ "$$app_reasoning" != "false" ]; then \
+	app_reasoning_off=0; \
+	case "$$app_reasoning" in false|off) app_reasoning_off=1 ;; esac; \
+	app_budget="$$(grep -oP '^LLM_REASONING_BUDGET=\K[0-9]+' .env 2>/dev/null || echo '')"; \
+	if [ -z "$$app_budget" ]; then app_budget=1024; fi; \
+	if [ "$(LLM_REASONING_FLAG)" = "on" ] && [ "$$app_reasoning_off" -eq 1 ]; then \
+		echo "WARNING: server starts with reasoning on but the app env (.env) sets LLM_REASONING=$$app_reasoning — the client won't reserve LLM_REASONING_BUDGET thinking tokens and the JSON truncates"; \
+	elif [ "$(LLM_REASONING_FLAG)" = "off" ] && [ "$$app_reasoning_off" -eq 0 ]; then \
 		echo "reasoning off — set LLM_REASONING=false in the app env too (.env); both sides default to reasoning on"; \
+	elif [ "$(LLM_REASONING_FLAG)" = "on" ] && [ "$$app_budget" != "$(LLM_REASONING_BUDGET)" ]; then \
+		echo "note: server starts with --reasoning-budget $(LLM_REASONING_BUDGET) but the app env (.env) reserves LLM_REASONING_BUDGET=$$app_budget — app requests are safe either way (the client pins the server's per-request thinking cap to its own budget), but align them so the server flag stays a sensible fallback cap"; \
 	fi; \
 	echo "Starting llama-server ($$model) on :$(LLM_PORT)…"; \
-	reasoning_args="--reasoning $(LLM_REASONING)"; \
-	if [ "$(LLM_REASONING)" = "on" ]; then \
+	reasoning_args="--reasoning $(LLM_REASONING_FLAG)"; \
+	if [ "$(LLM_REASONING_FLAG)" = "on" ]; then \
 		reasoning_args="$$reasoning_args --reasoning-budget $(LLM_REASONING_BUDGET)"; \
 	fi; \
 	$(LLAMA_ENV) nohup $(LLAMA_SERVER) -m "$$model" -c $(LLM_CTX) -np 1 -fa on -ctk q8_0 -ctv q8_0 $$gpu_args $$reasoning_args --host $(LLM_HOST) --port $(LLM_PORT) --no-webui > /tmp/llama-server.log 2>&1 & \

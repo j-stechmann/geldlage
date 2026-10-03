@@ -52,6 +52,8 @@ interface ChatBody {
     type: "json_schema"
     json_schema: { schema: Record<string, unknown> }
   }
+  /** llama.cpp extension: pins the server's per-request thinking cap. */
+  reasoning_budget_tokens?: number
 }
 
 export class LlmClient {
@@ -113,6 +115,16 @@ export class LlmClient {
       max_tokens:
         (cfg.LLM_REASONING ? cfg.LLM_REASONING_BUDGET : 0) +
         Math.max(1024, items.length * 96),
+      // Enforcement of the reserve: pin the server's per-request thinking
+      // cap (llama.cpp's `reasoning_budget_tokens`, which overrides the
+      // `--reasoning-budget` server flag) to exactly the budget reserved
+      // above — the trace can then never outgrow max_tokens' reserve, no
+      // matter what flags an already-running server or Docker container
+      // was started with. A backend without thinking support (or with
+      // reasoning off) ignores it; it is only sent when reasoning is on.
+      ...(cfg.LLM_REASONING && {
+        reasoning_budget_tokens: cfg.LLM_REASONING_BUDGET,
+      }),
       response_format: {
         type: "json_schema",
         json_schema: { schema: responseSchema(items.length) },

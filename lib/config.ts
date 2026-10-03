@@ -21,19 +21,28 @@ const envSchema = z.object({
   LLM_CTX: z.coerce.number().int().min(1024).default(8192),
   LLM_MAX_ATTEMPTS: z.coerce.number().int().min(1).default(5),
   LLM_MAX_LABELS_PROMPT: z.coerce.number().int().min(0).default(200),
-  /** Whether the llama-server behind LLM_BASE_URL runs with `--reasoning on`. */
+  /**
+   * Whether the llama-server behind LLM_BASE_URL runs with `--reasoning on`.
+   * Both spellings are accepted — `true`/`false` (env-boolean convention)
+   * and `on`/`off` (the server flag's vocabulary) — and normalized, so an
+   * exported `LLM_REASONING=on` works for both the Makefile and the app
+   * (the Makefile normalizes the same way onto llama-server's on/off).
+   */
   LLM_REASONING: z
     .string()
-    .regex(/^(true|false)$/)
+    .regex(/^(true|false|on|off)$/)
     .default("true")
-    .transform((v) => v === "true"),
+    .transform((v) => v === "true" || v === "on"),
   /**
    * Thinking tokens reserved per request when LLM_REASONING is enabled: the
    * model's reasoning counts against max_tokens, so the budget must be
    * added on top of the label budget or the JSON truncates deterministically.
    * Default 1024: sized for the reference machine (Ryzen 5 5600X +
    * RTX 3070 Ti, ~3.5–4 t/s) so a worst-case request fits LLM_TIMEOUT_MS
-   * (900 s); must match the server's --reasoning-budget.
+   * (900 s). Enforced per request: the client pins llama-server's
+   * thinking cap to this value (`reasoning_budget_tokens` in the request
+   * body), so the server's `--reasoning-budget` flag is a fallback cap,
+   * not a sync requirement.
    */
   LLM_REASONING_BUDGET: z.coerce.number().int().min(0).default(1024),
   OIDC_ISSUER_URL: z.string().url(),
@@ -64,7 +73,7 @@ const schemaWithCrossFieldChecks = envSchema.superRefine((cfg, ctx) => {
       code: "custom",
       path: ["LLM_REASONING_BUDGET"],
       message:
-        "must be >= 1 when LLM_REASONING=true (a 0 reserve lets the thinking trace eat into the label JSON and truncate it; server-side budget 0 ends thinking immediately — set LLM_REASONING=false for that)",
+        "must be >= 1 when LLM_REASONING=true/on (a 0 reserve lets the thinking trace eat into the label JSON and truncate it; server-side budget 0 ends thinking immediately — set LLM_REASONING=false for that)",
     })
   }
 })

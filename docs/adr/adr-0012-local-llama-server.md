@@ -16,11 +16,14 @@ GGUF model (downloaded at a pinned Hugging Face revision by `make model`).
 **No Ollama is involved anywhere** — the Makefile is explicit about this and
 only reuses Ollama's _binary_ when a user opts in via `Makefile.local`.
 Server flags are standardized (`--reasoning` configurable via
-`LLM_REASONING`, default `on`, `on`/`off` only — both sides must agree
-because the trace shares the request's token budget and the client must
-reserve for it (`LLM_REASONING=true` / `LLM_REASONING_BUDGET` matching
-the server's `--reasoning-budget`); `auto` would let the model decide per
-request, which the client cannot reserve for;
+`LLM_REASONING`, default `on`, `on`/`off` — `true`/`false` accepted and
+normalized; both sides must agree on on/off because the trace shares the
+request's token budget and the client must reserve for it
+(`LLM_REASONING=true`); `auto` would let the model decide per request,
+which the client cannot reserve for. The thinking cap is enforced per
+request: the client pins llama.cpp's `reasoning_budget_tokens` to its
+`LLM_REASONING_BUDGET`, so the server's `--reasoning-budget` flag is only
+a fallback cap for non-app traffic, not a sync requirement;
 `-fa on -ctk q8_0 -ctv q8_0`; `-c` must
 match the app's `LLM_CTX`).
 

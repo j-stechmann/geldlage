@@ -26,6 +26,9 @@ Three coordinated mechanisms in [lib/llm/client.ts](../../lib/llm/client.ts) /
    `max_tokens = max(1024, items.length * 96)` plus
    `LLM_REASONING_BUDGET` when `LLM_REASONING=true` (the thinking trace
    shares the completion budget when llama-server runs `--reasoning on`).
+   The client also pins the per-request thinking cap (llama.cpp's
+   `reasoning_budget_tokens`) to the same budget, so the trace cannot
+   outgrow the reserve regardless of the server's `--reasoning-budget`.
 3. **Retry taxonomy** (ported from a Rust client): timeouts are **never**
    retried (including mid-body-read aborts); network errors, 429/5xx, and
    malformed payloads are retried with backoff `200ms · 4^(attempt-1) +

@@ -37,24 +37,28 @@ Key llama-server flags and why:
 
 - `-c $(LLM_CTX)` — context window (default 8192); must match the app's
   `LLM_CTX` env (the client-side budget guard reads the same variable).
-- `--reasoning $(LLM_REASONING)` (default `on`; only `on`/`off` — the
-  Makefile rejects anything else, `auto` included) — the thinking trace
-  shares `max_tokens`, so the app must reserve for it:
-  `LLM_REASONING=true` in the app env (the default) plus
-  `LLM_REASONING_BUDGET` matching the server, or the JSON truncates
-  deterministically. To disable thinking run `make llm LLM_REASONING=off`
-  **and** set `LLM_REASONING=false` in the app. `--reasoning-budget`
-  (server) caps the trace server-side; both sides default to 1024, sized
-  for the reference machine (Ryzen 5 5600X, 32 GB RAM, RTX 3070 Ti — 27B
-  Q4_K_M at ~3.5–4 t/s): the model's typical traces fit, and the
-  theoretical worst case (full cap + 96-token/item label JSON + prompt
-  eval) stays inside the app's 900 s `LLM_TIMEOUT_MS` (timeouts are never
-  retried; a substantially raised `LLM_BATCH_SIZE` can push past it).
-  With reasoning on the budget must be ≥ 1 on both sides — `0` (llama-server:
-  end thinking immediately) is rejected by the Makefile and the app's config
-  validation (that is what `LLM_REASONING=off` is for), and uncapped
-  thinking (`-1`) is unsupported as well: the client cannot reserve
-  `max_tokens` for an unbounded trace. Keep the two in sync.
+- `--reasoning $(LLM_REASONING)` (default `on`; `on`/`off` — `true`/`false`
+  are accepted and normalized; the Makefile rejects anything else, `auto`
+  included) — the thinking trace shares `max_tokens`, so the app must
+  reserve for it: `LLM_REASONING=true` in the app env (the default) or
+  the JSON truncates deterministically. To disable thinking run
+  `make llm LLM_REASONING=off` **and** set `LLM_REASONING=false` in the
+  app. `--reasoning-budget` (server) caps the trace server-side; both
+  sides default to 1024, sized for the reference machine (Ryzen 5 5600X,
+  32 GB RAM, RTX 3070 Ti — 27B Q4_K_M at ~3.5–4 t/s): the model's typical
+  traces fit, and the theoretical worst case (full cap + 96-token/item
+  label JSON + prompt eval) stays inside the app's 900 s
+  `LLM_TIMEOUT_MS` (timeouts are never retried; a substantially raised
+  `LLM_BATCH_SIZE` can push past it). For app requests the server flag is
+  only a fallback cap: the client pins the per-request thinking cap
+  (llama.cpp's `reasoning_budget_tokens`) to its own
+  `LLM_REASONING_BUDGET`, so a mismatch cannot truncate app JSON —
+  `make llm` still notes a mismatch so the flag stays a sensible fallback
+  for non-app traffic. With reasoning on the budget must be ≥ 1 on both
+  sides — `0` (llama-server: end thinking immediately) is rejected by the
+  Makefile and the app's config validation (that is what
+  `LLM_REASONING=off` is for), and uncapped thinking (`-1`) is unsupported
+  as well: the client cannot reserve `max_tokens` for an unbounded trace.
 - `-fa on -ctk q8_0 -ctv q8_0` — flash attention with quantized KV cache;
   `-np 1` — single parallel slot (the app sends one batch at a time).
 - `--no-webui` — API only.
@@ -74,27 +78,27 @@ interactive download offer fails fast when stdin is not a TTY (CI/pipes).
 All configuration is environment-based, read once via zod-validated
 `getConfig()` ([lib/config.ts](../lib/config.ts)):
 
-| Variable                 | Default                     | Purpose                                                                                                                                                                                                                                        |
-| ------------------------ | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_PATH`          | `./data/geldlage.db`        | SQLite file (WAL sidecars alongside)                                                                                                                                                                                                           |
-| `LLM_BASE_URL`           | `http://127.0.0.1:8080`     | llama-server base URL                                                                                                                                                                                                                          |
-| `LLM_LANGUAGE`           | `de`                        | ISO 639-1 label language                                                                                                                                                                                                                       |
-| `LLM_BATCH_SIZE`         | `20` (1–100)                | items per LLM request; > ~40 risks exceeding `LLM_CTX`                                                                                                                                                                                         |
-| `LLM_MAX_RETRIES`        | `2`                         | transient-failure retries (timeouts never retry)                                                                                                                                                                                               |
-| `LLM_TIMEOUT_MS`         | `900000`                    | per-request timeout; sized for the reference machine (~3.5–4 t/s) — the theoretical worst-case reasoning request at the default batch size must fit, timeouts are never retried                                                                |
-| `LLM_CTX`                | `8192`                      | must match the server's `-c` flag (budget guard)                                                                                                                                                                                               |
-| `LLM_MAX_ATTEMPTS`       | `5`                         | per-transaction labeling attempt cap                                                                                                                                                                                                           |
-| `LLM_MAX_LABELS_PROMPT`  | `200` (0 disables)          | existing labels injected into prompts                                                                                                                                                                                                          |
-| `LLM_REASONING`          | `true`                      | matches llama-server's `--reasoning` flag (`false` when the server runs `--reasoning off`); the client reserves thinking tokens in `max_tokens` when `true`                                                                                    |
-| `LLM_REASONING_BUDGET`   | `1024`                      | thinking tokens reserved per request when `LLM_REASONING=true` (must be ≥ 1 then — 0 is rejected); must match the server's `--reasoning-budget` (Makefile default: same)                                                                       |
-| `OIDC_ISSUER_URL`        | — (required)                | OIDC issuer (well-known discovery); any compliant provider. Dev default from `make oidc`: `http://localhost:8081/application/o/geldlage/` (plain-HTTP issuers opt into `allowInsecureRequests` automatically; HTTPS issuers are unaffected)    |
-| `LEGACY_OIDC_ISSUER_URL` | — (optional)                | Pre-rebrand issuer URL (v1.10.x dev default `…/application/o/dkb-analytics/`); set only when upgrading so users still keyed on the old issuer are rewritten to `OIDC_ISSUER_URL` once at startup (lib/db, see CHANGELOG). Unset → no migration |
-| `OIDC_CLIENT_ID`         | — (required)                | OIDC client id (dev: `geldlage`, provisioned by `make oidc`)                                                                                                                                                                                   |
-| `OIDC_CLIENT_SECRET`     | — (required)                | OIDC client secret (confidential client; dev value in `.env`)                                                                                                                                                                                  |
-| `OIDC_SCOPES`            | `openid profile email`      | scopes requested at the authorization endpoint                                                                                                                                                                                                 |
-| `SESSION_TTL_SECONDS`    | `604800` (7 days)           | signed session cookie lifetime                                                                                                                                                                                                                 |
-| `SESSION_SECRET`         | falls back to client secret | HS256 key for session cookies (min 32 chars)                                                                                                                                                                                                   |
-| `APP_ORIGIN`             | derived from request        | public origin for redirects behind a reverse proxy                                                                                                                                                                                             |
+| Variable                 | Default                     | Purpose                                                                                                                                                                                                                                                                                               |
+| ------------------------ | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_PATH`          | `./data/geldlage.db`        | SQLite file (WAL sidecars alongside)                                                                                                                                                                                                                                                                  |
+| `LLM_BASE_URL`           | `http://127.0.0.1:8080`     | llama-server base URL                                                                                                                                                                                                                                                                                 |
+| `LLM_LANGUAGE`           | `de`                        | ISO 639-1 label language                                                                                                                                                                                                                                                                              |
+| `LLM_BATCH_SIZE`         | `20` (1–100)                | items per LLM request; > ~40 risks exceeding `LLM_CTX`                                                                                                                                                                                                                                                |
+| `LLM_MAX_RETRIES`        | `2`                         | transient-failure retries (timeouts never retry)                                                                                                                                                                                                                                                      |
+| `LLM_TIMEOUT_MS`         | `900000`                    | per-request timeout; sized for the reference machine (~3.5–4 t/s) — the theoretical worst-case reasoning request at the default batch size must fit, timeouts are never retried                                                                                                                       |
+| `LLM_CTX`                | `8192`                      | must match the server's `-c` flag (budget guard)                                                                                                                                                                                                                                                      |
+| `LLM_MAX_ATTEMPTS`       | `5`                         | per-transaction labeling attempt cap                                                                                                                                                                                                                                                                  |
+| `LLM_MAX_LABELS_PROMPT`  | `200` (0 disables)          | existing labels injected into prompts                                                                                                                                                                                                                                                                 |
+| `LLM_REASONING`          | `true`                      | matches llama-server's `--reasoning` flag (`false`/`off` when the server runs `--reasoning off`); the client reserves thinking tokens in `max_tokens` when enabled; accepts `true`/`false` and `on`/`off` (normalized)                                                                                |
+| `LLM_REASONING_BUDGET`   | `1024`                      | thinking tokens reserved per request when `LLM_REASONING=true` (must be ≥ 1 then — 0 is rejected); enforced per request — the client pins llama-server's thinking cap (`reasoning_budget_tokens`) to this value, so the server's `--reasoning-budget` is only a fallback cap (Makefile default: same) |
+| `OIDC_ISSUER_URL`        | — (required)                | OIDC issuer (well-known discovery); any compliant provider. Dev default from `make oidc`: `http://localhost:8081/application/o/geldlage/` (plain-HTTP issuers opt into `allowInsecureRequests` automatically; HTTPS issuers are unaffected)                                                           |
+| `LEGACY_OIDC_ISSUER_URL` | — (optional)                | Pre-rebrand issuer URL (v1.10.x dev default `…/application/o/dkb-analytics/`); set only when upgrading so users still keyed on the old issuer are rewritten to `OIDC_ISSUER_URL` once at startup (lib/db, see CHANGELOG). Unset → no migration                                                        |
+| `OIDC_CLIENT_ID`         | — (required)                | OIDC client id (dev: `geldlage`, provisioned by `make oidc`)                                                                                                                                                                                                                                          |
+| `OIDC_CLIENT_SECRET`     | — (required)                | OIDC client secret (confidential client; dev value in `.env`)                                                                                                                                                                                                                                         |
+| `OIDC_SCOPES`            | `openid profile email`      | scopes requested at the authorization endpoint                                                                                                                                                                                                                                                        |
+| `SESSION_TTL_SECONDS`    | `604800` (7 days)           | signed session cookie lifetime                                                                                                                                                                                                                                                                        |
+| `SESSION_SECRET`         | falls back to client secret | HS256 key for session cookies (min 32 chars)                                                                                                                                                                                                                                                          |
+| `APP_ORIGIN`             | derived from request        | public origin for redirects behind a reverse proxy                                                                                                                                                                                                                                                    |
 
 See the root README for the full Docker Compose example (app + llama-server
 on one network, named volume for `/app/data`).
