@@ -1,5 +1,46 @@
 # Changelog
 
+## v1.13.0
+
+### Added
+
+- **LLM reasoning on by default**: `make llm` passes `--reasoning on` and
+  `--reasoning-budget` (capping the trace server-side; default 1024; only
+  `on`/`off` are supported — `auto` is rejected). The app defaults to
+  `LLM_REASONING=true` / `LLM_REASONING_BUDGET` (1024) and reserves
+  thinking tokens in `max_tokens` — the trace shares the completion
+  budget, so without the reserve the JSON truncates deterministically.
+  Both sides must stay in sync on on/off: disabling thinking requires
+  `make llm LLM_REASONING=off` **and** `LLM_REASONING=false` in the app
+  env. All defaults are sized for the reference machine (Ryzen 5 5600X,
+  32 GB RAM, RTX 3070 Ti; 27B Q4_K_M at ~3.5–4 t/s); `LLM_TIMEOUT_MS`
+  rises from 300 s to 900 s so the theoretical worst-case reasoning
+  request fits (timeouts are never retried). **Upgrade note:** a
+  deployment that pinned the previously documented default
+  `LLM_TIMEOUT_MS=300000` keeps that value — a default-batch reasoning
+  request needs far more than 300 s on the reference machine and
+  timeouts are never retried; raise or remove the pin.
+  `LLM_REASONING=true` with `LLM_REASONING_BUDGET=0` is rejected at
+  startup (Makefile and app config) — budget `0` is llama-server's
+  end-thinking-immediately (use `LLM_REASONING=false`), and as a
+  client-side reserve `0` would let the trace eat into the label JSON.
+  Uncapped thinking (`-1`) is not supported either: the client cannot
+  reserve `max_tokens` for an unbounded trace.
+- **Budget sync is enforced per request**: the client pins
+  llama-server's thinking cap (llama.cpp's `reasoning_budget_tokens`
+  request field, which overrides the `--reasoning-budget` flag) to its
+  own `LLM_REASONING_BUDGET` on every reasoning-enabled request — the
+  trace can no longer outgrow the reserve, no matter what flags an
+  already-running server or Docker container was started with. The
+  server's `--reasoning-budget` becomes a fallback cap for non-app
+  traffic; `make llm` now also notes a budget mismatch against the app
+  env (`.env`) the same way it does for on/off.
+- **Both reasoning spellings accepted everywhere**: `LLM_REASONING`
+  accepts `true`/`false` and `on`/`off` on both sides (app config and
+  Makefile, normalized onto the boolean / llama-server's `on`/`off`
+  respectively), so an exported `LLM_REASONING=on` no longer pauses the
+  label worker with a config error while the server starts fine.
+
 ## v1.12.0
 
 ### Changed

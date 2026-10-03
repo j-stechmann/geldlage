@@ -15,8 +15,17 @@ Talk **OpenAI-compatible chat completions** to a local llama.cpp
 GGUF model (downloaded at a pinned Hugging Face revision by `make model`).
 **No Ollama is involved anywhere** — the Makefile is explicit about this and
 only reuses Ollama's _binary_ when a user opts in via `Makefile.local`.
-Server flags are standardized (`--reasoning off` is mandatory for thinking
-models; `-fa on -ctk q8_0 -ctv q8_0`; `-c` must match the app's `LLM_CTX`).
+Server flags are standardized (`--reasoning` configurable via
+`LLM_REASONING`, default `on`, `on`/`off` — `true`/`false` accepted and
+normalized; both sides must agree on on/off because the trace shares the
+request's token budget and the client must reserve for it
+(`LLM_REASONING=true`); `auto` would let the model decide per request,
+which the client cannot reserve for. The thinking cap is enforced per
+request: the client pins llama.cpp's `reasoning_budget_tokens` to its
+`LLM_REASONING_BUDGET`, so the server's `--reasoning-budget` flag is only
+a fallback cap for non-app traffic, not a sync requirement;
+`-fa on -ctk q8_0 -ctv q8_0`; `-c` must
+match the app's `LLM_CTX`).
 
 GPU support is auto-detected at runtime (`--list-devices`), falling back to
 CPU with a loud warning.
@@ -27,7 +36,7 @@ CPU with a loud warning.
   third parties and costs per call; unacceptable here.
 - **Ollama as the runtime** — convenient, but pins its own model management
   and versioning; llama-server's flags give the control the labeller needs
-  (grammar-constrained decoding, reasoning off).
+  (grammar-constrained decoding, explicit reasoning on/off).
 - **Local transformer via JS (transformers.js)** — slower, weaker models for
   this task.
 
