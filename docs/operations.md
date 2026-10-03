@@ -1,6 +1,6 @@
 # Operations
 
-_Last reviewed against v1.11.0 (rebrand: renamed compose project, `make oidc-teardown-legacy`, `LEGACY_OIDC_ISSUER_URL`); reasoning section reflects the feature/llm-reasoning changes (default-on reasoning, 900 s timeout, budget validation)._
+_Last reviewed against v1.13.0 (default-on reasoning, 900 s timeout, budget validation, per-request budget pin, both reasoning spellings)._
 
 Running, configuring, and shipping the app. Setup basics live in the root
 [README](../README.md); this guide covers what is behind the commands and
