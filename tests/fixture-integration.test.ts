@@ -471,6 +471,24 @@ describe("date-filtered analytics", () => {
     expect(none.kpis.balanceWithoutSnapshot).toBe(false)
   })
 
+  it("balance ignores the status filter (pending rows never enter it)", () => {
+    // the fixture contains pending rows; a status=all/pending query must not
+    // make the balance count money that has not actually moved
+    const plain = computeAnalytics(filters(""), userId, today)
+    for (const status of ["status=all", "status=Nicht gebucht"]) {
+      const r = computeAnalytics(filters(status), userId, today)
+      expect(r.kpis.currentBalanceCents).toBe(plain.kpis.currentBalanceCents)
+      expect(r.balanceTimeline).toEqual(plain.balanceTimeline)
+    }
+    // sanity: the flow scope DOES react to status (pending rows are 24)
+    const pendingOnly = computeAnalytics(
+      filters("status=Nicht gebucht"),
+      userId,
+      today
+    )
+    expect(pendingOnly.kpis.transactionCount).toBe(manifest.pendingCount)
+  })
+
   it("balance KPI = balance as of dateTo (dateTo ≥ anchor)", () => {
     const r = computeAnalytics(filters("dateTo=2024-01-08"), userId, today)
     // next booking after the anchor (2024-01-05, 5.000,00 €) is 2024-01-10
@@ -581,6 +599,16 @@ describe("savings history (last 6 complete months)", () => {
       "2026-01-15"
     )
     expect(filtered.savingsHistory).toEqual(un.savingsHistory)
+  })
+
+  it("ignores the status filter (booked rows only)", () => {
+    // savings is a booked-rows-only series; status=all or pending-only
+    // queries must not alter it
+    const un = computeAnalytics(filters(""), userId, "2026-01-15")
+    for (const status of ["status=all", "status=Nicht gebucht"]) {
+      const r = computeAnalytics(filters(status), userId, "2026-01-15")
+      expect(r.savingsHistory).toEqual(un.savingsHistory)
+    }
   })
 
   it("never claims the running month as last complete month", () => {

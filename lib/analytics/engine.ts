@@ -1,4 +1,4 @@
-import { and, eq, gt, gte, lt, sql } from "drizzle-orm"
+import { and, eq, gt, gte, lt, lte, sql, type SQL } from "drizzle-orm"
 import { getDb } from "@/lib/db"
 import { importBatches, transactions } from "@/lib/db/schema"
 import { buildWhere, type TransactionFilters } from "@/lib/analytics/queries"
@@ -66,6 +66,40 @@ interface BalanceAnchor {
 }
 
 /**
+ * There are two filter scopes, kept separate by construction:
+ *
+ * 1. **Flow scope** — cashflow, categories, transaction count. Reacts to
+ *    every filter including `status` (via `buildWhere`, shared with the
+ *    transactions table).
+ * 2. **Time-scoped scope** — balance (KPI + timeline) and savings history.
+ *    Snapshots anchor an *absolute booked* account balance, so every content
+ *    filter is structurally out of scope: these aggregates are built from an
+ *    allowlist (`buildTimeScopedWhere`: user, booked rows, optional account,
+ *    caller-supplied date bounds), never by stripping fields off the flow
+ *    filters — a new filter added to `TransactionFilters` cannot leak here.
+ */
+function buildTimeScopedWhere(
+  userId: number,
+  accountId: number | undefined,
+  dateBounds?: { from?: string; to?: string }
+): SQL | undefined {
+  const conditions: SQL[] = [
+    eq(transactions.userId, userId),
+    eq(transactions.status, "Gebucht"),
+  ]
+  if (accountId !== undefined) {
+    conditions.push(eq(transactions.accountId, accountId))
+  }
+  if (dateBounds?.from !== undefined) {
+    conditions.push(gte(transactions.bookingDate, dateBounds.from))
+  }
+  if (dateBounds?.to !== undefined) {
+    conditions.push(lte(transactions.bookingDate, dateBounds.to))
+  }
+  return and(...conditions)
+}
+
+/**
  * Balance anchor = LATEST snapshot across all batches (most recent known
  * absolute balance point). Current balance = snapshot + Σ(booked amounts
  * with booking_date > snapshot_date) — robust to missing older history.
@@ -128,11 +162,9 @@ function lastDayOfMonth(iso: string): string {
 }
 
 /**
- * Flow analytics (cashflow, categories, KPIs) react to every filter and share
- * buildWhere with the transactions table. Balance (KPI + timeline) is
- * time-scoped only by design: snapshots anchor an absolute account balance,
- * so content filters (q/type/category) are ignored and full history up to
- * the anchor date is required for the back-calculation.
+ * Flow aggregates (cashflow, categories, KPIs) react to every filter and
+ * share buildWhere with the transactions table. Balance and savings are
+ * time-scoped by design — see buildTimeScopedWhere.
  */
 export function computeAnalytics(
   f: TransactionFilters,
@@ -277,19 +309,9 @@ export function computeAnalytics(
     .slice(0, 12)
 
   // ── savings history: last 6 complete months, time-scoped only ─────
-  // Mirror of the balance scope: content filters (q/type/category/dates)
-  // are ignored so the card always shows the previous calendar month,
-  // but it must respect the account filter.
-  const savingsScope: TransactionFilters = {
-    ...f,
-    q: undefined,
-    type: undefined,
-    categoryIds: undefined,
-    labelStatus: undefined,
-    dateFrom: undefined,
-    dateTo: undefined,
-  }
-  const savingsWhere = buildWhere(savingsScope, userId)
+  // Allowlist-built scope (user + booked + optional account): content
+  // filters including status are structurally out of scope.
+  const savingsWhere = buildTimeScopedWhere(userId, f.accountId)
 
   let savingsHistory: SavingsHistory | null = null
 
@@ -381,14 +403,6 @@ export function computeAnalytics(
   const anchor = latestAnchor(userId, f.accountId)
   const { dateFrom, dateTo } = f
 
-  const balanceScope: TransactionFilters = {
-    ...f,
-    q: undefined,
-    type: undefined,
-    categoryIds: undefined,
-    labelStatus: undefined,
-    dateFrom: undefined,
-  }
   // The backward reconstruction subtracts everything between a day and the
   // anchor, so it must see bookings up to max(dateTo, anchorDate) — clipping
   // at dateTo would mislabel the (dateTo, anchorDate] segment as zero.
@@ -396,10 +410,9 @@ export function computeAnalytics(
     anchor !== null && dateTo !== undefined && dateTo < anchor.snapshotDate
       ? anchor.snapshotDate
       : dateTo
-  const reconWhere = buildWhere(
-    { ...balanceScope, dateTo: reconDateTo },
-    userId
-  )
+  const reconWhere = buildTimeScopedWhere(userId, f.accountId, {
+    to: reconDateTo,
+  })
 
   const dailyRows = db
     .select({
