@@ -105,8 +105,8 @@ produced) and must not clobber newer local state — external navigations
 per the Next 16 `useSearchParams` conventions. Category cells are badges
 colored by the golden-ratio oklch palette; pending rows show a dashed "wird
 kategorisiert" badge, failed/unlabeled rows "ohne Kategorie". Hiding the
-active sort column resets the sort to booking date (no silent invisible
-sorting).
+active sort column resets the sort to the first visible sortable column
+(booking date first, no silent invisible sorting).
 
 ### `/imports`
 

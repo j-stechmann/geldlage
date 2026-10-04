@@ -122,6 +122,9 @@ describe("queryTransactions extended fields", () => {
       25
     )
     expect(page.rows.length).toBeGreaterThan(0)
+    const statuses = page.rows.map((r) => r.status)
+    const sorted = [...statuses].sort((a, b) => b.localeCompare(a))
+    expect(statuses).toEqual(sorted)
   })
 
   it("filters by account", () => {

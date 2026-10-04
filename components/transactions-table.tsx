@@ -422,6 +422,15 @@ const SORTABLE_COLUMNS: Record<SortKey, ColumnKey> = {
   amountCents: "amountCents",
 }
 
+// preference order when the active sort column is hidden
+const DEFAULT_SORTABLE: SortKey[] = [
+  "bookingDate",
+  "valueDate",
+  "status",
+  "payee",
+  "amountCents",
+]
+
 export function TransactionsTable({ filters }: { filters: TableFilters }) {
   const [page, setPage] = React.useState(1)
   const [sort, setSort] = React.useState<{ key: SortKey; desc: boolean }>({
@@ -447,7 +456,11 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
     // hiding the active sort column would leave the rows silently sorted
     // with no visible indicator — reset to the default sort instead
     if (!next.includes(SORTABLE_COLUMNS[sort.key])) {
-      setSort({ key: "bookingDate", desc: true })
+      const fallback =
+        DEFAULT_SORTABLE.find(
+          (key) => next.includes(SORTABLE_COLUMNS[key])
+        ) ?? "bookingDate"
+      setSort({ key: fallback, desc: true })
       setPage(1)
     }
     setVisible(next)
