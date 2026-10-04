@@ -413,6 +413,15 @@ function SortHeader({
   )
 }
 
+// columns hosting a sortable header, keyed by their SortKey
+const SORTABLE_COLUMNS: Record<SortKey, ColumnKey> = {
+  bookingDate: "bookingDate",
+  valueDate: "valueDate",
+  status: "status",
+  payee: "counterparty",
+  amountCents: "amountCents",
+}
+
 export function TransactionsTable({ filters }: { filters: TableFilters }) {
   const [page, setPage] = React.useState(1)
   const [sort, setSort] = React.useState<{ key: SortKey; desc: boolean }>({
@@ -435,6 +444,12 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
           ),
         ]
     if (next.length === 0) return
+    // hiding the active sort column would leave the rows silently sorted
+    // with no visible indicator — reset to the default sort instead
+    if (!next.includes(SORTABLE_COLUMNS[sort.key])) {
+      setSort({ key: "bookingDate", desc: true })
+      setPage(1)
+    }
     setVisible(next)
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next))

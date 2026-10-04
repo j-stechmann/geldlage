@@ -23,6 +23,7 @@ const csv = readFileSync(join(fixtureDir, "fixture.csv"), "utf8")
 
 let db: Db
 let userId: number
+let accountId: number
 
 beforeAll(() => {
   db = createTestDb()
@@ -35,6 +36,7 @@ beforeAll(() => {
     .values({ userId, iban: parsed.accountIban, name: parsed.accountName })
     .returning()
     .get()
+  accountId = account.id
 
   db.insert(importBatches)
     .values({
@@ -124,13 +126,15 @@ describe("queryTransactions extended fields", () => {
 
   it("filters by account", () => {
     const page = queryTransactions(
-      parseFilters(new URLSearchParams("accountId=1")),
+      parseFilters(new URLSearchParams(`accountId=${accountId}`)),
       userId,
       1,
       25
     )
     expect(page.total).toBeGreaterThan(0)
-    expect(new Set(page.rows.map((r) => r.accountId))).toEqual(new Set([1]))
+    expect(new Set(page.rows.map((r) => r.accountId))).toEqual(
+      new Set([accountId])
+    )
 
     const none = queryTransactions(
       parseFilters(new URLSearchParams("accountId=9999")),
