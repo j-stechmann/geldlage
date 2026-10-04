@@ -1,5 +1,52 @@
 # Changelog
 
+## v1.14.0
+
+### Added
+
+- **Dedicated Transaktionen tab with URL-synced filters**: the full
+  transaction table moved off the Dashboard to `/transactions`
+  ([ADR-0026](adr/adr-0026-server-side-table.md)); the Dashboard keeps
+  analytics (KPIs + charts) only. Filter state round-trips through the
+  query string (`filtersToParams`/`paramsToFilters` in
+  [lib/filters.ts](../lib/filters.ts)), so filtered views are shareable
+  and bookmarkable; `router.push` gives every filter state its own
+  history entry. A synchronous local mirror of the URL filters plus an
+  echo-key registry ([lib/url-echo.ts](../lib/url-echo.ts)) make rapid
+  filter changes compose without racing async navigations, while
+  external changes (back/forward, shared links) are adopted.
+- **All schema fields as table columns**: Buchung, Wertstellung, Status,
+  Vertragspartner, Verwendungszweck, IBAN, Typ, Konto, Kategorie,
+  Label-Status, Gläubiger-ID, Mandatsreferenz, Kundenreferenz, Betrag —
+  with a persisted column-visibility toggle (Spalten dropdown,
+  `localStorage`). Sorting gained a Wertstellung and Status field plus
+  an always-visible Sortierung dropdown chip that shows the active
+  sort and direction and can sort by hidden columns.
+- **Extended filter bar**: multi-select categories (checkbox dropdown),
+  account filter (Alle Konten), Status (Gebucht/Nicht gebucht/Alle),
+  and Label-Status (offen/gelabelt/fehlgeschlagen), shared by Dashboard
+  and transactions tab.
+
+### Changed
+
+- **Balance/savings KPIs are scope-isolated**: `buildTimeScopedWhere`
+  ([lib/analytics/engine.ts](../lib/analytics/engine.ts)) builds the
+  time-scoped queries from an allowlist (user + booked rows + optional
+  account + date bounds) instead of stripping content filters off the
+  flow filters — new content filters can no longer leak into
+  balance/savings. Flow aggregates (cashflow, categories, transaction
+  count) still react to every filter including Status.
+
+### Fixed
+
+- **Server/client filter parsing parity**: `parseFilters` rejects
+  non-positive `accountId`, matching the client.
+- **Dropdown menus render in popup content** and URL filter updates
+  compose correctly (echo keys are evicted by TTL so pending echoes are
+  never dropped; stale keys from interrupted navigations expire).
+- **Accounts fetch surfaces failures** via React Query (`res.ok` check)
+  instead of silently rendering an empty list.
+
 ## v1.13.0
 
 ### Added
