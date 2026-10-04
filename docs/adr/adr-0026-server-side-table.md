@@ -13,7 +13,8 @@ table libraries would need the full dataset in the browser.
 **Everything happens in SQL** ([lib/analytics/queries.ts](../../lib/analytics/queries.ts)):
 `buildWhere()` composes the shared filter clause (escaped LIKE, allow-listed
 sort keys), `buildOrderBy()` restricts sorting to `amount_cents / payee /
-booking_date`, and pagination is `LIMIT/OFFSET` with `pageSize` clamped to 100. The transactions table component is **hand-rolled on shadcn `Table`
+booking_date / value_date / status`, and pagination is `LIMIT/OFFSET` with
+`pageSize` clamped to 100. The transactions table component is **hand-rolled on shadcn `Table`
 primitives** — the client only serializes filter/page/sort state into the
 query string; each state combination is its own React Query cache entry.
 Filter changes reset the page via a value-identity pattern (no effects).
