@@ -45,9 +45,10 @@ export function parseFilters(sp: URLSearchParams): TransactionFilters {
     .map((v) => Number.parseInt(v, 10))
     .filter((v) => Number.isInteger(v) && v > 0)
   const accountIdRaw = sp.get("accountId")
+  const accountIdParsed = Number.parseInt(accountIdRaw ?? "", 10)
   const accountId =
-    accountIdRaw && Number.isInteger(Number.parseInt(accountIdRaw, 10))
-      ? Number.parseInt(accountIdRaw, 10)
+    accountIdRaw && Number.isInteger(accountIdParsed) && accountIdParsed > 0
+      ? accountIdParsed
       : undefined
   const labelStatusRaw = sp.get("labelStatus")
   const labelStatus =

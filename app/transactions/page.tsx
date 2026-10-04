@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation"
 import { FilterBar } from "@/components/filter-bar"
 import { TransactionsTable } from "@/components/transactions-table"
 import { Skeleton } from "@/components/ui/skeleton"
+import { UrlEchoRegistry } from "@/lib/url-echo"
 import {
   paramsToFilters,
   filtersToParams,
@@ -27,43 +28,31 @@ function TransactionsPageInner() {
   const urlKey = filtersToParams(urlFilters).toString()
 
   // synchronous mirror of the URL filters: rapid changes compose instead of
-  // racing against async router.replace commits
+  // racing against async router.push commits
   const [filters, setFiltersState] = React.useState(urlFilters)
   const lastUrlKey = React.useRef(urlKey)
-  const echoKeys = React.useRef<Map<string, number>>(new Map())
+  const echoRegistry = React.useRef<UrlEchoRegistry | null>(null)
+  if (echoRegistry.current === null) {
+    echoRegistry.current = new UrlEchoRegistry(ECHO_TTL_MS)
+  }
 
   React.useEffect(() => {
     if (lastUrlKey.current === urlKey) return
     lastUrlKey.current = urlKey
     // adopt only external URL changes (back/forward, shared links); echoes
-    // of our own router.replace calls must not clobber newer local state
-    if (echoKeys.current.has(urlKey)) {
-      const consumedAt = echoKeys.current.get(urlKey)!
-      echoKeys.current.delete(urlKey)
-      // consuming an echo also clears newer keys: they were queued behind a
-      // navigation that just committed, so their URL state is already shown
-      for (const [key, ts] of echoKeys.current) {
-        if (ts > consumedAt) echoKeys.current.delete(key)
-      }
-    } else {
-      setFiltersState(urlFilters)
-    }
+    // of our own router.push calls must not clobber newer local state
+    if (echoRegistry.current!.consume(urlKey) === "own") return
+    setFiltersState(urlFilters)
   }, [urlKey, urlFilters])
 
   const setFilters = React.useCallback(
     (next: TableFilters) => {
       const qs = filtersToParams(next).toString()
-      if (qs !== lastUrlKey.current) {
-        echoKeys.current.set(qs, Date.now())
-        // evict only stale entries (interrupted navigations whose commits
-        // never happened), never pending ones — capping by count risks
-        // dropping a still-queued echo whose URL later commits
-        for (const [key, ts] of echoKeys.current) {
-          if (Date.now() - ts > ECHO_TTL_MS) echoKeys.current.delete(key)
-        }
-      }
+      echoRegistry.current!.add(qs, lastUrlKey.current)
       setFiltersState(next)
-      router.replace(qs ? `/transactions?${qs}` : "/transactions", {
+      // push creates a history entry per filter state so Back/Forward steps
+      // through them; same-URL pushes are turned into no-ops by Next.js
+      router.push(qs ? `/transactions?${qs}` : "/transactions", {
         scroll: false,
       })
     },

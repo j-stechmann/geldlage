@@ -19,7 +19,11 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuGroup,
+  DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
@@ -91,6 +95,14 @@ const SORT_TO_FIELD: Record<SortKey, string> = {
   amountCents: "amount_cents",
   payee: "payee",
   status: "status",
+}
+
+const SORT_LABELS: Record<SortKey, string> = {
+  bookingDate: "Buchung",
+  valueDate: "Wertstellung",
+  amountCents: "Betrag",
+  payee: "Vertragspartner",
+  status: "Status",
 }
 
 type ColumnKey =
@@ -413,16 +425,7 @@ function SortHeader({
   )
 }
 
-// columns hosting a sortable header, keyed by their SortKey
-const SORTABLE_COLUMNS: Record<SortKey, ColumnKey> = {
-  bookingDate: "bookingDate",
-  valueDate: "valueDate",
-  status: "status",
-  payee: "counterparty",
-  amountCents: "amountCents",
-}
-
-// preference order when the active sort column is hidden
+// canonical order of the sort dropdown
 const DEFAULT_SORTABLE: SortKey[] = [
   "bookingDate",
   "valueDate",
@@ -453,16 +456,6 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
           ),
         ]
     if (next.length === 0) return
-    // hiding the active sort column would leave the rows silently sorted
-    // with no visible indicator — reset to the default sort instead
-    if (!next.includes(SORTABLE_COLUMNS[sort.key])) {
-      const fallback =
-        DEFAULT_SORTABLE.find(
-          (key) => next.includes(SORTABLE_COLUMNS[key])
-        ) ?? "bookingDate"
-      setSort({ key: fallback, desc: true })
-      setPage(1)
-    }
     setVisible(next)
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
@@ -515,7 +508,52 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-end">
+      <div className="flex items-center justify-end gap-2">
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button variant="outline" size="sm">
+                <ArrowUpDown className="size-4" /> Sortierung
+                <span className="text-muted-foreground">
+                  {SORT_LABELS[sort.key]}
+                </span>
+                {sort.desc ? (
+                  <ArrowDown className="size-3.5 text-muted-foreground" />
+                ) : (
+                  <ArrowUp className="size-3.5 text-muted-foreground" />
+                )}
+              </Button>
+            }
+          />
+          <DropdownMenuContent>
+            <DropdownMenuRadioGroup
+              value={sort.key}
+              onValueChange={(v) => {
+                setSort({ key: v as SortKey, desc: true })
+                setPage(1)
+              }}
+            >
+              {DEFAULT_SORTABLE.map((key) => (
+                <DropdownMenuRadioItem key={key} value={key}>
+                  {SORT_LABELS[key]}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() => {
+                setSort((prev) => ({ ...prev, desc: !prev.desc }))
+              }}
+            >
+              {sort.desc ? (
+                <ArrowUp className="size-4" />
+              ) : (
+                <ArrowDown className="size-4" />
+              )}
+              {sort.desc ? "Aufsteigend sortieren" : "Absteigend sortieren"}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
