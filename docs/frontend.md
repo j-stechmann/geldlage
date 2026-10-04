@@ -77,11 +77,6 @@ so content filters (q/type/category/labelStatus/**status**) are ignored
 ([lib/analytics/engine.ts](../lib/analytics/engine.ts),
 `buildTimeScopedWhere`).
 
-**Label assignment** (`AssignLabelDialog`): clicking a category cell opens a
-searchable label list — single click selects, **double-click assigns
-instantly**; a "…neu erstellen und zuweisen" action POSTs `{labelName}` (the
-server creates the category and learns the rule in the same request).
-
 ### `/transactions`
 
 The full transaction table: **all schema fields as columns** (Buchung,
@@ -98,15 +93,25 @@ serializes state into the query string
 (`filtersToParams`/`paramsToFilters` in
 [lib/filters.ts](../lib/filters.ts)), so filtered views are shareable and
 bookmarkable. The page keeps a synchronous local mirror of the URL filters so
-rapid changes compose instead of racing async `router.replace` commits; own
+rapid changes compose instead of racing async `router.push` commits; own
 URL updates are recognized via echo keys (timestamps of the query strings we
 produced) and must not clobber newer local state — external navigations
 (back/forward, shared links) are adopted. The page is wrapped in Suspense
 per the Next 16 `useSearchParams` conventions. Category cells are badges
 colored by the golden-ratio oklch palette; pending rows show a dashed "wird
-kategorisiert" badge, failed/unlabeled rows "ohne Kategorie". Hiding the
-active sort column resets the sort to the first visible sortable column
-(booking date first, no silent invisible sorting).
+kategorisiert" badge, failed/unlabeled rows "ohne Kategorie".
+
+**Label assignment** (`AssignLabelDialog`): clicking a category cell opens a
+searchable label list — single click selects, **double-click assigns
+instantly**; a "…neu erstellen und zuweisen" action POSTs `{labelName}` (the
+server creates the category and learns a rule in the same request).
+
+**Sortierung dropdown**: sorting lives in an always-visible dropdown whose
+button chip shows the active sort and direction; it also lets you sort by a
+column that is currently hidden (sort headers render only on visible
+columns). Column header clicks toggle desc/asc, switching columns starts
+descending. Hiding the active sort column keeps the sort active — the chip
+makes it discoverable.
 
 ### `/imports`
 
