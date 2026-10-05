@@ -1,6 +1,6 @@
 # Operations
 
-_Last reviewed against v1.13.0 (default-on reasoning, 900 s timeout, budget validation, per-request budget pin, both reasoning spellings)._
+_Last reviewed against v1.14.1 (streamed LLM completions bypass undici's 300 s timeout; 900 s `LLM_TIMEOUT_MS`, default-on reasoning, budget validation, per-request budget pin, both reasoning spellings)._
 
 Running, configuring, and shipping the app. Setup basics live in the root
 [README](../README.md); this guide covers what is behind the commands and
