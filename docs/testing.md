@@ -1,6 +1,6 @@
 # Testing
 
-_Last reviewed against v1.11.0 (legacy db adoption + issuer migration tests)._
+_Last reviewed against v1.14.1 (streaming SSE client tests: frame reassembly, UTF-8 across chunk boundaries, mid-stream timeout classification)._
 
 The suite is **entirely in-process** — no Next dev server, no HTTP listener,
 no supertest. It runs with `bunx vitest run` (config: [vitest.config.ts](../vitest.config.ts),
