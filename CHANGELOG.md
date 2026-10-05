@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **LLM requests no longer die at undici's fixed 300 s timeout**: the client
+  now sends `stream: true` and consumes the SSE response
+  ([lib/llm/client.ts](../lib/llm/client.ts)). Non-streaming requests wait
+  for the entire batch to generate before the first response byte, and
+  Node's fetch (undici) enforces its own 300 s `headersTimeout` /
+  `bodyTimeout` that `LLM_TIMEOUT_MS` cannot extend — any batch slower
+  than 300 s to first byte failed with `UND_ERR_HEADERS_TIMEOUT`. With
+  streaming, llama-server flushes SSE headers immediately and emits one
+  delta per token, so undici's timers reset chunk by chunk;
+  `LLM_TIMEOUT_MS` (via `AbortSignal.timeout`, spanning fetch and body
+  read) is the deadline while generation is active. Only `delta.content`
+  accumulates (`reasoning_content` deltas are ignored, mirroring the
+  non-streaming `message.content` semantics), a non-SSE response still
+  parses via a fallback, and the retry taxonomy is unchanged — timeouts
+  (including mid-stream aborts) are never retried. A stream that stalls
+  outright instead hits undici's 300 s `bodyTimeout`
+  (`UND_ERR_BODY_TIMEOUT`), which stays classified as a transient
+  network error and is retried.
+
 ## v1.14.0
 
 ### Added
