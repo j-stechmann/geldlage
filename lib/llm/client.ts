@@ -59,7 +59,9 @@ interface ChatBody {
    * the server computes the batch: with `stream: true` llama-server flushes
    * SSE headers immediately and emits a delta per token, so both of
    * undici's timers (headersTimeout / bodyTimeout) reset chunk by chunk.
-   * LLM_TIMEOUT_MS via AbortSignal.timeout remains the only deadline.
+   * LLM_TIMEOUT_MS via AbortSignal.timeout is the deadline while deltas
+   * keep arriving — a stream that stalls for >300 s instead fails
+   * bodyTimeout (UND_ERR_BODY_TIMEOUT), which retries as transient.
    */
   stream: true
 }
@@ -247,9 +249,11 @@ export class LlmClient {
     res: Response,
     items: PromptTransaction[]
   ): Promise<LabelResult[]> {
-    // A body read that stalls past the deadline rejects with the same
+    // A body read aborted by AbortSignal.timeout rejects with the same
     // TimeoutError DOMException as fetch itself — rethrown so labelBatch
     // classifies it as a timeout instead of a malformed "transient" body.
+    // (A stream that stalls >300 s instead rejects via undici's
+    // bodyTimeout, which stays transient — see the `stream: true` note.)
     const content = await readContent(res)
     if (typeof content !== "string") {
       throw new LlmHttpError(res.status, "response missing message content")

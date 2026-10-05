@@ -76,9 +76,12 @@ completions to `${LLM_BASE_URL}/v1/chat/completions`
   `UND_ERR_HEADERS_TIMEOUT`. With streaming, llama-server flushes SSE
   headers immediately and emits one delta per token, so undici's timers
   reset chunk by chunk and `LLM_TIMEOUT_MS` (via `AbortSignal.timeout`,
-  spanning fetch **and** body read) is the only deadline. The client
-  accumulates `choices[0].delta.content` frames and ignores
-  `reasoning_content` deltas, exactly mirroring the non-streaming
+  spanning fetch **and** body read) is the deadline while generation is
+  active. One exception: if the stream stalls outright (no bytes for
+  undici's 300 s `bodyTimeout`), the read fails with `UND_ERR_BODY_TIMEOUT`
+  — classified as a transient network error and retried, never as a
+  timeout. The client accumulates `choices[0].delta.content` frames and
+  ignores `reasoning_content` deltas, exactly mirroring the non-streaming
   `message.content` semantics — the thinking trace never reaches
   `extractJson`. A non-SSE response (proxy or backend that ignored
   `stream`) still parses via the non-streaming fallback.
@@ -105,13 +108,14 @@ completions to `${LLM_BASE_URL}/v1/chat/completions`
 **Retry taxonomy** (ported from a Rust client,
 [ADR-0016](adr/adr-0016-grammar-constrained-decoding.md)):
 
-| Failure                                                  | Behavior                                        |
-| -------------------------------------------------------- | ----------------------------------------------- |
-| Timeout (`AbortSignal.timeout`, incl. mid-stream stalls) | **never retried** — thrown as `LlmTimeoutError` |
-| Network error                                            | retried (like backend-down)                     |
-| HTTP 429 / ≥5xx                                          | retried                                         |
-| Other HTTP status                                        | immediate `LlmHttpError`                        |
-| Malformed payload (missing content, unparseable JSON)    | retried like 5xx                                |
+| Failure                                                    | Behavior                                        |
+| ---------------------------------------------------------- | ----------------------------------------------- |
+| Timeout (`AbortSignal.timeout`, incl. mid-stream aborts)   | **never retried** — thrown as `LlmTimeoutError` |
+| Stalled stream (no bytes for undici's 300 s `bodyTimeout`) | retried like a network error                    |
+| Network error                                              | retried (like backend-down)                     |
+| HTTP 429 / ≥5xx                                            | retried                                         |
+| Other HTTP status                                          | immediate `LlmHttpError`                        |
+| Malformed payload (missing content, unparseable JSON)      | retried like 5xx                                |
 
 Backoff: `200ms · 4^(attempt-1) + jitter [0, base/4]` (first retry jitters
 up to 50 ms, later retries scale with the base), capped by

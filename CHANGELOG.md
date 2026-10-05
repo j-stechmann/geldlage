@@ -14,11 +14,14 @@
   streaming, llama-server flushes SSE headers immediately and emits one
   delta per token, so undici's timers reset chunk by chunk;
   `LLM_TIMEOUT_MS` (via `AbortSignal.timeout`, spanning fetch and body
-  read) is the only deadline. Only `delta.content` accumulates
-  (`reasoning_content` deltas are ignored, mirroring the non-streaming
-  `message.content` semantics), a non-SSE response still parses via a
-  fallback, and the retry taxonomy is unchanged — timeouts (including
-  mid-stream aborts) are never retried.
+  read) is the deadline while generation is active. Only `delta.content`
+  accumulates (`reasoning_content` deltas are ignored, mirroring the
+  non-streaming `message.content` semantics), a non-SSE response still
+  parses via a fallback, and the retry taxonomy is unchanged — timeouts
+  (including mid-stream aborts) are never retried. A stream that stalls
+  outright instead hits undici's 300 s `bodyTimeout`
+  (`UND_ERR_BODY_TIMEOUT`), which stays classified as a transient
+  network error and is retried.
 
 ## v1.14.0
 
