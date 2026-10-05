@@ -54,6 +54,14 @@ interface ChatBody {
   }
   /** llama.cpp extension: pins the server's per-request thinking cap. */
   reasoning_budget_tokens?: number
+  /**
+   * Streaming keeps undici's fixed 300 s headersTimeout from firing while
+   * the server computes the batch: with `stream: true` llama-server flushes
+   * SSE headers immediately and emits a delta per token, so both of
+   * undici's timers (headersTimeout / bodyTimeout) reset chunk by chunk.
+   * LLM_TIMEOUT_MS via AbortSignal.timeout remains the only deadline.
+   */
+  stream: true
 }
 
 export class LlmClient {
@@ -129,6 +137,7 @@ export class LlmClient {
         type: "json_schema",
         json_schema: { schema: responseSchema(items.length) },
       },
+      stream: true,
     }
 
     // guard: prompt + completion must fit the server context (LLM_CTX, the
@@ -239,15 +248,9 @@ export class LlmClient {
     items: PromptTransaction[]
   ): Promise<LabelResult[]> {
     // A body read that stalls past the deadline rejects with the same
-    // TimeoutError DOMException as fetch itself — rethrow so labelBatch
+    // TimeoutError DOMException as fetch itself — rethrown so labelBatch
     // classifies it as a timeout instead of a malformed "transient" body.
-    const payload = (await res.json().catch((err) => {
-      if (isTimeoutError(err)) throw err
-      return null
-    })) as {
-      choices?: Array<{ message?: { content?: string } }>
-    } | null
-    const content = payload?.choices?.[0]?.message?.content
+    const content = await readContent(res)
     if (typeof content !== "string") {
       throw new LlmHttpError(res.status, "response missing message content")
     }
@@ -289,6 +292,100 @@ export class LlmClient {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Reads the assistant content out of a chat-completions response.
+ * `text/event-stream` (the requested `stream: true` mode): accumulates
+ * `choices[0].delta.content` fragments across SSE frames. Anything else
+ * (a proxy or backend that ignored `stream`, or a plain JSON error-shaped
+ * body with status 200): falls back to the non-streaming message shape.
+ * Reading errors surface unchanged — a TimeoutError DOMException from the
+ * aborted body keeps its classification (see labelBatch).
+ */
+async function readContent(res: Response): Promise<string | null> {
+  const contentType = res.headers.get("content-type") ?? ""
+  if (!contentType.includes("text/event-stream")) {
+    const payload = (await res.json().catch((err) => {
+      if (isTimeoutError(err)) throw err
+      return null
+    })) as {
+      choices?: Array<{ message?: { content?: string } }>
+    } | null
+    return payload?.choices?.[0]?.message?.content ?? null
+  }
+
+  const sse = await readSse(res)
+  let content: string | null = null
+  for (const frame of sse) {
+    const payload = JSON.parse(frame) as {
+      choices?: Array<{ delta?: { content?: unknown } }>
+    }
+    // delta.content only: `reasoning_content` is deliberately ignored, just
+    // as the non-streaming path reads only message.content — the thinking
+    // trace must never reach extractJson.
+    const fragment = payload.choices?.[0]?.delta?.content
+    if (typeof fragment !== "string") continue
+    content = (content ?? "") + fragment
+  }
+  return content
+}
+
+/**
+ * Reads an SSE body into parsed `data:` frame strings (event: lines and
+ * comments ignored). SSE frames are delimited by blank lines and a `data:`
+ * field may itself contain interior newlines; llama-server never sends
+ * multi-line data, but the spec-correct reassembly (join with \n) costs
+ * nothing. The final `data: [DONE]` sentinel is dropped from the output.
+ */
+async function readSse(res: Response): Promise<string[]> {
+  const body = res.body
+  if (!body) return []
+  const reader = body.getReader()
+  // local decoder: { stream: true } keeps partial UTF-8 sequences pending
+  // across reads — state that must not interleave with sanitizeLabel's
+  // module-wide decoder
+  const decoder = new TextDecoder()
+  const frames: string[] = []
+  let buffer = ""
+  /** Extracts one frame's data fields (multi-line data joined with \n). */
+  const extract = (rawFrame: string): string | null => {
+    const dataLines = rawFrame
+      .split(/\r\n|\r|\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart())
+    const data = dataLines.join("\n")
+    return data && data !== "[DONE]" ? data : null
+  }
+  /** Pops every complete frame (terminated by a blank line) off the buffer. */
+  const drain = () => {
+    let sep: RegExpExecArray | null
+    while ((sep = /(?:\r\n|\r|\n)((?:\r\n|\r|\n)+)/.exec(buffer))) {
+      const rawFrame = buffer.slice(0, sep.index)
+      buffer = buffer.slice(sep.index + sep[0].length)
+      const data = extract(rawFrame)
+      if (data) frames.push(data)
+    }
+  }
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      drain()
+    }
+    // flush any pending partial bytes, then a final frame without a
+    // trailing blank line is still valid SSE
+    buffer += decoder.decode()
+    drain()
+    if (buffer.trim()) {
+      const data = extract(buffer)
+      if (data) frames.push(data)
+    }
+    return frames
+  } finally {
+    reader.releaseLock()
+  }
 }
 
 /**
