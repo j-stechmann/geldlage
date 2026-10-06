@@ -2,11 +2,13 @@ import {
   check,
   index,
   integer,
+  primaryKey,
   sqliteTable,
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core"
 import { sql } from "drizzle-orm"
+import { randomUUID } from "node:crypto"
 
 export const users = sqliteTable(
   "users",
@@ -194,6 +196,95 @@ export const transactions = sqliteTable(
     index("transactions_payee_idx").on(t.payee),
   ]
 )
+
+export const chatThreads = sqliteTable(
+  "chat_threads",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => randomUUID()),
+    /** Creator — the only role that can invite/rename/delete. */
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    title: text("title").notNull().default("Neuer Chat"),
+    /** Monotonic per-thread message counter for stable message ordering. */
+    seq: integer("seq").notNull().default(0),
+    createdAt: text("created_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+    updatedAt: text("updated_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+  },
+  (t) => [index("chat_threads_user_updated_idx").on(t.userId, t.updatedAt)]
+)
+
+export const chatThreadMembers = sqliteTable(
+  "chat_thread_members",
+  {
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => chatThreads.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    /** invited (visible title-only) | joined (full read + participate) */
+    state: text("state").notNull().default("invited"),
+    createdAt: text("created_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+  },
+  (t) => [
+    primaryKey({ columns: [t.threadId, t.userId] }),
+    index("chat_thread_members_user_idx").on(t.userId, t.state),
+  ]
+)
+
+export const chatMessages = sqliteTable(
+  "chat_messages",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => randomUUID()),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => chatThreads.id, { onDelete: "cascade" }),
+    /** NULL = model-produced (assistant/tool); user messages carry the author */
+    userId: integer("user_id").references(() => users.id),
+    /** user | assistant | tool */
+    role: text("role").notNull(),
+    content: text("content").notNull(),
+    /** assistant: thinking trace (reasoning_content); kept out of loop input */
+    reasoning: text("reasoning"),
+    /** tool rows: registry name + raw JSON args (display + debugging) */
+    toolName: text("tool_name"),
+    toolArgs: text("tool_args"),
+    createdAt: text("created_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+    /** (thread seq, id-tiebreak) sort key for the message list */
+    threadSeq: integer("thread_seq").notNull().default(0),
+  },
+  (t) => [
+    index("chat_messages_thread_sort_idx").on(t.threadId, t.threadSeq, t.id),
+    index("chat_messages_user_created_idx").on(t.userId, t.createdAt),
+    // Runtime enforcement comes from the hand-written DDL in lib/db/index.ts
+    // (role CHECK); these check() defs only matter for drizzle-kit push and
+    // must stay in sync with it.
+    check(
+      "chat_messages_role_check",
+      sql`${t.role} IN ('user', 'assistant', 'tool')`
+    ),
+  ]
+)
+
+export type ChatThread = typeof chatThreads.$inferSelect
+export type ChatThreadMember = typeof chatThreadMembers.$inferSelect
+export type ChatMessage = typeof chatMessages.$inferSelect
+export type NewChatThread = typeof chatThreads.$inferInsert
+export type NewChatThreadMember = typeof chatThreadMembers.$inferInsert
+export type NewChatMessage = typeof chatMessages.$inferInsert
 
 export type User = typeof users.$inferSelect
 export type Account = typeof accounts.$inferSelect

@@ -1,4 +1,5 @@
-import { getConfig, type AppConfig } from "@/lib/config"
+import { getConfig } from "@/lib/config"
+import { collectSse, isTimeoutError } from "@/lib/llm/sse"
 import {
   neutralizeMarkers,
   responseSchema,
@@ -69,7 +70,7 @@ interface ChatBody {
 export class LlmClient {
   constructor(private readonly baseUrl?: string) {}
 
-  private get cfg(): AppConfig {
+  private get cfg(): ReturnType<typeof getConfig> {
     return getConfig()
   }
 
@@ -99,6 +100,9 @@ export class LlmClient {
    * (network, 429, 5xx) are retried with exponential backoff; a timeout is
    * NOT retried — it throws LlmTimeoutError so the caller marks claimed rows
    * failed (there are no fallback labels).
+   *
+   * The SSE plumbing (readSse/collect/timeout classification) moved to
+   * lib/llm/sse.ts in ADR-0033 — shared verbatim with the agent chat path.
    */
   async labelBatch(
     items: PromptTransaction[],
@@ -298,6 +302,20 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+/** 200ms · 4^(attempt-1) + jitter [0, base/4] — ported from the Rust client. */
+function backoffMs(attempt: number): number {
+  const base = 200 * 4 ** (attempt - 1)
+  return base + Math.random() * (base / 4)
+}
+
+async function safeBody(res: Response): Promise<string> {
+  try {
+    return await res.text()
+  } catch {
+    return ""
+  }
+}
+
 /**
  * Reads the assistant content out of a chat-completions response.
  * `text/event-stream` (the requested `stream: true` mode): accumulates
@@ -319,7 +337,7 @@ async function readContent(res: Response): Promise<string | null> {
     return payload?.choices?.[0]?.message?.content ?? null
   }
 
-  const sse = await readSse(res)
+  const sse = await collectSse(res)
   let content: string | null = null
   for (const frame of sse) {
     const payload = JSON.parse(frame) as {
@@ -333,89 +351,6 @@ async function readContent(res: Response): Promise<string | null> {
     content = (content ?? "") + fragment
   }
   return content
-}
-
-/**
- * Reads an SSE body into parsed `data:` frame strings (event: lines and
- * comments ignored). SSE frames are delimited by blank lines and a `data:`
- * field may itself contain interior newlines; llama-server never sends
- * multi-line data, but the spec-correct reassembly (join with \n) costs
- * nothing. The final `data: [DONE]` sentinel is dropped from the output.
- */
-async function readSse(res: Response): Promise<string[]> {
-  const body = res.body
-  if (!body) return []
-  const reader = body.getReader()
-  // local decoder: { stream: true } keeps partial UTF-8 sequences pending
-  // across reads — state that must not interleave with sanitizeLabel's
-  // module-wide decoder
-  const decoder = new TextDecoder()
-  const frames: string[] = []
-  let buffer = ""
-  /** Extracts one frame's data fields (multi-line data joined with \n). */
-  const extract = (rawFrame: string): string | null => {
-    const dataLines = rawFrame
-      .split(/\r\n|\r|\n/)
-      .filter((line) => line.startsWith("data:"))
-      .map((line) => line.slice(5).trimStart())
-    const data = dataLines.join("\n")
-    return data && data !== "[DONE]" ? data : null
-  }
-  /** Pops every complete frame (terminated by a blank line) off the buffer. */
-  const drain = () => {
-    let sep: RegExpExecArray | null
-    while ((sep = /(?:\r\n|\r|\n)((?:\r\n|\r|\n)+)/.exec(buffer))) {
-      const rawFrame = buffer.slice(0, sep.index)
-      buffer = buffer.slice(sep.index + sep[0].length)
-      const data = extract(rawFrame)
-      if (data) frames.push(data)
-    }
-  }
-  try {
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      drain()
-    }
-    // flush any pending partial bytes, then a final frame without a
-    // trailing blank line is still valid SSE
-    buffer += decoder.decode()
-    drain()
-    if (buffer.trim()) {
-      const data = extract(buffer)
-      if (data) frames.push(data)
-    }
-    return frames
-  } finally {
-    reader.releaseLock()
-  }
-}
-
-/**
- * AbortSignal.timeout() rejects with a DOMException named "TimeoutError"
- * (Node ≥17.3 and Bun). Also matches a pre-rejected LlmTimeoutError so a
- * rethrown body-read timeout keeps its classification through labelBatch.
- */
-function isTimeoutError(err: unknown): boolean {
-  return (
-    (err instanceof DOMException && err.name === "TimeoutError") ||
-    err instanceof LlmTimeoutError
-  )
-}
-
-/** 200ms · 4^(attempt-1) + jitter [0, base/4] — ported from the Rust client. */
-function backoffMs(attempt: number): number {
-  const base = 200 * 4 ** (attempt - 1)
-  return base + Math.random() * (base / 4)
-}
-
-async function safeBody(res: Response): Promise<string> {
-  try {
-    return await res.text()
-  } catch {
-    return ""
-  }
 }
 
 /**

@@ -26,7 +26,56 @@ vs. common knowledge — the vendored docs under
 
 Provider nesting (`components/providers.tsx`): ThemeProvider →
 QueryClientProvider → TooltipProvider → ActiveImportProvider →
-DragDropProvider → children + ImportProgressPill + Toaster.
+DragDropProvider → children + ImportProgressPill + Toaster. The agent panel
+([ADR-0033](adr/adr-0033-agent-panel-tool-loop.md)) deliberately adds **no
+provider**: its open/width state lives in a module-level
+`useSyncExternalStore` store (see below).
+
+## Agent panel
+
+The app-wide "KI-Chat" ([ADR-0033](adr/adr-0033-agent-panel-tool-loop.md),
+all in [components/agent/](../components/agent/)): an LLM chat panel with
+native tool access to the user's own finance data, composed into
+`app/layout.tsx` — `AgentToggle` sits in the header's right group
+(before `LabellerHealthBadge`), and `AgentDock` is rendered as a flex sibling
+next to `<main>` in the main content row, so pages and `AppNav` stay
+untouched.
+
+| Component                           | Role                                                                                                                                                                                                  |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `components/agent/agent-toggle.tsx` | Header icon button (`aria-pressed`), toggles the dock via the shared panel store                                                                                                                      |
+| `components/agent/agent-dock.tsx`   | Dock frame: resizable right column on md+ (`ResizeHandle` with pointer capture), full-screen overlay with close button below md                                                                       |
+| `components/agent/agent-chat.tsx`   | The chat itself: thread bar, message list, streaming bubble, input with stop button, invite dialog                                                                                                    |
+| `components/agent/panel-state.ts`   | Module-level `useSyncExternalStore` store: `{open, width}`, persisted to `localStorage` (`geldlage.agent.open`/`.width`); SSR serves closed, lazy first-client hydrate (no provider, no layout flash) |
+
+**Dock behavior**: on md+ the panel is a docked flex column whose width the
+user drags between 280 and 720 px (clamped, persisted); below md it renders
+as a fixed full-screen overlay. The chat is streamed over SSE
+(`delta`/`reasoning`/`tool_call`/`tool_result`/`done`/`error` frames):
+content renders incrementally into a streaming bubble, the model's thinking
+trace appears as a collapsible **Denkprozess** (open while streaming,
+collapsed on the persisted row), and each tool round renders as a **tool
+chip** (name + expandable JSON args/result).
+
+**Threads and invites**: the thread bar dropdown groups Meine Chats /
+Geteilte Chats / Einladungen; selecting an invite shows the join panel
+(Annehmen/Ablehnen) instead of messages — content unlocks exactly on join
+(the API 404s for invited users). Owners get rename, invite (the
+`InviteDialog` fetches the user directory from `GET /api/users`, filtering
+out existing members) and delete; joined members get leave; invited users
+decline. Sending the first message can auto-create a thread; the active
+thread id persists in `localStorage`.
+
+**React Query keys** (same conventions as above):
+
+| Query key                      | Fetches                            | Polling                                          |
+| ------------------------------ | ---------------------------------- | ------------------------------------------------ |
+| `["agent-threads"]`            | `/api/agent/threads`               | 15 s                                             |
+| `["agent-messages", threadId]` | `/api/agent/threads/[id]/messages` | 4 s, **paused while streaming** (`retry: false`) |
+| `["agent-users"]`              | `/api/users`                       | — (only while the invite dialog is open)         |
+
+After a turn finishes (`done` or abort), the messages query is invalidated
+and replaced by the persisted rows.
 
 ## React Query conventions
 

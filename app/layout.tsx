@@ -5,6 +5,8 @@ import { LabellerHealthBadge } from "@/components/labeller-health-badge"
 import { Logo } from "@/components/logo"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { HeaderUserChip } from "@/components/user-chip"
+import { AgentToggle } from "@/components/agent/agent-toggle"
+import { AgentDock } from "@/components/agent/agent-dock"
 import type { Metadata } from "next"
 import "./globals.css"
 
@@ -36,6 +38,7 @@ export default function RootLayout({
                   <AppNav />
                 </div>
                 <div className="flex min-w-0 items-center gap-2">
+                  <AgentToggle />
                   <LabellerHealthBadge />
                   <ThemeToggle />
                   <HeaderUserChip />
@@ -43,9 +46,12 @@ export default function RootLayout({
                 </div>
               </div>
             </header>
-            <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6">
-              {children}
-            </main>
+            <div className="mx-auto flex w-full max-w-7xl flex-1 items-stretch">
+              <main className="w-full max-w-full flex-1 px-4 py-6">
+                {children}
+              </main>
+              <AgentDock />
+            </div>
           </div>
         </Providers>
       </body>

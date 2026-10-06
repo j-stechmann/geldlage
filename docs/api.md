@@ -1,6 +1,6 @@
 # API reference
 
-_Last reviewed against v2.0. Descriptive reference — verify against `app/api/`. All 17 route files export `runtime = "nodejs"` and `dynamic = "force-dynamic"` (no request caching, ever), and use the Next 16 `params: Promise<…>` convention._
+_Last reviewed against v2.0 (+ agent chat, ADR-0033). Descriptive reference — verify against `app/api/`. All 25 route files export `runtime = "nodejs"` and `dynamic = "force-dynamic"` (no request caching, ever), and use the Next 16 `params: Promise<…>` convention._
 
 Validation is **hand-rolled per handler** with typed narrowing and typed
 error responses; zod is reserved for environment config
@@ -64,6 +64,33 @@ fails closed.
 | `DELETE /api/accounts`              | `{deleted}`                                                                   | 400, 404, 409 `account_in_use` (account has transactions/import batches)                                                                                                                | Delete an unused account by `?iban=`; accounts with history are rejected                                                                                          |
 | `GET /api/llm/health`               | `{status: "ok" \| "degraded" \| "unreachable"}`                               | —                                                                                                                                                                                       | Proxy to llama-server `/health` (5 s timeout); **always HTTP 200** — dependency status lives in the body                                                          |
 
+### Agent chat ([ADR-0033](adr/adr-0033-agent-panel-tool-loop.md))
+
+Access to every thread endpoint follows the role matrix below; foreign or
+unknown threads always answer **404, never 403** (see Conventions).
+
+| Method & path                                     | Success                                | Errors                                             | Purpose                                                                                                                            |
+| ------------------------------------------------- | -------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/users`                                  | `{users: [{id, name, email}]}`         | 401                                                | Full user directory for the invite dialog (requester filtered out server-side); deliberate name/email exposure on a local instance |
+| `GET /api/agent/threads`                          | `{threads: [...]}` (each with `role`)  | 401                                                | Sidebar list: owned + shared threads, newest activity first, caller's role attached                                                |
+| `POST /api/agent/threads`                         | **201** `{thread}`                     | 403 CSRF                                           | Create thread (optional `title`, trimmed ≤ 80 chars, default `"Neuer Chat"`)                                                       |
+| `PATCH /api/agent/threads/[id]`                   | `{thread}`                             | 400 `invalid_title`, 404                           | Rename; **owner-only** — members/outsiders get 404 (no existence leak)                                                             |
+| `DELETE /api/agent/threads/[id]`                  | `{deleted: true}` / `{left: true}`     | 404                                                | Role-derived teardown: owner deletes (members + messages cascade), joined member leaves, invited user declines                     |
+| `GET /api/agent/threads/[id]/invites`             | `{members: [...]}` (owner synthesized) | 404                                                | Member roster; **owner-only**                                                                                                      |
+| `POST /api/agent/threads/[id]/invites`            | `{invited}` (rows actually added)      | 400 `invalid_user_ids`, 404                        | Invite `userIds` (deduped, owner un-invitable, idempotent conflict-do-nothing); **owner-only**                                     |
+| `DELETE /api/agent/threads/[id]/invites/[userId]` | `{removed}`                            | 400 `invalid_user_id` / `cannot_remove_owner`, 404 | Retract an invite or remove a member; **owner-only**, never themself                                                               |
+| `POST /api/agent/threads/[id]/join`               | `{joined: true}`                       | 404                                                | Accept an invite (`invited → joined`); owner/member no-op; uninvited = 404                                                         |
+| `GET /api/agent/threads/[id]/messages`            | `{thread, role, members, messages}`    | 404                                                | Full thread view (thread meta, roster, messages in `threadSeq` order); invited users get 404 — content unlocks exactly on join     |
+| `POST /api/agent/threads/[id]/chat`               | **SSE stream** (see below)             | 400 `invalid_content` (1–8000 chars), 404          | One streamed agent turn (`text/event-stream`); owner and joined members only                                                       |
+
+The chat endpoint's SSE vocabulary: named frames
+`event: <name>\ndata: <json>\n\n` — `delta` (content fragment), `reasoning`
+(thinking trace fragment, display-only), `tool_call` (`{name, args}`),
+`tool_result` (`{name, result}`, persisted as a tool row per result),
+`done` (`{messageId, content, reasoning}` — the assistant row is persisted
+at this point), `error` (infrastructure failure; streamed then the stream
+closes). Client disconnects abort the in-flight LLM fetch silently.
+
 ## Conventions
 
 - **Dynamic params** are promises and must be awaited:
@@ -84,6 +111,11 @@ fails closed.
 - **Status-code-free health** — `/api/llm/health` returning 200 even when
   the LLM is unreachable is deliberate: the Docker healthcheck must reflect
   process liveness, not dependency status ([ADR-0028](adr/adr-0028-shallow-healthcheck.md)).
+- **404, never 403, on agent threads** — every thread-scoped agent route
+  answers 404 for foreign or existing-but-forbidden threads: a 403 would
+  confirm to an authenticated outsider that the id belongs to someone else's
+  thread (existence disclosure); 404 is indistinguishable from a random id
+  ([ADR-0033](adr/adr-0033-agent-panel-tool-loop.md)).
 
 ## Error semantics worth knowing
 

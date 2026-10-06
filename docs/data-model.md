@@ -40,7 +40,7 @@ lexically sortable; the analytics engine slices months with
 
 ## Tables
 
-Six tables ([lib/db/schema.ts](../lib/db/schema.ts)); every domain table
+Nine tables ([lib/db/schema.ts](../lib/db/schema.ts)); every domain table
 carries `user_id` — rows are invisible to other users
 ([ADR-0032](adr/adr-0032-multi-user-oidc.md)):
 
@@ -51,11 +51,16 @@ erDiagram
   USERS ||--o{ CATEGORIES : "user_id"
   USERS ||--o{ LABEL_RULES : "user_id"
   USERS ||--o{ TRANSACTIONS : "user_id (denormalized)"
+  USERS ||--o{ CHAT_THREADS : "user_id (owner)"
+  USERS ||--o{ CHAT_THREAD_MEMBERS : "user_id"
+  USERS ||--o{ CHAT_MESSAGES : "user_id (author, nullable)"
   ACCOUNTS ||--o{ TRANSACTIONS : "account_id"
   ACCOUNTS ||--o{ IMPORT_BATCHES : "account_id"
   IMPORT_BATCHES ||--o{ TRANSACTIONS : "batch_id"
   CATEGORIES ||--o{ TRANSACTIONS : "category_id"
   CATEGORIES ||--o{ LABEL_RULES : "label_id (cascade delete)"
+  CHAT_THREADS ||--o{ CHAT_THREAD_MEMBERS : "thread_id (cascade delete)"
+  CHAT_THREADS ||--o{ CHAT_MESSAGES : "thread_id (cascade delete)"
 ```
 
 ### `users`
@@ -160,6 +165,66 @@ Indexes: `transactions_dedupe_unique` UNIQUE `(account_id, source_hash,
 occurrence_index)` — the dedupe linchpin — plus `account_booking`,
 `booking_date`, `label_status` (worker claim scan), `batch_id`, `category`,
 `payee`.
+
+### `chat_threads` / `chat_thread_members` / `chat_messages`
+
+Agent chat persistence ([ADR-0033](adr/adr-0033-agent-panel-tool-loop.md)):
+conversation threads with invite-based sharing. Message reads/writes go
+through [lib/agent/store.ts](../lib/agent/store.ts); every agent route gates
+on `roleOf()` (owner from `chat_threads.user_id`, member/invited from the
+membership row's `state`).
+
+`chat_threads`:
+
+| Column                      | Type               | Notes                                                                                                             |
+| --------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `id`                        | TEXT PK            | UUID                                                                                                              |
+| `user_id`                   | INTEGER FK → users | creator = thread **owner**, the only invite/rename/delete role                                                    |
+| `title`                     | TEXT NOT NULL      | default `"Neuer Chat"`; auto-filled (24 chars + "…") from the first user turn only while the default is still set |
+| `seq`                       | INTEGER            | monotonic per-thread message counter (advanced in the same transaction as the message insert)                     |
+| `created_at` / `updated_at` | TEXT ISO           | `updated_at` bumps on new user/assistant messages (tool rows don't count) and renames                             |
+
+Index: `chat_threads_user_updated_idx` on `(user_id, updated_at)` — the
+sidebar's newest-first list.
+
+`chat_thread_members` (the owner is never stored here — synthesized in
+`listMembers` so the UI shows one roster):
+
+| Column       | Type                   | Notes                                                                                                                                                        |
+| ------------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `thread_id`  | TEXT FK → chat_threads | **ON DELETE CASCADE**                                                                                                                                        |
+| `user_id`    | INTEGER FK → users     | invitee/participant                                                                                                                                          |
+| `state`      | TEXT NOT NULL          | `invited` (title-only preview) / `joined` (full read + participate); only those two values are written — a stray value degrades to invited (least privilege) |
+| `created_at` | TEXT                   | ISO                                                                                                                                                          |
+
+Unique index: `chat_thread_members_pk` on `(thread_id, user_id)` — makes
+re-invites idempotent no-ops, one membership per pair. Plus
+`chat_thread_members_user_idx` on `(user_id, state)` for "threads I'm in"
+queries.
+
+`chat_messages` — user, assistant and tool rows in one stream (protocol
+trio for tool rounds is reconstructed by the loop from role-tagged rows):
+
+| Column                    | Type                   | Notes                                                                                                                                                           |
+| ------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                      | TEXT PK                | UUID; deterministic tiebreak in message ordering                                                                                                                |
+| `thread_id`               | TEXT FK → chat_threads | **ON DELETE CASCADE**                                                                                                                                           |
+| `user_id`                 | INTEGER FK → users     | **NULL = model-produced** (assistant/tool); user rows carry the author                                                                                          |
+| `role`                    | TEXT NOT NULL          | `user` / `assistant` / `tool` — **CHECK enforced** (`chat_messages_role_check` in the hand-written DDL; the drizzle `check()` def must stay in sync, see below) |
+| `content`                 | TEXT NOT NULL          | for tool rows: the JSON tool result (capped at 8000 chars on persist)                                                                                           |
+| `reasoning`               | TEXT                   | assistant rows: the `reasoning_content` thinking trace (display/persistence only, never replayed into loop input)                                               |
+| `tool_name` / `tool_args` | TEXT                   | tool rows: registry name + raw JSON args (display + debugging)                                                                                                  |
+| `created_at`              | TEXT                   | ISO                                                                                                                                                             |
+| `thread_seq`              | INTEGER NOT NULL       | the per-thread counter snapshot at insert, `threadSeq` — stable display AND loop order                                                                          |
+
+Indexes: `chat_messages_thread_sort_idx` on `(thread_id, thread_seq, id)` —
+built for exactly the `ORDER BY thread_seq, id` both the message list and the
+loop's history use — plus `chat_messages_user_created_idx` on
+`(user_id, created_at)`.
+
+Thread deletion cascades members and messages (`ON DELETE CASCADE`);
+inviting is deduped by the membership primary key; accepting an invite is a
+guarded `invited → joined` transition (never a downgrade).
 
 ## Schema creation and migration
 
