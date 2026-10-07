@@ -7,6 +7,7 @@ import { AssistantBubble } from "@/components/agent/assistant-bubble"
 import type {
   StoredMessage,
   ThreadDetail,
+  ThreadRole,
   ToolEvent,
 } from "@/components/agent/types"
 
@@ -15,15 +16,18 @@ const EMPTY: StoredMessage[] = []
 
 /**
  * Message list (ADR-0033): persisted rows + optimistic pending user
- * message + the streaming bubble, pinned to the bottom. Handles the two
- * special views: no thread (empty state) and invited preview (join panel
- * — the detail query 404s for invited users by design).
+ * message + the streaming bubble, pinned to the bottom. Handles the three
+ * special views: no thread (empty state), invited preview (join panel —
+ * the detail query 404s for invited users by design), and owner/member
+ * loading/error states.
  */
 
 interface MessageListProps {
   data: ThreadDetail | undefined
   hasError: boolean
   activeThreadId: string
+  /** Role from the threads list — decides invited-preview vs. ordinary view. */
+  activeRole: ThreadRole | undefined
   streaming: boolean
   streamContent: string
   streamReasoning: string
@@ -33,6 +37,8 @@ interface MessageListProps {
   invitedTitle: string | undefined
   onJoin: (id: string) => Promise<void>
   onDecline: (id: string) => Promise<void>
+  /** Refetches the detail query after an error (owner/member views). */
+  onRetry: () => void
   /** Changes whenever the list should re-pin to the bottom (message count or streaming). */
   pinTarget: string
 }
@@ -45,6 +51,31 @@ export function MessageListView(props: MessageListProps) {
     if (listEl) listEl.scrollTo({ top: listEl.scrollHeight })
   }, [listEl, props.pinTarget])
 
+  // Follow growing content: while streaming, every content growth re-pins
+  // to the bottom — unless the user scrolled up to read (they win: a
+  // scroll event is the only user signal, content growth changes
+  // scrollHeight, not scrollTop, so stickiness lives in a scroll-ref).
+  useEffect(() => {
+    if (!listEl || !props.streaming) return
+    const nearBottom = () =>
+      listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < 80
+    let stick = true
+    const onScroll = () => {
+      stick = nearBottom()
+    }
+    listEl.addEventListener("scroll", onScroll, { passive: true })
+    const observer = new ResizeObserver(() => {
+      if (stick) listEl.scrollTo({ top: listEl.scrollHeight })
+    })
+    observer.observe(listEl)
+    const content = listEl.firstElementChild
+    if (content) observer.observe(content)
+    return () => {
+      observer.disconnect()
+      listEl.removeEventListener("scroll", onScroll)
+    }
+  }, [listEl, props.streaming])
+
   if (!props.activeThreadId) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
@@ -52,9 +83,13 @@ export function MessageListView(props: MessageListProps) {
       </div>
     )
   }
-  // invited users get the join panel instead of messages (404 by design —
-  // "preview after join"): the title comes from the threads list
-  if (props.hasError || !props.data) {
+  // Invited users get the join panel instead of messages — the detail
+  // query 404s for them by design (the title comes from the threads list).
+  // The role decides the branch, NOT the query state: an owner/member sees
+  // loading/error views here because their detail fetch is the query's,
+  // and decline-from-error would otherwise delete a thread via the
+  // polymorphic DELETE route.
+  if (props.activeRole === "invited") {
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
         <p className="text-sm text-muted-foreground">
@@ -72,6 +107,25 @@ export function MessageListView(props: MessageListProps) {
             Ablehnen
           </Button>
         </div>
+      </div>
+    )
+  }
+  if (props.hasError) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+        <p className="text-sm text-muted-foreground">
+          Chats konnten nicht geladen werden.
+        </p>
+        <Button size="sm" variant="outline" onClick={props.onRetry}>
+          Erneut versuchen
+        </Button>
+      </div>
+    )
+  }
+  if (!props.data) {
+    return (
+      <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-sm text-muted-foreground">
+        Chats werden geladen…
       </div>
     )
   }

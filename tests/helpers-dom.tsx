@@ -166,3 +166,13 @@ export function stubLocalStorage() {
 export function stubScrollTo() {
   Element.prototype.scrollTo = vi.fn()
 }
+
+/** jsdom lacks ResizeObserver (stream-follow pinning in message-list). */
+export function stubResizeObserver() {
+  class FakeResizeObserver implements ResizeObserver {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+  vi.stubGlobal("ResizeObserver", FakeResizeObserver)
+}

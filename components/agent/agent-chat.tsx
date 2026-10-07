@@ -38,7 +38,10 @@ const EMPTY_MESSAGES: Array<{
 const EMPTY_MEMBERS: Member[] = []
 
 export function AgentChat() {
-  const [renaming, setRenaming] = useState(false)
+  // renamingThreadId doubles as the rename flag: it carries WHICH thread is
+  // being renamed, so a thread switch mid-rename cannot retarget the submit
+  // (the editor applies its draft to the id captured at pencil-click time).
+  const [renamingThreadId, setRenamingThreadId] = useState<string | null>(null)
   const [inviteOpen, setInviteOpen] = useState(false)
   const [input, setInput] = useState("")
 
@@ -58,7 +61,10 @@ export function AgentChat() {
   } = useAgentThreads(streaming)
 
   const detail = detailQuery.data
-  const role = detail?.role
+  // The threads-list role decides the invited-preview branch in the
+  // message list — the detail query's role is unavailable when its fetch
+  // 404s (invited preview) or fails/hits a cache miss (owner, member).
+  const activeRole = activeThread?.role
   const messages = detail?.messages ?? EMPTY_MESSAGES
   const members: Member[] = detail?.members ?? EMPTY_MEMBERS
 
@@ -95,17 +101,17 @@ export function AgentChat() {
   }, [activeThreadId, createThreadAndSelect, input, send, streaming])
 
   const onRename = useCallback(
-    async (title: string) => {
-      if (!activeThreadId) return
-      const ok = await renameThread(activeThreadId, title)
+    async (threadId: string | undefined, title: string) => {
+      if (!threadId) return
+      const ok = await renameThread(threadId, title)
       if (!ok) {
         toast.error("Umbenennen fehlgeschlagen (1–80 Zeichen).")
         return
       }
-      setRenaming(false)
+      setRenamingThreadId(null)
       refresh()
     },
-    [activeThreadId, refresh]
+    [refresh]
   )
 
   const onInvite = useCallback(
@@ -176,12 +182,20 @@ export function AgentChat() {
         mine={mine}
         joined={joined}
         invited={invited}
-        role={role}
-        renaming={renaming}
+        role={
+          activeRole === "owner" || activeRole === "member"
+            ? activeRole
+            : undefined
+        }
+        renaming={renamingThreadId !== null}
+        renamingThreadId={renamingThreadId ?? undefined}
         onSelect={setActiveThreadId}
         onCreate={createThreadAndSelect}
         onRename={onRename}
-        onStartRename={() => setRenaming(true)}
+        onStartRename={() => {
+          if (activeThreadId) setRenamingThreadId(activeThreadId)
+        }}
+        onCancelRename={() => setRenamingThreadId(null)}
         onInviteOpen={() => setInviteOpen(true)}
         onDelete={onDelete}
         onLeave={onLeave}
@@ -192,6 +206,7 @@ export function AgentChat() {
         data={detailQuery.data}
         hasError={Boolean(detailQuery.error)}
         activeThreadId={activeThreadId}
+        activeRole={activeRole}
         streaming={streaming}
         streamContent={streams.content}
         streamReasoning={streams.reasoning}
@@ -201,6 +216,9 @@ export function AgentChat() {
         invitedTitle={activeThread?.title}
         onJoin={onJoin}
         onDecline={onDecline}
+        onRetry={() => {
+          void detailQuery.refetch()
+        }}
         pinTarget={streaming ? "stream" : String(messages.length)}
       />
       <ChatInput

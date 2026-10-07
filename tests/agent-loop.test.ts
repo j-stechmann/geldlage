@@ -284,7 +284,7 @@ describe("runAgentTurn", () => {
     ]
     const events = await collect([{ role: "user", content: "loop" }])
 
-    // 3 tool rounds + 1 final tools-free round
+    // AGENT_MAX_TURNS - 1 tool rounds + 1 final tools-free round
     expect(requests).toHaveLength(AGENT_MAX_TURNS)
     const final = requests[requests.length - 1] as {
       tools?: unknown
@@ -293,7 +293,7 @@ describe("runAgentTurn", () => {
     const done = events[events.length - 1]
     expect(done.type).toBe("done")
     if (done.type === "done") expect(done.content).toBe("Schluss.")
-    // rounds 1..3 executed the tool; the final round's calls are not made
+    // rounds 1..(N-1) executed the tool; the final round's calls are not made
     expect(events.filter((e) => e.type === "tool_result")).toHaveLength(
       AGENT_MAX_TURNS - 1
     )

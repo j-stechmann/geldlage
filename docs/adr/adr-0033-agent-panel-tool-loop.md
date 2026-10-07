@@ -100,9 +100,10 @@ The agent chat is built from six pieces:
   `temperature: 0.3` (a chat persona needs some freedom; labeling keeps 0)
   and `max_tokens = reasoning budget + 2048` (same token accounting as the
   label path: the thought shares the completion budget). History is windowed
-  per request (lib/agent/window.ts): last 24 messages anchored at the newest
-  user message (slicing may not start mid-protocol — llama-server rejects
-  orphan tool continuations), fields truncated at 4000 chars with "…", and a
+  per request (lib/agent/window.ts): last 24 messages anchored at the oldest
+  user message inside the cap (slicing may not start mid-protocol —
+  llama-server rejects orphan tool continuations), fields truncated at 4000
+  chars with "…", and a
   chars/4 estimate warns once per turn when the prompt exceeds 90% of
   `LLM_CTX`.
 

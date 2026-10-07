@@ -11,6 +11,7 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { THREAD_TITLE_MAX_INPUT_CHARS } from "@/lib/agent/constants"
 import type { ThreadSummary } from "@/components/agent/types"
 
 /**
@@ -28,10 +29,17 @@ interface ThreadBarProps {
   invited: ThreadSummary[]
   role: "owner" | "member" | undefined
   renaming: boolean
+  /** The stored id being renamed — rename applies to this, not to whichever
+   * thread is active on submit (a select during rename must not retarget). */
+  renamingThreadId: string | undefined
   onSelect: (id: string) => void
   onCreate: () => Promise<string | null>
-  onRename: (title: string) => Promise<void>
+  /** Submits the draft for the thread captured at pencil-click time —
+   * NOT `activeThread`, which may have changed mid-rename. */
+  onRename: (threadId: string | undefined, title: string) => Promise<void>
   onStartRename: () => void
+  /** Leaves rename mode without submitting (blur, Escape, empty draft). */
+  onCancelRename: () => void
   onInviteOpen: () => void
   onDelete: () => Promise<void>
   onLeave: () => Promise<void>
@@ -41,6 +49,11 @@ interface ThreadBarProps {
 
 export function ThreadBar(props: ThreadBarProps) {
   const [draft, setDraft] = useState("")
+
+  const startRename = () => {
+    setDraft(props.activeThread?.title ?? "")
+    props.onStartRename()
+  }
 
   return (
     <div className="flex items-center gap-1 border-b px-2 py-1.5">
@@ -58,16 +71,24 @@ export function ThreadBar(props: ThreadBarProps) {
           className="flex flex-1 items-center gap-1"
           onSubmit={(e) => {
             e.preventDefault()
-            props.onRename(draft)
+            const title = draft.trim()
+            if (!title) {
+              props.onCancelRename()
+              return
+            }
+            void props.onRename(props.renamingThreadId, title)
           }}
         >
           <Input
             autoFocus
             value={draft}
-            maxLength={80}
+            maxLength={THREAD_TITLE_MAX_INPUT_CHARS}
             placeholder="Titel…"
             onChange={(e) => setDraft(e.target.value)}
-            onBlur={() => props.onStartRename()}
+            onBlur={props.onCancelRename}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") props.onCancelRename()
+            }}
             className="h-7"
           />
         </form>
@@ -83,10 +104,7 @@ export function ThreadBar(props: ThreadBarProps) {
             size="icon-sm"
             aria-label="Chat umbenennen"
             title="Umbenennen"
-            onClick={() => {
-              setDraft(props.activeThread?.title ?? "")
-              props.onStartRename()
-            }}
+            onClick={startRename}
           >
             <Pencil className="size-4" />
           </Button>
@@ -203,22 +221,18 @@ function ThreadSelect(props: {
                 actions={(t) => (
                   <>
                     <Button
+                      type="button"
                       variant="ghost"
                       size="xs"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        props.onJoin(t.id)
-                      }}
+                      onClick={() => props.onJoin(t.id)}
                     >
                       Annehmen
                     </Button>
                     <Button
+                      type="button"
                       variant="ghost"
                       size="xs"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        props.onDecline(t.id)
-                      }}
+                      onClick={() => props.onDecline(t.id)}
                     >
                       Ablehnen
                     </Button>
@@ -247,14 +261,22 @@ function ThreadGroup(props: {
         {props.label}
       </p>
       {props.threads.map((t) => (
-        <button
+        // Row is a div, not a button: the optional invite actions render
+        // real <button>s and buttons must not nest (invalid HTML →
+        // hydration warnings). Title button + action buttons as siblings.
+        <div
           key={t.id}
-          className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-left text-sm hover:bg-accent"
-          onClick={() => props.onSelect(t.id)}
+          className="flex w-full items-center justify-between gap-2 rounded-md hover:bg-accent"
         >
-          <span className="min-w-0 truncate">{t.title}</span>
+          <button
+            type="button"
+            className="min-w-0 flex-1 rounded-md px-2 py-1 text-left text-sm"
+            onClick={() => props.onSelect(t.id)}
+          >
+            <span className="block truncate">{t.title}</span>
+          </button>
           {props.actions?.(t)}
-        </button>
+        </div>
       ))}
     </div>
   )

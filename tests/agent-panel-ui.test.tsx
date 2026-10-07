@@ -16,6 +16,7 @@ import {
   sseFrames,
   stubMatchMedia,
   stubLocalStorage,
+  stubResizeObserver,
   stubScrollTo,
 } from "./helpers-dom"
 
@@ -124,6 +125,7 @@ beforeEach(() => {
   stubLocalStorage()
   stubMatchMedia()
   stubScrollTo()
+  stubResizeObserver()
   window.confirm = vi.fn(() => true)
   let release!: () => void
   const gate = new Promise<void>((r) => {
@@ -338,5 +340,109 @@ describe("<AgentChat>", () => {
         screen.getByText("Stell eine Frage zu deinen Finanzdaten…")
       ).toBeInTheDocument()
     )
+  })
+
+  it("does NOT show the join panel for an owner thread on transient detail error", async () => {
+    const state = {
+      messages: [] as Array<Record<string, unknown>>,
+      threads: [
+        {
+          id: "t1",
+          title: "Haushaltsfragen",
+          role: "owner",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    }
+    const { calls } = stubChatFlow(state)
+    // script the detail fetch to fail (network/server hiccup)
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input).split("?")[0]
+        const method = (init?.method ?? "GET").toUpperCase()
+        calls.push({ path, method })
+        if (path === "/api/agent/threads" && method === "GET") {
+          return Response.json({ threads: state.threads })
+        }
+        if (path === "/api/agent/threads/t1/messages") {
+          return new Response(null, { status: 503 })
+        }
+        throw new TypeError(`unscripted ${path} ${method}`)
+      })
+    )
+    renderWithQuery(createElement(AgentChat))
+    await waitFor(() =>
+      expect(screen.getByText("Chats konnten nicht geladen werden."))
+    )
+    // the destructive join panel must not appear for a non-invited role
+    expect(screen.queryByText(/Einladung zu/)).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Ablehnen" })
+    ).not.toBeInTheDocument()
+    // retry refetches the detail query instead
+    await userEvent.click(
+      screen.getByRole("button", { name: "Erneut versuchen" })
+    )
+    expect(
+      calls.filter(
+        (c) => c.path === "/api/agent/threads/t1/messages" && c.method === "GET"
+      ).length
+    ).toBeGreaterThan(1)
+  })
+
+  it("cancels rename on Escape, blur, and empty submit without PATCHing", async () => {
+    const state = {
+      messages: [],
+      threads: [
+        {
+          id: "t1",
+          title: "Haushaltsfragen",
+          role: "owner",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    }
+    const { calls } = stubChatFlow(state)
+    renderWithQuery(createElement(AgentChat))
+    await waitFor(() =>
+      expect(screen.getByText("Haushaltsfragen")).toBeInTheDocument()
+    )
+    const input = screen.getByPlaceholderText("Nachricht…")
+    await userEvent.type(input, "x")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Chat umbenennen" })
+    )
+    const editor = screen.getByPlaceholderText("Titel…")
+    expect(editor).toHaveValue("Haushaltsfragen")
+
+    await userEvent.type(editor, "{Escape}")
+    // editor closed, no PATCH fired
+    expect(screen.queryByPlaceholderText("Titel…")).not.toBeInTheDocument()
+    expect(
+      calls.some(
+        (c) => c.path === "/api/agent/threads/t1" && c.method === "PATCH"
+      )
+    ).toBe(false)
+
+    // reopen and dismiss via blur (no change) — still no PATCH. Focus
+    // leaves via Tab; any outside click (e.g. a thread switch in the
+    // dropdown) is just another blur.
+    await userEvent.click(
+      screen.getByRole("button", { name: "Chat umbenennen" })
+    )
+    await userEvent.tab()
+    expect(screen.queryByPlaceholderText("Titel…")).not.toBeInTheDocument()
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false)
+
+    // empty submit also cancels
+    await userEvent.click(
+      screen.getByRole("button", { name: "Chat umbenennen" })
+    )
+    const editor2 = screen.getByPlaceholderText("Titel…")
+    await userEvent.clear(editor2)
+    await userEvent.type(editor2, "{Enter}")
+    expect(screen.queryByPlaceholderText("Titel…")).not.toBeInTheDocument()
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false)
   })
 })

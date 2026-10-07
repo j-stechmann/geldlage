@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { CHAT_MESSAGE_MAX_CHARS } from "@/lib/agent/constants"
 import { runAgentTurn } from "@/lib/agent/loop"
 import { appendMessage, listMessages } from "@/lib/agent/store"
 import { maybeAutoTitle } from "@/lib/agent/thread-title"
@@ -40,9 +41,12 @@ export async function POST(
     )
   }
   const content = body.content.trim()
-  if (!content || content.length > 8000) {
+  if (!content || content.length > CHAT_MESSAGE_MAX_CHARS) {
     return NextResponse.json(
-      { error: "invalid_content", message: "Nachricht: 1–8000 Zeichen." },
+      {
+        error: "invalid_content",
+        message: `Nachricht: 1–${CHAT_MESSAGE_MAX_CHARS} Zeichen.`,
+      },
       { status: 400 }
     )
   }

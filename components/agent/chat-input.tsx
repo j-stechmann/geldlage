@@ -3,11 +3,13 @@
 import { Square, SendHorizontal } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { CHAT_MESSAGE_MAX_CHARS } from "@/lib/agent/constants"
 
 /**
  * Message composer (ADR-0033): Enter sends (Shift+Enter and IME
  * composition excluded), the send button swaps to stop while a turn
- * streams.
+ * streams. maxLength enforces the route's 1–8000-char contract client-side
+ * (mirrors THREAD_TITLE_MAX_INPUT_CHARS for the rename editor).
  */
 
 interface ChatInputProps {
@@ -33,6 +35,7 @@ export function ChatInput(props: ChatInputProps) {
         value={props.input}
         placeholder="Nachricht…"
         disabled={props.disabled}
+        maxLength={CHAT_MESSAGE_MAX_CHARS}
         onChange={(e) => props.setInput(e.target.value)}
         onKeyDown={(e) => {
           if (

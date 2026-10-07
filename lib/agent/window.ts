@@ -41,10 +41,11 @@ export function windowHistory(
   if (messages.length === 0) return []
   const capped = messages.slice(-AGENT_HISTORY_MAX_MESSAGES)
 
-  // The newest user message is the only required anchor: everything after
-  // it (assistant answer/tool results) is kept verbatim, everything before
-  // it is dropped. Keeps the protocol pairing intact even after heavy
-  // trimming while honoring the 24-message cap.
+  // The first (oldest) user message inside the capped window anchors the
+  // slice: everything from it onward is kept, everything before it is
+  // dropped (the newest message is the current turn and is always inside
+  // the cap). Keeps the protocol pairing intact even after heavy trimming
+  // while honoring the 24-message cap.
   const start = capped.findIndex((m) => m.role === "user")
   if (start === -1) return []
 

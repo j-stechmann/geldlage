@@ -136,8 +136,10 @@ export async function safeBody(res: Response): Promise<string> {
  * (Node ≥17.3 and Bun), and reads of an aborted body reject the same way.
  * isTimeoutError answers for the whole module so all consumers classify
  * identically: the name check covers polyfills that throw a plain Error
- * rather than a DOMException; SseTimeoutError is the SSE stall variant
- * thrown here.
+ * rather than a DOMException. No timeout is raised inside this module —
+ * both chat consumers enforce deadlines via AbortSignal.timeout upstream
+ * (SseTimeoutError exists for a future stall guard, keeping the module's
+ * error taxonomy stable).
  */
 export function isTimeoutError(err: unknown): boolean {
   return (
@@ -146,7 +148,7 @@ export function isTimeoutError(err: unknown): boolean {
   )
 }
 
-/** Thrown when an SSE body stalls or the fetch deadline hits. */
+/** Reserved: SSE stall/deadline errors (same taxonomy as TimeoutError). */
 export class SseTimeoutError extends Error {
   constructor(ms: number) {
     super(`SSE body timed out after ${ms}ms`)
