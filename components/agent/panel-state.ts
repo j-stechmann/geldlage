@@ -79,9 +79,13 @@ export function usePanelState(): PanelState {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
 }
 
-/** SSR snapshot: the panel never starts open (no layout flash). */
+/** SSR snapshot: the panel never starts open (no layout flash). Cached so
+ * useSyncExternalStore gets a stable reference (React warns + can loop
+ * when getServerSnapshot allocates a new object each call). */
+const SERVER_SNAPSHOT: PanelState = { open: false, width: DEFAULT_WIDTH }
+
 function getServerSnapshot(): PanelState {
-  return { open: false, width: DEFAULT_WIDTH }
+  return SERVER_SNAPSHOT
 }
 
 export { MIN_WIDTH, MAX_WIDTH, clampWidth }
