@@ -5,7 +5,6 @@ import {
   chatThreads,
   type ChatThread,
 } from "@/lib/db/schema"
-import { DEFAULT_THREAD_TITLE } from "@/lib/agent/constants"
 import { rankOf } from "@/lib/agent/store/thread-access"
 
 /**

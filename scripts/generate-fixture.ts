@@ -87,7 +87,6 @@ void rand
 for (const month of months) {
   const y = Number.parseInt(month.slice(0, 4))
   const m = Number.parseInt(month.slice(5, 7))
-  const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate()
   const day = (d: number) => `${month}-${String(d).padStart(2, "0")}`
 
   // salary on the 1st (exact)

@@ -68,10 +68,6 @@ function cleanCell(v: string | undefined): string {
   return normalizeWhitespace(v ?? "")
 }
 
-function cleanCellRaw(v: string | undefined): string {
-  return (v ?? "").normalize("NFC").trim()
-}
-
 /**
  * Extract account info from the preamble (before the header row).
  * Row 1: "Girokonto;DE02120300000000202051;..."
@@ -170,7 +166,6 @@ export function parseDkbCsv(content: string): ParsedCsv {
     const raw = rows[i]
     // skip rows where every cell is empty (DKB pads with ;;;;)
     if (raw.every((c) => !c || !c.trim())) continue
-    const lineNo = i + 1
 
     const get = (name: string) => {
       const idx = col.get(name)!
