@@ -230,14 +230,28 @@ async function runImportJob(
       pruneOrphanCategories()
     }
   } catch (err) {
-    db.update(importBatches)
-      .set({
-        status: "failed",
-        error: (err as Error).message,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(importBatches.id, batchId))
-      .run()
+    // The batch row itself may not exist (e.g. a dangling session uid failing
+    // the import_batches→users FK): the UPDATE below matches 0 rows, so
+    // without this log the job's death is invisible on both sides — the
+    // upload got its 202 and the 1 Hz poll just keeps 404ing. The catch
+    // must also stay inside the try's scope above any statement that
+    // assumes the DB row was written.
+    console.error(`[import] job failed batch=${batchId}:`, err)
+    try {
+      db.update(importBatches)
+        .set({
+          status: "failed",
+          error: (err as Error).message,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(importBatches.id, batchId))
+        .run()
+    } catch (markErr) {
+      console.error(
+        `[import] could not persist failed state batch=${batchId}:`,
+        markErr
+      )
+    }
   } finally {
     try {
       fs.rmSync(tmpDir, { recursive: true, force: true })

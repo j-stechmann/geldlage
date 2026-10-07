@@ -157,6 +157,34 @@ describe("startImport job-state handshake", () => {
     )
   })
 
+  it("logs and keeps the failed-batch invariant when the job dies before the batch row exists", async () => {
+    // Regression: a session uid with no users row (DB wiped by the
+    // multi-user fresh-start migration while the stateless cookie stayed
+    // valid) made the very first batch INSERT die on the users FK. The
+    // catch's UPDATE then matched 0 rows — silently. The job must at least
+    // log loudly (the route-level user check prevents this entirely).
+    vi.stubGlobal(
+      "fetch",
+      stubFetch(() => new Response("{}", { status: 200 }))
+    )
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+    // a dangling uid: no users row with this id (setupTestDb created one;
+    // children go first — the account row holds the FK to users)
+    const { users, accounts } = await import("@/lib/db/schema")
+    db.delete(accounts).where(eq(accounts.userId, userId)).run()
+    db.delete(users).where(eq(users.id, userId)).run()
+
+    const { batchId } = startImport("a.csv", CSV_OK, userId)
+    await flush()
+
+    expect(getBatch(batchId)).toBeUndefined() // row never written
+    expect(isImportRunning()).toBe(false)
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringContaining(batchId),
+      expect.anything()
+    )
+  })
+
   it("completes an all-Nicht-gebucht batch immediately", async () => {
     vi.stubGlobal(
       "fetch",
