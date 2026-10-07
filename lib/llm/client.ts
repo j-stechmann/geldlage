@@ -1,5 +1,5 @@
 import { getConfig } from "@/lib/config"
-import { collectSse, isTimeoutError } from "@/lib/llm/sse"
+import { collectSse, isTimeoutError, safeBody } from "@/lib/llm/sse"
 import {
   neutralizeMarkers,
   responseSchema,
@@ -306,14 +306,6 @@ function sleep(ms: number): Promise<void> {
 function backoffMs(attempt: number): number {
   const base = 200 * 4 ** (attempt - 1)
   return base + Math.random() * (base / 4)
-}
-
-async function safeBody(res: Response): Promise<string> {
-  try {
-    return await res.text()
-  } catch {
-    return ""
-  }
 }
 
 /**

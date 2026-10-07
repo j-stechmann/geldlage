@@ -1,7 +1,8 @@
 import { getConfig } from "@/lib/config"
 import { streamAgentChat } from "@/lib/agent/chat-client"
 import { agentSystemPrompt } from "@/lib/agent/system-prompt"
-import { agentTools, toolByName } from "@/lib/agent/tools"
+import { agentTools, toolsForRequest } from "@/lib/agent/tool-registry"
+import { executeToolCall } from "@/lib/agent/tool-executor"
 import {
   AGENT_MAX_TURNS,
   estimatePromptChars,
@@ -19,7 +20,9 @@ import type {
  * Persistence-free by design — it only yields AgentLoopEvents; the route
  * streams them to the client and persists the final assistant message once
  * the done event arrives (which is why done carries content+reasoning but
- * a null messageId).
+ * a null messageId). A pure turn state machine: registry access is read-
+ * only (wire tool list + system prompt names), execution lives in
+ * tool-executor.ts.
  */
 
 /** Rough chars→tokens divisor, same estimate convention as lib/llm. */
@@ -46,6 +49,7 @@ export async function* runAgentTurn(params: {
   signal?: AbortSignal
 }): AsyncGenerator<AgentLoopEvent> {
   const cfg = getConfig()
+  const wireTools = toolsForRequest()
   const system: AgentPromptMessage = {
     role: "system",
     content: agentSystemPrompt(
@@ -89,7 +93,7 @@ export async function* runAgentTurn(params: {
 
     for await (const ev of streamAgentChat(msgs, {
       signal: params.signal,
-      disableTools: noTools,
+      tools: noTools ? [] : wireTools,
     })) {
       if (ev.type === "reasoning") {
         reasoning = (reasoning ?? "") + ev.text
@@ -143,37 +147,5 @@ export async function* runAgentTurn(params: {
     }
     yield { type: "done", messageId: null, content, reasoning }
     return
-  }
-}
-
-/**
- * Executes one tool call with full error absorption: parse errors, unknown
- * tools and thrown tool errors all become JSON error objects — the loop
- * never throws on tool misbehavior (stream errors DO propagate, those are
- * infrastructure, not model mistakes).
- */
-async function executeToolCall(
-  name: string,
-  rawArgs: string,
-  ctx: { uid: number }
-): Promise<string> {
-  const tool = toolByName(name)
-  if (!tool) {
-    return JSON.stringify({ error: `unknown tool: ${name}` })
-  }
-  let args: unknown
-  try {
-    args = JSON.parse(rawArgs || "{}")
-  } catch (err) {
-    return JSON.stringify({
-      error: err instanceof Error ? err.message : String(err),
-    })
-  }
-  try {
-    return JSON.stringify((await tool.execute(args, ctx)) ?? {})
-  } catch (err) {
-    return JSON.stringify({
-      error: err instanceof Error ? err.message : String(err),
-    })
   }
 }

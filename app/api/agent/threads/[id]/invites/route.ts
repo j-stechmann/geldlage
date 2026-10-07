@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { inviteMembers, listMembers, roleOf } from "@/lib/agent/store"
-import {
-  assertSameOrigin,
-  requireSession,
-  unauthorized,
-} from "@/lib/auth/guard"
+import { getThread, inviteMembers, listMembers } from "@/lib/agent/store"
+import { requireThreadAccess } from "@/lib/agent/route-guard"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -18,27 +14,23 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await requireSession(request)
-  if (!session) return unauthorized()
   const { id } = await params
-  if (roleOf(id, session.uid) !== "owner") {
-    return NextResponse.json({ error: "not_found" }, { status: 404 })
-  }
-  return NextResponse.json({ members: listMembers(id) })
+  const gate = await requireThreadAccess(request, id, ["owner"], {
+    csrf: false,
+  })
+  if (!gate.ok) return gate.response
+  // roleOf=owner implies the thread row exists; its userId is the owner.
+  const thread = getThread(id)!
+  return NextResponse.json({ members: listMembers(id, thread.userId) })
 }
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await requireSession(request)
-  if (!session) return unauthorized()
-  const csrf = assertSameOrigin(request)
-  if (csrf) return csrf
   const { id } = await params
-  if (roleOf(id, session.uid) !== "owner") {
-    return NextResponse.json({ error: "not_found" }, { status: 404 })
-  }
+  const gate = await requireThreadAccess(request, id, ["owner"])
+  if (!gate.ok) return gate.response
 
   const body = (await request.json().catch(() => null)) as {
     userIds?: unknown
@@ -62,9 +54,11 @@ export async function POST(
   // the owner id; the return count = rows actually added. Foreign-key
   // violations (a stale dialog submitting a since-deleted user id) are
   // caught here — onConflictDoNothing does NOT suppress FK failures — and
-  // surface as 400 unknown_user instead of an unhandled 500.
+  // surface as 400 unknown_user instead of an unhandled 500. roleOf=owner
+  // implies the thread row exists, so its userId is readable non-null.
   try {
-    const invited = inviteMembers(id, userIds)
+    const ownerId = getThread(id)!.userId
+    const invited = inviteMembers(id, userIds, ownerId)
     return NextResponse.json({ invited })
   } catch (err) {
     if (isForeignKeyError(err)) {

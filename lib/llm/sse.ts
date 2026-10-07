@@ -118,14 +118,30 @@ export async function collectSse(res: Response): Promise<string[]> {
 }
 
 /**
+ * Best-effort error body reader for HTTP error responses: the body is
+ * diagnostics, never control flow — a read failure must not mask the
+ * status code with a fetch exception. Shared by both chat consumers
+ * (LlmHttpError construction).
+ */
+export async function safeBody(res: Response): Promise<string> {
+  try {
+    return await res.text()
+  } catch {
+    return ""
+  }
+}
+
+/**
  * AbortSignal.timeout() rejects with a DOMException named "TimeoutError"
  * (Node ≥17.3 and Bun), and reads of an aborted body reject the same way.
- * isTimeoutError answers for the whole module so both consumers classify
- * identically.
+ * isTimeoutError answers for the whole module so all consumers classify
+ * identically: the name check covers polyfills that throw a plain Error
+ * rather than a DOMException; SseTimeoutError is the SSE stall variant
+ * thrown here.
  */
 export function isTimeoutError(err: unknown): boolean {
   return (
-    (err instanceof DOMException && err.name === "TimeoutError") ||
+    (err instanceof Error && err.name === "TimeoutError") ||
     err instanceof SseTimeoutError
   )
 }

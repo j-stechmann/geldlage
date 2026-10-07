@@ -7,6 +7,7 @@ import * as schema from "./schema"
 import { users as usersTable } from "./schema"
 import { getConfig } from "@/lib/config"
 import { pickCategoryColor } from "@/lib/category-colors"
+import { DEFAULT_THREAD_TITLE } from "@/lib/agent/constants"
 
 export type Db = ReturnType<typeof createDb>
 /** Transaction callback parameter type (for helpers receiving `tx`). */
@@ -252,7 +253,7 @@ export function createSchemaSqlite(db: Db) {
     CREATE TABLE IF NOT EXISTS chat_threads (
       id TEXT PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id),
-      title TEXT NOT NULL DEFAULT 'Neuer Chat',
+      title TEXT NOT NULL DEFAULT '${DEFAULT_THREAD_TITLE}',
       seq INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -643,7 +644,7 @@ export function migrateSchema(db: Db) {
     CREATE TABLE IF NOT EXISTS chat_threads (
       id TEXT PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id),
-      title TEXT NOT NULL DEFAULT 'Neuer Chat',
+      title TEXT NOT NULL DEFAULT '${DEFAULT_THREAD_TITLE}',
       seq INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL

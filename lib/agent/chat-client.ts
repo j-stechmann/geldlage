@@ -1,7 +1,12 @@
 import { getConfig } from "@/lib/config"
 import { LlmHttpError } from "@/lib/llm/client"
-import { sseGenerator } from "@/lib/llm/sse"
-import { toolsForRequest } from "@/lib/agent/tools"
+import { safeBody, sseGenerator } from "@/lib/llm/sse"
+import {
+  ToolCallAccumulator,
+  foldToolCalls,
+  type ChatStreamEvent,
+  type WireChunk,
+} from "@/lib/agent/tool-call-accumulator"
 import type { AgentPromptMessage } from "@/lib/agent/types"
 
 /**
@@ -12,16 +17,29 @@ import type { AgentPromptMessage } from "@/lib/agent/types"
  * lib/llm/sse.ts frame parsing verbatim with the label path and reuses its
  * error conventions (LlmHttpError, TimeoutError propagation), so the route
  * can classify failures identically for both consumers.
+ *
+ * Dependency inversion: the wire `tools` array is injected via options —
+ * the client knows nothing about the tool registry (lib/agent/
+ * tool-registry.ts), so it can serve any completion (agent rounds, the
+ * tools-free final round, one-shot title generation).
  */
 
-/** One streamed (or folded) chunk of an agent chat completion. */
-export type ChatStreamEvent =
-  | { type: "reasoning"; text: string }
-  | { type: "content"; text: string }
-  | {
-      type: "tool_calls"
-      calls: Array<{ id: string; name: string; args: string }>
-    }
+/** Per-round wire tool shape: what toolsForRequest() produces. */
+export type WireTool = {
+  type: "function"
+  function: {
+    name: string
+    description: string
+    parameters: Record<string, unknown>
+  }
+}
+
+export interface StreamAgentChatOptions {
+  signal?: AbortSignal
+  /** Wire tools to advertise; empty/omitted ⇒ the field is left off (some
+   * llama-server builds reject `tools: []`). */
+  tools?: WireTool[]
+}
 
 /**
  * Non-streaming message fallback shape (a backend that ignored `stream` or
@@ -31,39 +49,18 @@ export type ChatStreamEvent =
 interface NonStreamingMessage {
   content?: unknown
   reasoning_content?: unknown
-  tool_calls?: Array<{
-    id?: unknown
-    type?: unknown
-    function?: { name?: unknown; arguments?: unknown }
-  }>
-}
-
-interface WireDeltaToolCall {
-  index?: unknown
-  id?: unknown
-  function?: { name?: unknown; arguments?: unknown }
-}
-
-interface WireChunk {
-  choices?: Array<{
-    delta?: {
-      content?: unknown
-      reasoning_content?: unknown
-      tool_calls?: WireDeltaToolCall[]
-    }
-  }>
+  tool_calls?: unknown
 }
 
 /**
  * One request → event stream. Tool-call fragments arrive spread over many
- * frames (`delta.tool_calls[i].function.arguments` pieces concatenate by
- * `index`); they are buffered here and yielded once after the stream ends,
- * because a call's args are only valid when complete — the loop must never
- * JSON.parse a half-arrived argument string.
+ * frames; they are buffered in the accumulator and yielded once after the
+ * stream ends, because a call's args are only valid when complete — the
+ * loop must never JSON.parse a half-arrived argument string.
  */
 export async function* streamAgentChat(
   messages: AgentPromptMessage[],
-  options?: { signal?: AbortSignal; disableTools?: boolean }
+  options?: StreamAgentChatOptions
 ): AsyncGenerator<ChatStreamEvent> {
   const cfg = getConfig()
   // Caller cancellation + per-request deadline combined: either abort tears
@@ -77,8 +74,8 @@ export async function* streamAgentChat(
   const root = cfg.LLM_BASE_URL.replace(/\/+$/, "")
   // Request body: reasoning budget reserves thinking tokens inside
   // max_tokens (same accounting as the label path); only sent when
-  // reasoning is on. Tools are attached whenever the registry is non-empty
-  // — `tool_choice: "auto"` lets the model answer directly when no call is
+  // reasoning is on. Tools are attached only when advertised —
+  // `tool_choice: "auto"` lets the model answer directly when no call is
   // needed.
   const body: Record<string, unknown> = {
     messages: messages.map((m) => toWireMessage(m)),
@@ -89,7 +86,7 @@ export async function* streamAgentChat(
   if (cfg.LLM_REASONING) {
     body.reasoning_budget_tokens = cfg.LLM_REASONING_BUDGET
   }
-  const wireTools = options?.disableTools ? [] : toolsForRequest()
+  const wireTools = options?.tools ?? []
   if (wireTools.length > 0) {
     body.tools = wireTools
     body.tool_choice = "auto"
@@ -114,12 +111,7 @@ export async function* streamAgentChat(
     return
   }
 
-  // Accumulator for streamed tool calls keyed by fragment index: first id
-  // and first non-empty name win, argument strings concatenate. A plain
-  // array with index holes survives `array[i] = …` writes even when frames
-  // skip around (llama-server emits dense indices, but the protocol only
-  // promises `index`).
-  const calls: Array<{ id: string; name: string; args: string } | null> = []
+  const calls = new ToolCallAccumulator()
 
   for await (const frame of sseGenerator(res.body)) {
     let parsed: WireChunk
@@ -144,40 +136,11 @@ export async function* streamAgentChat(
       yield { type: "content", text: delta.content }
     }
     if (Array.isArray(delta.tool_calls)) {
-      for (const fragment of delta.tool_calls) {
-        if (!fragment || typeof fragment !== "object") continue
-        const idx =
-          typeof fragment.index === "number" && Number.isInteger(fragment.index)
-            ? fragment.index
-            : calls.length
-        let call = calls[idx]
-        if (!call) {
-          call = { id: "", name: "", args: "" }
-          calls[idx] = call
-        }
-        if (typeof fragment.id === "string" && fragment.id && !call.id) {
-          call.id = fragment.id
-        }
-        if (fragment.function && typeof fragment.function === "object") {
-          if (
-            typeof fragment.function.name === "string" &&
-            fragment.function.name &&
-            !call.name
-          ) {
-            call.name = fragment.function.name
-          }
-          if (typeof fragment.function.arguments === "string") {
-            call.args += fragment.function.arguments
-          }
-        }
-      }
+      calls.addFragments(delta.tool_calls)
     }
   }
 
-  const complete = calls.filter(
-    (c): c is { id: string; name: string; args: string } =>
-      c !== null && c.name !== ""
-  )
+  const complete = calls.complete()
   if (complete.length > 0) {
     yield { type: "tool_calls", calls: complete }
   }
@@ -201,36 +164,10 @@ async function* nonStreamingEvents(
   if (typeof message.content === "string" && message.content) {
     yield { type: "content", text: message.content }
   }
-  const folded = foldToolCalls(message.tool_calls ?? [])
+  const folded = foldToolCalls(message.tool_calls)
   if (folded.length > 0) {
     yield { type: "tool_calls", calls: folded }
   }
-}
-
-function foldToolCalls(
-  raw: Array<{
-    id?: unknown
-    type?: unknown
-    function?: { name?: unknown; arguments?: unknown }
-  }>
-): Array<{ id: string; name: string; args: string }> {
-  const out: Array<{ id: string; name: string; args: string }> = []
-  for (const call of raw) {
-    if (!call || typeof call !== "object") continue
-    const name =
-      typeof call.function?.name === "string" ? call.function.name : ""
-    if (!name) continue
-    out.push({
-      id:
-        typeof call.id === "string" && call.id ? call.id : `call_${out.length}`,
-      name,
-      args:
-        typeof call.function?.arguments === "string"
-          ? call.function.arguments
-          : "{}",
-    })
-  }
-  return out
 }
 
 /** Loop input → wire message: protocol fields only (reasoning never leaves). */
@@ -242,10 +179,4 @@ function toWireMessage(m: AgentPromptMessage): Record<string, unknown> {
   return wire
 }
 
-async function safeBody(res: Response): Promise<string> {
-  try {
-    return await res.text()
-  } catch {
-    return ""
-  }
-}
+export type { WireChunk, ChatStreamEvent }

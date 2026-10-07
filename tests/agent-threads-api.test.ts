@@ -24,7 +24,6 @@ import {
   listMembers,
   renameThread,
   roleOf,
-  setTitleIfDefault,
 } from "@/lib/agent/store"
 import { setupTestDb, seedUser, authedRequest } from "./helpers"
 
@@ -421,30 +420,27 @@ describe("DELETE /api/agent/threads/[id] (leave/decline/delete)", () => {
   })
 })
 
-describe("title auto-fill", () => {
-  it("derives the title once, then never overwrites a chosen one", () => {
-    setTitleIfDefault(
-      threadId,
-      "Wie viel habe ich diesen Monat für Shopping ausgegeben?"
-    )
-    expect(getThread(threadId)?.title).toBe(
-      "Wie viel habe ich diesen…" // 24 chars + …
-    )
-    appendMessage(threadId, { userId: u1, role: "user", content: "nochwas" })
-    expect(getThread(threadId)?.title).not.toBe("nochwas")
-  })
-
-  it("renamed threads never get re-titled by later appends", () => {
-    // user renames via PATCH first, then sends messages
+describe("title guard", () => {
+  it("renamed threads keep their title through later messages", () => {
+    // user renames via PATCH first, then sends messages — the auto-title
+    // paths (AI + fallback) in lib/agent/thread-title.ts only ever write
+    // over the default title ("Neuer Chat"), enforced by their own guard;
+    // here the store-side invariant: plain appends never touch the title.
     renameThread(threadId, "Budget")
     appendMessage(threadId, {
       userId: u1,
       role: "user",
       content: "erste Frage nach dem Umbenennen",
     })
-    setTitleIfDefault(threadId, "erste Frage nach dem Umbenennen")
-    // a user-chosen title must never be overwritten by the auto-fill
     expect(getThread(threadId)?.title).toBe("Budget")
+  })
+
+  it("a fresh thread keeps the default title until a turn completes", () => {
+    // titling (AI or fallback) runs post-turn via maybeAutoTitle — covered
+    // in tests/agent-thread-title.test.ts
+    expect(getThread(threadId)?.title).toBe("Neuer Chat")
+    appendMessage(threadId, { userId: u1, role: "user", content: "nochwas" })
+    expect(getThread(threadId)?.title).toBe("Neuer Chat")
   })
 })
 

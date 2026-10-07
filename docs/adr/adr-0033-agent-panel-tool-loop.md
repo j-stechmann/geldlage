@@ -41,19 +41,24 @@ The agent chat is built from six pieces:
   trailing blank line still valid — are unchanged and covered by the
   existing llm-client tests.
 
-- **Native tools API, registry-driven** (lib/agent/tools.ts): no
+- **Native tools API, registry-driven** (lib/agent/tool-registry.ts, lib/agent/tools/*): no
   prompt-side JSON protocol and no grammar — tool calls are requested with
   `tools` + `tool_choice: "auto"` and executed from the model's
-  `tool_calls`. Tools live in one ordered registry array; adding a tool is
-  one entry (name, description, JSON-schema parameters, `execute)`) — the
-  wire `tools` array (`toolsForRequest()`) and the system prompt's tool list
-  derive from it. The registry holds exactly one tool, `get_category_totals`
+  `tool_calls`. Tools live in one ordered registry array
+  (`tool-registry.ts`); adding a tool is one entry (name, description,
+  JSON-schema parameters, `execute`) in its own module under
+  lib/agent/tools/ — the wire `tools` array (`toolsForRequest()`) and the
+  system prompt's tool list derive from it. The registry holds exactly one
+  tool, `get_category_totals`
   (period `this_month | last_month | last_90_days`, ISO-date string
   comparison against `booking_date` — exact calendar math, no timezone
   drift). **All tools are read-only** and every tool executes with the
   **speaker's uid** (`ctx.uid`) — in a shared thread the answers reflect
   whoever asked, never another member's data; the system prompt states this
-  explicitly so participants are not misled.
+  explicitly so participants are not misled. Execution with full error
+  absorption (unknown tool, unparseable args, thrown errors → JSON
+  `{"error": …}` results) lives in lib/agent/tool-executor.ts, separate
+  from the loop's round state machine.
 
 - **Round semantics** (lib/agent/loop.ts, AGENT_MAX_TURNS = 5): the loop
   drives `stream_agent_chat` until the model answers without tool calls, with
@@ -68,17 +73,23 @@ The agent chat is built from six pieces:
   `{"error": …}` tool results, so the model sees the problem and can
   self-correct; only stream/infrastructure errors propagate.
 
-- **SSE to the browser, persistence-free loop** (app/api/agent/…/chat): the
-  loop yields events and knows nothing about the database; the **route**
-  streams them as named SSE events — `delta` (content), `reasoning`,
-  `tool_call`, `tool_result`, `done`, `error` — and does all persistence:
-  the user message immediately, one tool row per `tool_result` (with its
-  preceding `tool_call` args), and the final assistant row (content +
-  reasoning) at `done`. Persisting per tool_result keeps `threadSeq` order
-  identical to the streamed event order. Client disconnects (`request.signal`)
-  are forwarded into the loop so the in-flight LLM fetch aborts instead of
-  burning tokens for nobody; infrastructure failures stream one `error`
-  frame then close.
+- **SSE to the browser, persistence-free loop** (app/api/agent/…/chat,
+  lib/agent/sse-writer.ts, lib/agent/turn-persister.ts): the loop yields
+  events and knows nothing about the database; the **route** streams them
+  as named SSE events — `delta` (content), `reasoning`, `tool_call`,
+  `tool_result`, `done`, `error` — and does all persistence: the user
+  message immediately, one tool row per `tool_result` (with its preceding
+  `tool_call` args), and the final assistant row (content + reasoning) at
+  `done`. The route is protocol wiring only: frame encoding, headers and
+  the error→frame mapping live in sse-writer.ts; the write-side state
+  machine (tool_call→tool_result args pairing, assistant row, thread
+  touch) lives in turn-persister.ts. All agent routes gate through one
+  shared guard (lib/agent/route-guard.ts: session → CSRF → roleOf → 404)
+  instead of seven copies of the same boilerplate. Persisting per
+  tool_result keeps `threadSeq` order identical to the streamed event
+  order. Client disconnects (`request.signal`) are forwarded into the loop
+  so the in-flight LLM fetch aborts instead of burning tokens for nobody;
+  infrastructure failures stream one `error` frame then close.
 
 - **Reasoning is display metadata** (lib/agent/chat-client.ts): llama-server's
   `reasoning_content` streams through as its own event, is shown in the panel
@@ -95,21 +106,34 @@ The agent chat is built from six pieces:
   chars/4 estimate warns once per turn when the prompt exceeds 90% of
   `LLM_CTX`.
 
-- **Threads with invite-based sharing** (lib/agent/store.ts,
+- **Threads with invite-based sharing** (lib/agent/store.ts + lib/agent/store/*,
   chat_tables): `chat_threads` (owner = creator), `chat_thread_members`
   (roles via `roleOf()`: `owner | member | invited`, state `invited →
 joined`) and `chat_messages` (roles `user | assistant | tool`, CHECK
-  enforced in the hand-written DDL). Invites are idempotent (conflict-
+  enforced in the hand-written DDL). store.ts is a barrel over the split
+  concern modules (store/threads.ts, store/members.ts, store/messages.ts,
+  store/thread-access.ts). Invites are idempotent (conflict-
   nothing on the `(thread_id, user_id)` primary key, owner un-invitable);
   **`GET /api/users`** serves the invite dialog the full user directory — a
   deliberate PII exposure on a local, single-instance app where every
   provisioned identity sits inside the same trust boundary (the OIDC
   provider already gates who gets a workspace at all); per-row redaction
-  would buy nothing. Titles auto-fill from the first user turn (24 chars)
-  only while the thread still wears the default "Neuer Chat". Messages carry
+  would buy nothing. Titles auto-fill after the first turn (AI titling,
+  below). Messages carry
   a per-thread `seq` counter (advanced in the same transaction as the
   insert) for stable ordering; thread deletion cascades members and messages
   (`ON DELETE CASCADE`).
+
+- **AI thread titling** (lib/agent/thread-title.ts): while a thread wears
+  the default title ("Neuer Chat", defined once in
+  lib/agent/constants.ts — schema drizzle default + hand-written DDL + the
+  create route all read it), the chat route fires a fire-and-forget
+  one-shot completion after the turn's `done` (tools-free; the single
+  llama-server slot is free then). The sanitized answer (quotes stripped,
+  80-char cap, placeholder answers rejected) replaces the default; an
+  unusable answer or LLM failure falls back to the first 24 chars of the
+  first user message. The default-title guard runs at call time AND on
+  write, so a user rename during the turn can never be clobbered.
 
 **Access rule matrix** — every agent route gates on `roleOf` first:
 
@@ -129,10 +153,22 @@ than role hints.
 **UI composition** (components/agent/*): the panel is a **docked,
 pointer-resizable right column** on md+ (280–720 px, open + width persisted
 to `localStorage`) and a full-screen overlay below md. Its open/width state
-is a module-level `useSyncExternalStore` store (panel-state.ts) shared by the
-header toggle and the dock without a provider. `app/layout.tsx` composes it
+is a module-level `useSyncExternalStore` store (panel-state.ts) shared by
+the header toggle and the dock without a provider. `app/layout.tsx` composes it
 into the main `flex` row — `AppNav`, pages and their layouts remain
 untouched. Sidebar groups: Meine Chats / Geteilte Chats / Einladungen.
+The 1,000+-line chat monolith is split by responsibility: `agent-api.ts`
+(typed fetchers + React Query keys + a typed `ApiError` — the invited-
+preview 404 surfaces as a query error, never as fake success data),
+`sse-events.ts` (client dispatch of the named frames over the SHARED
+`lib/llm/sse.ts` generator — one SSE parser server- and client-side),
+`use-agent-threads.ts` (queries, active-thread derivation with
+localStorage persistence), `use-agent-turn.ts` (the streaming turn state
+machine: optimistic user message, abort, post-done refetch), and one file
+per UI part (thread-bar, message-list, assistant-bubble, tool-chip,
+chat-input, invite-dialog) — `agent-chat.tsx` is a ~200-line orchestrator.
+DOM tests (jsdom + testing-library) cover the lifecycle end to end
+(tests/agent-panel-ui.test.tsx).
 
 **Concurrency**: llama-server keeps `-np 1` — agent turns share the single
 slot with label batches, and either queues behind the other. Acceptable for a

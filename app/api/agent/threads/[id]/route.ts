@@ -4,13 +4,8 @@ import {
   getThread,
   removeMember,
   renameThread,
-  roleOf,
 } from "@/lib/agent/store"
-import {
-  assertSameOrigin,
-  requireSession,
-  unauthorized,
-} from "@/lib/auth/guard"
+import { requireThreadAccess } from "@/lib/agent/route-guard"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -25,11 +20,9 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await requireSession(request)
-  if (!session) return unauthorized()
-  const csrf = assertSameOrigin(request)
-  if (csrf) return csrf
   const { id } = await params
+  const gate = await requireThreadAccess(request, id, ["owner"])
+  if (!gate.ok) return gate.response
 
   const body = (await request.json().catch(() => null)) as {
     title?: unknown
@@ -48,15 +41,6 @@ export async function PATCH(
     )
   }
 
-  // Owner-only gate AFTER validation: non-owners can't rename, and they
-  // can't learn whether the thread exists.
-  if (roleOf(id, session.uid) !== "owner") {
-    return NextResponse.json({ error: "not_found" }, { status: 404 })
-  }
-  if (!getThread(id)) {
-    return NextResponse.json({ error: "not_found" }, { status: 404 })
-  }
-
   renameThread(id, title)
   return NextResponse.json({ thread: getThread(id) })
 }
@@ -70,20 +54,18 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await requireSession(request)
-  if (!session) return unauthorized()
-  const csrf = assertSameOrigin(request)
-  if (csrf) return csrf
   const { id } = await params
-
-  const role = roleOf(id, session.uid)
-  if (!role) {
-    return NextResponse.json({ error: "not_found" }, { status: 404 })
-  }
+  const gate = await requireThreadAccess(request, id, [
+    "owner",
+    "member",
+    "invited",
+  ])
+  if (!gate.ok) return gate.response
+  const role = gate.role!
   if (role === "owner") {
     deleteThread(id)
     return NextResponse.json({ deleted: true })
   }
-  removeMember(id, session.uid)
+  removeMember(id, gate.session.uid)
   return NextResponse.json({ left: true })
 }

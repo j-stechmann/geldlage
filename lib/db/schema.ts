@@ -9,6 +9,7 @@ import {
 } from "drizzle-orm/sqlite-core"
 import { sql } from "drizzle-orm"
 import { randomUUID } from "node:crypto"
+import { DEFAULT_THREAD_TITLE } from "@/lib/agent/constants"
 
 export const users = sqliteTable(
   "users",
@@ -207,7 +208,7 @@ export const chatThreads = sqliteTable(
     userId: integer("user_id")
       .notNull()
       .references(() => users.id),
-    title: text("title").notNull().default("Neuer Chat"),
+    title: text("title").notNull().default(DEFAULT_THREAD_TITLE),
     /** Monotonic per-thread message counter for stable message ordering. */
     seq: integer("seq").notNull().default(0),
     createdAt: text("created_at")

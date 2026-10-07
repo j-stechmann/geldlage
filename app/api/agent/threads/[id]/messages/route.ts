@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { findUserById } from "@/lib/auth/users"
-import { getThread, listMembers, listMessages, roleOf } from "@/lib/agent/store"
-import { requireSession, unauthorized } from "@/lib/auth/guard"
+import { getThread, listMembers, listMessages } from "@/lib/agent/store"
+import { requireThreadAccess } from "@/lib/agent/route-guard"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -17,14 +17,12 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await requireSession(request)
-  if (!session) return unauthorized()
   const { id } = await params
+  const gate = await requireThreadAccess(request, id, ["owner", "member"], {
+    csrf: false,
+  })
+  if (!gate.ok) return gate.response
 
-  const role = roleOf(id, session.uid)
-  if (role !== "owner" && role !== "member") {
-    return NextResponse.json({ error: "not_found" }, { status: 404 })
-  }
   const thread = getThread(id)
   if (!thread) {
     return NextResponse.json({ error: "not_found" }, { status: 404 })
@@ -40,8 +38,8 @@ export async function GET(
       createdAt: thread.createdAt,
       updatedAt: thread.updatedAt,
     },
-    role,
-    members: listMembers(id),
+    role: gate.role,
+    members: listMembers(id, thread.userId),
     messages: listMessages(id),
   })
 }

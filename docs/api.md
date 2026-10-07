@@ -1,6 +1,6 @@
 # API reference
 
-_Last reviewed against v2.0 (+ agent chat, ADR-0033). Descriptive reference — verify against `app/api/`. All 25 route files export `runtime = "nodejs"` and `dynamic = "force-dynamic"` (no request caching, ever), and use the Next 16 `params: Promise<…>` convention._
+_Last reviewed against v2.1 (+ agent AI titling refactor, ADR-0033). Descriptive reference — verify against `app/api/`. All 25 route files export `runtime = "nodejs"` and `dynamic = "force-dynamic"` (no request caching, ever), and use the Next 16 `params: Promise<…>` convention._
 
 Validation is **hand-rolled per handler** with typed narrowing and typed
 error responses; zod is reserved for environment config
@@ -74,7 +74,7 @@ unknown threads always answer **404, never 403** (see Conventions).
 | `GET /api/users`                                  | `{users: [{id, name, email}]}`         | 401                                                | Full user directory for the invite dialog (requester filtered out server-side); deliberate name/email exposure on a local instance |
 | `GET /api/agent/threads`                          | `{threads: [...]}` (each with `role`)  | 401                                                | Sidebar list: owned + shared threads, newest activity first, caller's role attached                                                |
 | `POST /api/agent/threads`                         | **201** `{thread}`                     | 403 CSRF                                           | Create thread (optional `title`, trimmed ≤ 80 chars, default `"Neuer Chat"`)                                                       |
-| `PATCH /api/agent/threads/[id]`                   | `{thread}`                             | 400 `invalid_title`, 404                           | Rename; **owner-only** — members/outsiders get 404 (no existence leak)                                                             |
+| `PATCH /api/agent/threads/[id]`                   | `{thread}`                             | 400 `invalid_title`, 404                           | Rename (1–80 chars after trim); **owner-only** — members/outsiders get 404 (no existence leak)                                     |
 | `DELETE /api/agent/threads/[id]`                  | `{deleted: true}` / `{left: true}`     | 404                                                | Role-derived teardown: owner deletes (members + messages cascade), joined member leaves, invited user declines                     |
 | `GET /api/agent/threads/[id]/invites`             | `{members: [...]}` (owner synthesized) | 404                                                | Member roster; **owner-only**                                                                                                      |
 | `POST /api/agent/threads/[id]/invites`            | `{invited}` (rows actually added)      | 400 `invalid_user_ids`, 404                        | Invite `userIds` (deduped, owner un-invitable, idempotent conflict-do-nothing); **owner-only**                                     |
@@ -90,6 +90,14 @@ The chat endpoint's SSE vocabulary: named frames
 `done` (`{messageId, content, reasoning}` — the assistant row is persisted
 at this point), `error` (infrastructure failure; streamed then the stream
 closes). Client disconnects abort the in-flight LLM fetch silently.
+
+**AI thread titling**: after a thread's FIRST turn completes (post-`done`,
+fire-and-forget) the route asks the model for a 2–5 word title via the same
+chat endpoint (no tools, one user message). While the model is thinking the
+thread keeps the `"Neuer Chat"` default; a usable answer replaces it, an
+unusable/failed one falls back to the first 24 chars of the first user
+message. A user-chosen title (PATCH) is never overwritten — the
+default-title guard runs at call time and again on write.
 
 ## Conventions
 

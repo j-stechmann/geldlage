@@ -41,12 +41,23 @@ native tool access to the user's own finance data, composed into
 next to `<main>` in the main content row, so pages and `AppNav` stay
 untouched.
 
-| Component                           | Role                                                                                                                                                                                                  |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `components/agent/agent-toggle.tsx` | Header icon button (`aria-pressed`), toggles the dock via the shared panel store                                                                                                                      |
-| `components/agent/agent-dock.tsx`   | Dock frame: resizable right column on md+ (`ResizeHandle` with pointer capture), full-screen overlay with close button below md                                                                       |
-| `components/agent/agent-chat.tsx`   | The chat itself: thread bar, message list, streaming bubble, input with stop button, invite dialog                                                                                                    |
-| `components/agent/panel-state.ts`   | Module-level `useSyncExternalStore` store: `{open, width}`, persisted to `localStorage` (`geldlage.agent.open`/`.width`); SSR serves closed, lazy first-client hydrate (no provider, no layout flash) |
+| Component / module                      | Role                                                                                                                                                                                                  |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `components/agent/agent-toggle.tsx`     | Header icon button (`aria-pressed`), toggles the dock via the shared panel store                                                                                                                      |
+| `components/agent/agent-dock.tsx`       | Dock frame: resizable right column on md+ (`ResizeHandle` with pointer capture), full-screen overlay with close button below md                                                                       |
+| `components/agent/agent-chat.tsx`       | Slim orchestrator (~200 lines): composes the four UI parts around the two hooks; owns the mutation handlers with their German toasts                                                                  |
+| `components/agent/thread-bar.tsx`       | Thread bar: new-chat, inline rename, owner actions (rename/invite/delete), member leave, grouped dropdown (Meine Chats / Geteilte Chats / Einladungen, `ThreadSelect`/`ThreadGroup`)                  |
+| `components/agent/message-list.tsx`     | Message list: persisted rows (`MessageRow`, `UserBubble`), optimistic pending user message, streaming bubble, pin-to-bottom, invited join panel + empty state                                         |
+| `components/agent/assistant-bubble.tsx` | The ONE assistant bubble: reasoning toggle ("Denkprozess"), tool chips, streamed/persisted content — `streaming` only toggles defaults (thinking open, cursor)                                        |
+| `components/agent/tool-chip.tsx`        | Tool round chip (name + expandable JSON args/result), shared by persisted rows and the streaming bubble                                                                                               |
+| `components/agent/chat-input.tsx`       | Composer: Enter sends (Shift+Enter / IME excluded), send button swaps to stop while streaming                                                                                                         |
+| `components/agent/invite-dialog.tsx`    | Invite dialog: user directory fetched only while open minus existing members, checkbox multi-select                                                                                                   |
+| `components/agent/use-agent-threads.ts` | Threads/detail React Query hooks (polling 15 s / 4 s paused while streaming), active-thread derivation with `localStorage` persistence (`geldlage.agent.thread`), lazy thread creation                |
+| `components/agent/use-agent-turn.ts`    | Streaming turn state machine: optimistic user message, SSE consumption into stream state, abort handling, post-done invalidation of messages+threads                                                  |
+| `components/agent/agent-api.ts`         | Typed fetchers for all agent endpoints, React Query keys (`THREADS_KEY`/`MESSAGES_KEY`/`USERS_KEY`), `ApiError` on non-OK JSON (a 404 for invited preview surfaces as a query error, not fake data)   |
+| `components/agent/sse-events.ts`        | Client-side dispatch of the named SSE frames, built on the SHARED parser `lib/llm/sse.ts` (`sseGenerator`) — the same generator the server-side loop client consumes                                  |
+| `components/agent/types.ts`             | Client-side DTOs mirroring the server contract (single source, no inline copies)                                                                                                                      |
+| `components/agent/panel-state.ts`       | Module-level `useSyncExternalStore` store: `{open, width}`, persisted to `localStorage` (`geldlage.agent.open`/`.width`); SSR serves closed, lazy first-client hydrate (no provider, no layout flash) |
 
 **Dock behavior**: on md+ the panel is a docked flex column whose width the
 user drags between 280 and 720 px (clamped, persisted); below md it renders
@@ -60,7 +71,8 @@ chip** (name + expandable JSON args/result).
 **Threads and invites**: the thread bar dropdown groups Meine Chats /
 Geteilte Chats / Einladungen; selecting an invite shows the join panel
 (Annehmen/Ablehnen) instead of messages — content unlocks exactly on join
-(the API 404s for invited users). Owners get rename, invite (the
+(the API 404s for invited users, and `agent-api.ts` turns that 404 into a
+query error so the join panel renders). Owners get rename, invite (the
 `InviteDialog` fetches the user directory from `GET /api/users`, filtering
 out existing members) and delete; joined members get leave; invited users
 decline. Sending the first message can auto-create a thread; the active

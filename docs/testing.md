@@ -1,12 +1,16 @@
 # Testing
 
-_Last reviewed against v1.14.1 (streaming SSE client tests: frame reassembly, UTF-8 across chunk boundaries, mid-stream timeout classification)._
+_Last reviewed against v1.14.1 (streaming SSE client tests: frame reassembly, UTF-8 across chunk boundaries, mid-stream timeout classification; agent panel ADR-0033)._
 
 The suite is **entirely in-process** — no Next dev server, no HTTP listener,
 no supertest. It runs with `bunx vitest run` (config: [vitest.config.ts](../vitest.config.ts),
-node environment, `tests/**` only). ~16 test files cover parsing, money,
-dedupe, reconciliation, the import pipeline, the labeller, the LLM client,
-label/rule services, and full analytics correctness.
+node environment by default, `tests/**` only). Test files cover parsing,
+money, dedupe, reconciliation, the import pipeline, the labeller, the LLM
+client, label/rule services, full analytics correctness, the agent loop,
+the agent thread API access matrix, thread titling, and — in a jsdom
+environment opted in per file via the `// @vitest-environment jsdom`
+docblock (Vitest 4 removed `environmentMatchGlobs`) — the agent panel
+components.
 
 ```bash
 make test          # or: bunx vitest run
@@ -78,6 +82,28 @@ with expected counts recorded in its manifest.
 | `llm-client.test.ts`              | Index pinning/dropping, slot preservation, prose-poisoned JSON extraction, retry taxonomy (**timeouts never retried**), `temperature: 0` + `json_schema` on the wire, `max_tokens` scaling, context warning |
 | `prompt.test.ts`                  | Positional markers, suggestion rendering, marker neutralization (fixed point of odd runs), 512-byte truncation on char boundaries, `responseSchema` bounds                                                  |
 | `db-migration.test.ts`            | **Real file DBs** in temp dirs: a DB built with the _previous release's_ `label_rules` DDL is dropped/rebuilt into the triple shape without crashing; fresh DBs get the full schema                         |
+| `agent-loop.test.ts`              | Tool loop against a mock SSE llama-server: round budget with tools-strip on the final request, tools-free retry after an empty answer, tool JSON error absorption, windows/sanitization                     |
+| `agent-tools.test.ts`             | `get_category_totals`: period boundary math, per-uid isolation (two users querying the same categories), fold correctness, wire-shape derivation from the registry                                          |
+| `agent-threads-api.test.ts`       | The full access matrix (owner/member/invited/outsider) per endpoint, 404-not-403 existence nondisclosure, invite idempotency, FK-violation mapping, leave/decline/delete semantics                          |
+| `agent-thread-title.test.ts`      | AI titling: sanitize rules, default-title guard (call-time + on write), substring fallback on model failure/empty answer, detached error swallowing                                                         |
+| `agent-titling-route.test.ts`     | Chat route integration: title fires once after the first turn only; user-renamed threads never hit the LLM for titling                                                                                      |
+| `sse-crlf.test.ts`                | Shared SSE frame parsing regressed on CRLF-reframed bodies, `event:` name extraction, multi-line `data:` joining, final frame without trailing blank line                                                   |
+| `agent-panel-state.test.tsx`      | `panel-state` store (jsdom): open/width defaults, `localStorage` persistence, lazy hydrate clamping, `clampWidth` bounds (ResizeHandle contract)                                                            |
+| `agent-sse-events.test.tsx`       | Client SSE dispatcher (jsdom): all six event types, routing by event name (payload containing "event: done" not misrouted), malformed-frame skip, CRLF reframe tolerance                                    |
+| `agent-panel-ui.test.tsx`         | `AgentChat` (jsdom, stubbed fetch): stored message rendering, the streaming lifecycle (optimistic user bubble + streamed content/tool chips → persisted rows after done), invited join panel, empty state   |
+
+### DOM tests (jsdom)
+
+Component tests opt in per file with `// @vitest-environment jsdom` and use
+[tests/helpers-dom.tsx](../tests/helpers-dom.tsx): a React Query wrapper
+(`renderWithQuery`), a per-pathname fetch stub with scriptable JSON/SSE
+responses (`stubFetch`, `once` entries for differing refetches), a gated
+`ReadableStream` for asserting mid-stream UI, an in-memory `localStorage`
+polyfill (Node ≥26 exposes a broken global `localStorage` getter stub that
+otherwise shadows jsdom's working storage during vitest's global
+population), and `matchMedia`/`scrollTo` stubs for jsdom gaps. RTL
+`cleanup()` is registered module-side because vitest runs without
+`globals: true`.
 
 ## Property-based testing — deliberately narrow
 
