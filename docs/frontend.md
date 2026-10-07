@@ -59,9 +59,10 @@ untouched.
 | `components/agent/types.ts`             | Client-side DTOs mirroring the server contract (single source, no inline copies)                                                                                                                      |
 | `components/agent/panel-state.ts`       | Module-level `useSyncExternalStore` store: `{open, width}`, persisted to `localStorage` (`geldlage.agent.open`/`.width`); SSR serves closed, lazy first-client hydrate (no provider, no layout flash) |
 
-**Dock behavior**: on md+ the panel is a docked flex column whose width the
-user drags between 280 and 720 px (clamped, persisted); below md it renders
-as a fixed full-screen overlay. The chat is streamed over SSE
+**Dock behavior**: on md+ the panel is a sticky flex column pinned under the
+header (`top-14`, `h-[calc(100svh-3.5rem)]`) whose width the user drags
+between 280 and 720 px (clamped, persisted); below md it renders as a fixed
+full-screen overlay. The chat is streamed over SSE
 (`delta`/`reasoning`/`tool_call`/`tool_result`/`done`/`error` frames):
 content renders incrementally into a streaming bubble, the model's thinking
 trace appears as a collapsible **Denkprozess** (open while streaming,

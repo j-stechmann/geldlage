@@ -53,7 +53,7 @@ export function AgentDock() {
     <aside
       data-slot="agent-dock"
       style={{ width }}
-      className="relative flex h-full flex-none flex-col border-l bg-background"
+      className="sticky top-14 flex h-[calc(100svh-3.5rem)] flex-none flex-col border-l bg-background"
     >
       <ResizeHandle />
       <div className="flex items-center justify-between border-b px-3 py-2">
