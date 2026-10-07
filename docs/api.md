@@ -1,6 +1,6 @@
 # API reference
 
-_Last reviewed against v2.1 (+ agent AI titling refactor, ADR-0033). Descriptive reference — verify against `app/api/`. All 25 route files export `runtime = "nodejs"` and `dynamic = "force-dynamic"` (no request caching, ever), and use the Next 16 `params: Promise<…>` convention._
+_Last reviewed against v2.1 (+ agent AI titling refactor and the `user` SSE frame, ADR-0033). Descriptive reference — verify against `app/api/`. All 25 route files export `runtime = "nodejs"` and `dynamic = "force-dynamic"` (no request caching, ever), and use the Next 16 `params: Promise<…>` convention._
 
 Validation is **hand-rolled per handler** with typed narrowing and typed
 error responses; zod is reserved for environment config
@@ -84,7 +84,10 @@ unknown threads always answer **404, never 403** (see Conventions).
 | `POST /api/agent/threads/[id]/chat`               | **SSE stream** (see below)             | 400 `invalid_content` (1–8000 chars), 404          | One streamed agent turn (`text/event-stream`); owner and joined members only                                                       |
 
 The chat endpoint's SSE vocabulary: named frames
-`event: <name>\ndata: <json>\n\n` — `delta` (content fragment), `reasoning`
+`event: <name>\ndata: <json>\n\n` — `user` (`{id}`, the persisted user row's
+id, first frame — lets the client retire its optimistic bubble once the
+racing detail fetch serves the authoritative row), `delta` (content
+fragment), `reasoning`
 (thinking trace fragment, display-only), `tool_call` (`{name, args}`),
 `tool_result` (`{name, result}`, persisted as a tool row per result),
 `done` (`{messageId, content, reasoning}` — the assistant row is persisted

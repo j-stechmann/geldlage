@@ -36,10 +36,15 @@ export function useAgentTurn() {
     tools: [],
   })
   // The user message of the in-flight turn: rendered optimistically while
-  // streaming (see module doc), replaced by the authoritative refetch.
+  // streaming (see module doc), replaced by the authoritative refetch. The
+  // route echoes the persisted row's id in its first `user` frame — once
+  // aligned, the list can dedupe that row against this bubble (the detail
+  // fetch races a first-turn send: the lazily created thread enables the
+  // query right after the server persisted the row).
   const [pendingUserMessage, setPendingUserMessage] = useState<string | null>(
     null
   )
+  const [pendingMessageId, setPendingMessageId] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const queryClient = useQueryClient()
 
@@ -56,6 +61,7 @@ export function useAgentTurn() {
   const send = useCallback(
     async (threadId: string, content: string): Promise<boolean> => {
       setPendingUserMessage(content)
+      setPendingMessageId(null)
       setStreaming(true)
       setStreams({ content: "", reasoning: "", tools: [] })
       const controller = new AbortController()
@@ -78,25 +84,40 @@ export function useAgentTurn() {
         return false
       } finally {
         abortRef.current = null
-        setStreaming(false)
-        setPendingUserMessage(null)
+        // Invalidate BEFORE dropping the optimistic state: the awaited
+        // refetch (the streaming detail query pauses while streaming, so
+        // this is the fresh view) lands in the cache first, then the
+        // pending bubble unmounts in the same commit the persisted rows
+        // appear — never a flash of a missing user message.
         await queryClient
           .invalidateQueries({ queryKey: MESSAGES_KEY(threadId) })
           .catch(() => undefined)
         queryClient
           .invalidateQueries({ queryKey: THREADS_KEY })
           .catch(() => undefined)
+        setPendingMessageId(null)
+        setPendingUserMessage(null)
+        setStreaming(false)
       }
     },
     [queryClient]
   )
 
-  return { streaming, streams, pendingUserMessage, send, stop }
+  return {
+    streaming,
+    streams,
+    pendingUserMessage,
+    pendingMessageId,
+    send,
+    stop,
+  }
 
   /** Streams the response body into state via the shared parser. */
   async function consumeTurn(body: ReadableStream<Uint8Array>): Promise<void> {
     for await (const ev of parseAgentSse(body)) {
-      if (ev.type === "reasoning") {
+      if (ev.type === "user") {
+        if (ev.id) setPendingMessageId(ev.id)
+      } else if (ev.type === "reasoning") {
         setStreams((s) => ({ ...s, reasoning: s.reasoning + ev.text }))
       } else if (ev.type === "delta") {
         setStreams((s) => ({ ...s, content: s.content + ev.text }))

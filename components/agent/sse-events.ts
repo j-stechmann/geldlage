@@ -10,6 +10,7 @@ import { sseGenerator } from "@/lib/llm/sse"
 
 /** A parsed protocol event, after `event:`-name dispatch. */
 export type AgentStreamEvent =
+  | { type: "user"; id: string }
   | { type: "reasoning"; text: string }
   | { type: "delta"; text: string }
   | { type: "tool_call"; name: string; args: string }
@@ -18,6 +19,7 @@ export type AgentStreamEvent =
   | { type: "error"; message: string }
 
 interface FramePayload {
+  id?: string
   text?: string
   name?: string
   args?: string
@@ -45,6 +47,9 @@ export async function* parseAgentSse(
       continue
     }
     switch (frame.eventName) {
+      case "user":
+        yield { type: "user", id: payload.id ?? "" }
+        break
       case "reasoning":
         yield { type: "reasoning", text: payload.text ?? "" }
         break

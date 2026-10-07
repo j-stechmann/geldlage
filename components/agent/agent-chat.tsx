@@ -49,7 +49,14 @@ export function AgentChat() {
   // streaming flag; useAgentThreads consumes it (pauses detail polling
   // while a turn is in flight) and exposes the ids the turn hook needs —
   // the turn's send takes the thread id per call, so there is no cycle.
-  const { streaming, streams, pendingUserMessage, send, stop } = useAgentTurn()
+  const {
+    streaming,
+    streams,
+    pendingUserMessage,
+    pendingMessageId,
+    send,
+    stop,
+  } = useAgentTurn()
   const {
     detailQuery,
     threads,
@@ -212,6 +219,7 @@ export function AgentChat() {
         streamReasoning={streams.reasoning}
         streamTools={streams.tools}
         pendingUserMessage={pendingUserMessage}
+        pendingMessageId={pendingMessageId}
         namesById={namesById}
         invitedTitle={activeThread?.title}
         onJoin={onJoin}

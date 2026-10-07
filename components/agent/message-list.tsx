@@ -33,6 +33,12 @@ interface MessageListProps {
   streamReasoning: string
   streamTools: ToolEvent[]
   pendingUserMessage: string | null
+  /**
+   * The persisted row id the turn's `user` frame echoed back (null until
+   * aligned) — an authoritative view containing this row retires the
+   * optimistic bubble.
+   */
+  pendingMessageId: string | null
   namesById: Map<number, string>
   invitedTitle: string | undefined
   onJoin: (id: string) => Promise<void>
@@ -138,6 +144,24 @@ export function MessageListView(props: MessageListProps) {
   const multiAuthor =
     new Set(messages.filter((m) => m.userId !== null).map((m) => m.userId))
       .size > 1
+  // The optimistic bubble fills the gap until the authoritative view shows
+  // the message. The detail fetch races a first-turn send (the lazily
+  // created thread enables the query right after the server persisted the
+  // row), so the fetched list can contain the persisted twin already —
+  // dedupe by the `user` frame's row id once aligned, content-match only
+  // as the unaligned-window fallback; rendering both would duplicate the
+  // first message for the whole streamed turn. The persisted row wins
+  // (authoritative seq order, author name). Content-matching an identical
+  // earlier message hides the bubble for one refetch cycle at worst.
+  const pending =
+    props.pendingUserMessage !== null &&
+    (props.pendingMessageId === null
+      ? messages.some(
+          (m) => m.role === "user" && m.content === props.pendingUserMessage
+        )
+      : !messages.some((m) => m.id === props.pendingMessageId))
+      ? props.pendingUserMessage
+      : null
 
   return (
     <div ref={setListEl} className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
@@ -150,9 +174,9 @@ export function MessageListView(props: MessageListProps) {
             showAuthor={multiAuthor}
           />
         ))}
-        {props.pendingUserMessage && (
+        {pending && (
           <div className="flex justify-end">
-            <UserBubble content={props.pendingUserMessage} />
+            <UserBubble content={pending} />
           </div>
         )}
         {props.streaming && (

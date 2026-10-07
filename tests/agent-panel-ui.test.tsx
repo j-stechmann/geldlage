@@ -79,6 +79,18 @@ const postTurnMessages: Array<Record<string, unknown>> = [
   }),
 ]
 
+/**
+ * The persisted user row the turn appended, as the raced detail fetch
+ * serves it: the `user` frame's echoed id (see chatStream) matches the
+ * optimistic bubble for identity-based dedupe.
+ */
+function postTurnMessagesWithUser(): Array<Record<string, unknown>> {
+  return [
+    ...postTurnMessages.filter((m) => m.threadSeq !== 3 || m.id !== "m-tool"),
+    { ...msg("m-user", "user", "Wie viel?", 5), id: "m-pending" },
+  ]
+}
+
 /** One fetch stub covering the whole thread flow via a mutable script. */
 function stubChatFlow(state: {
   messages: Array<Record<string, unknown>>
@@ -139,6 +151,7 @@ beforeEach(() => {
         controller.enqueue(
           enc.encode(
             sseFrames([
+              { event: "user", data: { id: "m-pending" } },
               { event: "reasoning", data: { text: "Nachdenken…" } },
               {
                 event: "tool_call",
@@ -244,7 +257,9 @@ describe("<AgentChat>", () => {
 
     // done: release the stream; the finally-refetch now returns the
     // persisted rows (the server appended user+tool+assistant during the
-    // turn — modeled here by swapping the state the stub serves)
+    // turn — modeled here by swapping the state the stub serves). The
+    // persisted user row carries the id the `user` frame echoed, so the
+    // optimistic bubble retires by identity.
     await act(async () => {
       state.messages = postTurnMessages.map((m) => ({ ...m }))
       releaseTurn()
@@ -263,6 +278,67 @@ describe("<AgentChat>", () => {
     // the state mutation fed the post-turn rows through the shared state
     const persisted = screen.getAllByText(/Du hast/)
     expect(persisted.length).toBe(1)
+  }, 15_000)
+
+  it("raced detail fetch with the persisted user row shows the message once", async () => {
+    // The first-send path: the turn's POST and the enable-racing detail
+    // GET hit together, and the fetch result already contains the
+    // persisted user row ("m-pending" — the id the user frame echoes).
+    // Regression: optimistic bubble + stored row rendered the first
+    // message twice for the whole streamed turn. The persisted row wins.
+    const state = {
+      // detail serves the appended user row ALREADY, mid-turn
+      messages: [msg("m-pending", "user", "Wie viel?", 3)] as Array<
+        Record<string, unknown>
+      >,
+      threads: [
+        {
+          id: "t1",
+          title: "Haushaltsfragen",
+          role: "owner",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    }
+    stubChatFlow(state)
+    renderWithQuery(createElement(AgentChat))
+    await waitFor(() =>
+      expect(screen.getByText("Haushaltsfragen")).toBeInTheDocument()
+    )
+    // wait for the raced detail fetch to have landed (the row is shown)
+    await waitFor(() =>
+      expect(screen.getByText("Wie viel?")).toBeInTheDocument()
+    )
+
+    const input = screen.getByPlaceholderText("Nachricht…")
+    await userEvent.type(input, "Wie viel?")
+    await userEvent.click(screen.getByRole("button", { name: "Senden" }))
+
+    // mid-stream: exactly ONE user bubble — the optimistic twin is
+    // suppressed even though pendingUserMessage ("Wie viel?") is set and
+    // the fetched list already contains the identical persisted row.
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Du hast 4211,00 € ausgegeben\./)
+      ).toBeInTheDocument()
+    )
+    expect(screen.getAllByText("Wie viel?")).toHaveLength(1)
+
+    // done: the persisted list arrives; dedupe retires by identity, still
+    // exactly one user row and one assistant answer (the streamed bubble
+    // replaced by the equivalent stored row m9)
+    await act(async () => {
+      state.messages = postTurnMessagesWithUser()
+      releaseTurn()
+      await Promise.resolve()
+    })
+    await waitFor(() =>
+      expect(screen.getByText("4211,00 €")).toBeInTheDocument()
+    )
+    expect(screen.getAllByText("Wie viel?")).toHaveLength(1)
+    expect(screen.getAllByText(/Du hast 4211,00 € ausgegeben\./)).toHaveLength(
+      1
+    )
   }, 15_000)
 
   it("auto-selects the newest own thread; sends create thread none exists", async () => {

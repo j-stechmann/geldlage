@@ -76,7 +76,10 @@ The agent chat is built from six pieces:
 - **SSE to the browser, persistence-free loop** (app/api/agent/…/chat,
   lib/agent/sse-writer.ts, lib/agent/turn-persister.ts): the loop yields
   events and knows nothing about the database; the **route** streams them
-  as named SSE events — `delta` (content), `reasoning`, `tool_call`,
+  as named SSE events — `user` (the persisted user row's id, first frame:
+  the client aligns its optimistic bubble against the authoritative detail
+  view, whose fetch races a first-turn send when the thread is lazily
+  created), `delta` (content), `reasoning`, `tool_call`,
   `tool_result`, `done`, `error` — and does all persistence: the user
   message immediately, one tool row per `tool_result` (with its preceding
   `tool_call` args), and the final assistant row (content + reasoning) at

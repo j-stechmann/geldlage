@@ -53,7 +53,11 @@ export async function POST(
 
   // Was this the thread's first user turn? (Read BEFORE appending.)
   const isFirstTurn = !listMessages(id).some((m) => m.role === "user")
-  appendMessage(id, { userId: gate.session.uid, role: "user", content })
+  const userMessage = appendMessage(id, {
+    userId: gate.session.uid,
+    role: "user",
+    content,
+  })
 
   // Full stored history INCLUDING the just-appended user message; the
   // loop windows/sanitizes it further (windowHistory). Stored `reasoning`
@@ -75,6 +79,12 @@ export async function POST(
       // into the loop aborts the in-flight LLM fetch instead of burning
       // the rest of the turn for nobody.
       try {
+        // The persisted user row's id, echoed before the loop starts: the
+        // client aligns its optimistic bubble against the authoritative
+        // detail view (the first send lazily creates the thread, so the
+        // detail fetch races the turn and can arrive already containing
+        // this row — without the id, content-matching duplicates it).
+        controller.enqueue(sseFrame("user", { id: userMessage.id }))
         for await (const ev of runAgentTurn({
           history,
           uid: gate.session.uid,

@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 /**
  * Client SSE dispatcher tests (ADR-0033): the named-frame protocol
- * (delta/reasoning/tool_call/tool_result/done/error) parsed through the
- * shared lib/llm/sse generator. Includes the CRLF reframe regression the
- * shared parser guarantees.
+ * (user/delta/reasoning/tool_call/tool_result/done/error) parsed through
+ * the shared lib/llm/sse generator. Includes the CRLF reframe regression
+ * the shared parser guarantees.
  */
 import { describe, it, expect } from "vitest"
 import { parseAgentSse } from "@/components/agent/sse-events"
@@ -26,8 +26,9 @@ async function collect(body: string) {
 }
 
 describe("parseAgentSse", () => {
-  it("dispatches all six event types by name", async () => {
+  it("dispatches all seven event types by name", async () => {
     const body = sseFrames([
+      { event: "user", data: { id: "m0" } },
       { event: "reasoning", data: { text: "denke" } },
       { event: "delta", data: { text: "Hallo" } },
       {
@@ -42,18 +43,20 @@ describe("parseAgentSse", () => {
     ])
     const events = await collect(body)
     expect(events.map((e) => e.type)).toEqual([
+      "user",
       "reasoning",
       "delta",
       "tool_call",
       "tool_result",
       "done",
     ])
-    expect(events[2]).toEqual({
+    expect(events[0]).toEqual({ type: "user", id: "m0" })
+    expect(events[3]).toEqual({
       type: "tool_call",
       name: "get_category_totals",
       args: '{"period":"this_month"}',
     })
-    expect(events[4]).toEqual({ type: "done", messageId: "m1" })
+    expect(events[5]).toEqual({ type: "done", messageId: "m1" })
   })
 
   it("maps error frames to their message", async () => {
