@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm"
+import { asc, desc, eq } from "drizzle-orm"
 import { getDb } from "@/lib/db"
 import { chatMessages, chatThreads, type ChatMessage } from "@/lib/db/schema"
 import { DEFAULT_THREAD_TITLE } from "@/lib/agent/constants"
@@ -79,4 +79,25 @@ export function listMessages(threadId: string): ChatMessage[] {
     .where(eq(chatMessages.threadId, threadId))
     .orderBy(asc(chatMessages.threadSeq), asc(chatMessages.id))
     .all()
+}
+
+/**
+ * The last `limit` messages in the same order — the bounded read the chat
+ * route's history mapping uses. The full list stays O(thread size) per
+ * turn otherwise; SQLite walks chat_messages_thread_sort_idx backwards
+ * for this ORDER BY … LIMIT, so the cost tracks the window, not the
+ * thread. Callers needing the whole thread (display/detail) keep
+ * listMessages; a windowed slice is only valid when nothing before the
+ * window is read (the loop's own cap is what makes this safe).
+ */
+export function listRecentMessages(threadId: string, limit: number): ChatMessage[] {
+  const db = getDb()
+  return db
+    .select()
+    .from(chatMessages)
+    .where(eq(chatMessages.threadId, threadId))
+    .orderBy(desc(chatMessages.threadSeq), desc(chatMessages.id))
+    .limit(limit)
+    .all()
+    .reverse()
 }

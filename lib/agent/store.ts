@@ -14,6 +14,7 @@
 export {
   appendMessage,
   listMessages,
+  listRecentMessages,
   DEFAULT_THREAD_TITLE,
 } from "@/lib/agent/store/messages"
 

@@ -177,9 +177,13 @@ DOM tests (jsdom + testing-library) cover the lifecycle end to end
 (tests/agent-panel-ui.test.tsx).
 
 **Concurrency**: llama-server keeps `-np 1` — agent turns share the single
-slot with label batches, and either queues behind the other. Acceptable for a
-local tool with human-paced turns; revisit with `--parallel`/`-np N` if
-round-trip latency degrades under concurrent label jobs.
+slot with label batches, and either queues behind the other. The
+fire-and-forget auto-title one-shot is a third consumer: it grabs the slot
+right after every first turn, and a stalled backend can hold it up to
+`LLM_TIMEOUT_MS` while the next turn (owner's or a member's) queues behind
+it — one more data point for the `--parallel`/`-np N` revisit. Acceptable
+for a local tool with human-paced turns; revisit with `--parallel`/`-np N`
+if round-trip latency degrades under concurrent label jobs.
 
 ## Alternatives considered
 

@@ -300,13 +300,16 @@ describe("join + message visibility", () => {
     expect(res.status).toBe(404)
   })
 
-  it("join for the owner/unknown thread is 404-or-idempotent-safe", async () => {
-    // owner joining own thread: no invited row exists → setMemberState false → route's response
+  it("join for the owner is an idempotent no-op 200", async () => {
+    // owner joining own thread: the gate's roleOf returns "owner" and the
+    // route short-circuits before any member-store write — deterministic
+    // 200; pinned so a guard regression that downgrades the role to 404
+    // cannot slip through.
     const res = await joinRoute(
       await req(`/api/agent/threads/${threadId}/join`, u1, { method: "POST" }),
       { params: Promise.resolve({ id: threadId }) }
     )
-    expect([200, 404]).toContain(res.status)
+    expect(res.status).toBe(200)
     // but an invited→joined flow stays correct
     await joinRoute(
       await req(`/api/agent/threads/${threadId}/join`, u2, { method: "POST" }),

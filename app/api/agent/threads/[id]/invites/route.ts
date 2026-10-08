@@ -19,8 +19,13 @@ export async function GET(
     csrf: false,
   })
   if (!gate.ok) return gate.response
-  // roleOf=owner implies the thread row exists; its userId is the owner.
-  const thread = getThread(id)!
+  // Same concurrent-delete race as the owner gate itself: the thread row
+  // can vanish between roleOf and this read, so an explicit check keeps
+  // the 404 body instead of an unhandled 500.
+  const thread = getThread(id)
+  if (!thread) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 })
+  }
   return NextResponse.json({ members: listMembers(id, thread.userId) })
 }
 
@@ -54,11 +59,15 @@ export async function POST(
   // the owner id; the return count = rows actually added. Foreign-key
   // violations (a stale dialog submitting a since-deleted user id) are
   // caught here — onConflictDoNothing does NOT suppress FK failures — and
-  // surface as 400 unknown_user instead of an unhandled 500. roleOf=owner
-  // implies the thread row exists, so its userId is readable non-null.
+  // surface as 400 unknown_user instead of an unhandled 500. The thread
+  // row can still vanish between the roleOf gate and this read (owner
+  // deleted it concurrently), so the same check maps that to 404.
   try {
-    const ownerId = getThread(id)!.userId
-    const invited = inviteMembers(id, userIds, ownerId)
+    const thread = getThread(id)
+    if (!thread) {
+      return NextResponse.json({ error: "not_found" }, { status: 404 })
+    }
+    const invited = inviteMembers(id, userIds, thread.userId)
     return NextResponse.json({ invited })
   } catch (err) {
     if (isForeignKeyError(err)) {

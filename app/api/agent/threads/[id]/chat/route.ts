@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { CHAT_MESSAGE_MAX_CHARS } from "@/lib/agent/constants"
+import { AGENT_HISTORY_MAX_MESSAGES } from "@/lib/agent/window"
 import { runAgentTurn } from "@/lib/agent/loop"
-import { appendMessage, listMessages } from "@/lib/agent/store"
+import { appendMessage, listRecentMessages } from "@/lib/agent/store"
 import { maybeAutoTitle } from "@/lib/agent/thread-title"
 import { requireThreadAccess } from "@/lib/agent/route-guard"
 import { TurnPersister } from "@/lib/agent/turn-persister"
@@ -10,10 +11,31 @@ import {
   sseFrame,
   sseResponseHeaders,
 } from "@/lib/agent/sse-writer"
-import type { AgentChatMessage, AgentLoopEvent } from "@/lib/agent/types"
+import type {
+  AgentChatMessage,
+  AgentLoopEvent,
+} from "@/lib/agent/types"
+import type { ChatMessage } from "@/lib/db/schema"
+
+/** Race between the access gate and the store write: thread deleted. */
+function deletedThreadResponse(err: unknown): NextResponse {
+  const message = typeof err === "object" && err !== null ? String((err as Error).message) : ""
+  if (message.includes("thread not found")) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 })
+  }
+  throw err
+}
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
+
+/**
+ * Bounded recent-read size for the chat route's history mapping: the loop
+ * consumes at most AGENT_HISTORY_MAX_MESSAGES, but tool rows are filtered
+ * out BEFORE windowHistory sees the list, so the read takes extra headroom
+ * (5 turns × tool rows) to keep the post-filter window fully populated.
+ */
+const HISTORY_WINDOW = AGENT_HISTORY_MAX_MESSAGES * 2
 
 /**
  * One streamed agent turn as SSE (ADR-0033). Route = protocol wiring only:
@@ -51,21 +73,38 @@ export async function POST(
     )
   }
 
-  // Was this the thread's first user turn? (Read BEFORE appending.)
-  const isFirstTurn = !listMessages(id).some((m) => m.role === "user")
-  const userMessage = appendMessage(id, {
-    userId: gate.session.uid,
-    role: "user",
-    content,
-  })
+  // Was this the thread's first user turn? (Read BEFORE appending.) A
+  // bounded recent read can't answer "any user message at all", but a
+  // thread old enough to overflow the window-by-headroom necessarily has
+  // user messages, so the check is only load-bearing for small threads.
+  // Both reads live inside the catch: the gate's roleOf check and the
+  // insert are separate transactions, so an owner deleting the thread in
+  // another session between them must surface as the same 404 body (never
+  // a 500 from appendMessage's internal "thread not found" throw).
+  let isFirstTurn: boolean
+  let userMessage: ChatMessage
+  try {
+    isFirstTurn = !listRecentMessages(id, HISTORY_WINDOW).some(
+      (m) => m.role === "user"
+    )
+    userMessage = appendMessage(id, {
+      userId: gate.session.uid,
+      role: "user",
+      content,
+    })
+  } catch (err) {
+    return deletedThreadResponse(err)
+  }
 
-  // Full stored history INCLUDING the just-appended user message; the
-  // loop windows/sanitizes it further (windowHistory). Stored `reasoning`
-  // is display metadata only and is not replayed to the model: reasoning
-  // tokens belong to the round that produced them, the chat endpoint's
-  // request builder drops them anyway, and replaying them across turns
-  // would bloat the prompt with stale thinking traces.
-  const history: AgentChatMessage[] = listMessages(id)
+  // Windowed stored history INCLUDING the just-appended user message; the
+  // loop re-windows/sanitizes it (windowHistory), and the loop's cap is
+  // what makes reading only the recent slice safe — nothing older enters
+  // the prompt anyway. Stored `reasoning` is display metadata only and is
+  // not replayed to the model: reasoning tokens belong to the round that
+  // produced them, the chat endpoint's request builder drops them anyway,
+  // and replaying them across turns would bloat the prompt with stale
+  // thinking traces.
+  const history: AgentChatMessage[] = listRecentMessages(id, HISTORY_WINDOW)
     .filter((m) => m.role !== "tool")
     .map((m) => ({
       role: m.role === "user" ? ("user" as const) : ("assistant" as const),

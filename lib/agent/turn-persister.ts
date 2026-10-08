@@ -1,4 +1,5 @@
 import { appendMessage, touchThread } from "@/lib/agent/store"
+import { AGENT_NO_ANSWER_TEXT } from "@/lib/agent/constants"
 import type { AgentLoopEvent } from "@/lib/agent/types"
 
 /**
@@ -49,10 +50,14 @@ export class TurnPersister {
     if (ev.type === "done") {
       let saved: string | null = null
       if (ev.content || ev.reasoning) {
+        // A reasoning-only stream (no prose on the final round) persists
+        // with a placeholder body — an empty-content row would render as
+        // an empty bubble after the post-done refetch; the reasoning
+        // trace stays in the collapsible "Denkprozess".
         saved = appendMessage(this.threadId, {
           userId: null,
           role: "assistant",
-          content: ev.content,
+          content: ev.content || AGENT_NO_ANSWER_TEXT,
           reasoning: ev.reasoning,
         }).id
       }

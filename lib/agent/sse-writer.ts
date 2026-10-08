@@ -10,6 +10,14 @@ import { isTimeoutError } from "@/lib/llm/sse"
 
 const encoder = new TextEncoder()
 
+/**
+ * The client-visible fallback for all non-timeout infrastructure failures.
+ * Never embeds err.message: LlmHttpError carries up to 500 chars of the
+ * llama-server response body, and the frame renders verbatim in the chat
+ * UI — the detail is logged server-side instead.
+ */
+const GENERIC_LLM_FRAME = "LLM-Fehler — der Sprachdienst antwortet nicht korrekt."
+
 /** Encodes one named SSE frame. */
 export function sseFrame(event: string, data: unknown): Uint8Array {
   return encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
@@ -28,12 +36,17 @@ export function sseResponseHeaders(): Record<string, string> {
 /**
  * Maps a thrown loop/stream error to the client-visible error frame
  * message, or null when the client itself went away (abort — nothing left
- * to tell); the caller skips the frame then and just closes.
+ * to tell); the caller skips the frame then and just closes. Non-timeout
+ * failures get the generic frame with the raw detail logged server-side.
  */
 export function errorFrameMessage(err: unknown): string | null {
   if (isClientAbort(err)) return null
   if (isTimeoutError(err)) return "Timeout — die Antwort dauerte zu lange."
-  return `LLM-Fehler: ${err instanceof Error ? err.message : "unbekannt"}`
+  console.error(
+    "[agent] LLM turn failed:",
+    err instanceof Error ? err.message : err
+  )
+  return GENERIC_LLM_FRAME
 }
 
 /** request.signal aborts surface as AbortError (client went away). */
