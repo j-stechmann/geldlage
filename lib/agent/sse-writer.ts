@@ -16,7 +16,8 @@ const encoder = new TextEncoder()
  * llama-server response body, and the frame renders verbatim in the chat
  * UI — the detail is logged server-side instead.
  */
-const GENERIC_LLM_FRAME = "LLM-Fehler — der Sprachdienst antwortet nicht korrekt."
+const GENERIC_LLM_FRAME =
+  "LLM-Fehler — der Sprachdienst antwortet nicht korrekt."
 
 /** Encodes one named SSE frame. */
 export function sseFrame(event: string, data: unknown): Uint8Array {

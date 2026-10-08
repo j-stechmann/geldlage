@@ -178,7 +178,12 @@ export function AgentChat() {
   const onDecline = useCallback(
     async (threadId: string) => {
       const ok = await deleteOrLeaveThread(threadId)
-      if (ok) refresh()
+      if (!ok) {
+        toast.error("Ablehnen fehlgeschlagen.")
+      }
+      // Refresh even on failure: a 404 means the invite was already gone
+      // (concurrent decline), and the list should drop the stale row.
+      refresh()
     },
     [refresh]
   )

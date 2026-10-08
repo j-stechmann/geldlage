@@ -90,7 +90,10 @@ export function listMessages(threadId: string): ChatMessage[] {
  * listMessages; a windowed slice is only valid when nothing before the
  * window is read (the loop's own cap is what makes this safe).
  */
-export function listRecentMessages(threadId: string, limit: number): ChatMessage[] {
+export function listRecentMessages(
+  threadId: string,
+  limit: number
+): ChatMessage[] {
   const db = getDb()
   return db
     .select()

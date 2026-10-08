@@ -42,7 +42,14 @@ export async function PATCH(
   }
 
   renameThread(id, title)
-  return NextResponse.json({ thread: getThread(id) })
+  // The thread can vanish concurrently (owner deleted it in another
+  // session) between the rename and this read — same race the invites
+  // routes handle, mapped to 404 like every other miss on this id.
+  const thread = getThread(id)
+  if (!thread) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 })
+  }
+  return NextResponse.json({ thread })
 }
 
 /**

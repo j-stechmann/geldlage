@@ -84,23 +84,33 @@ export function AgentDock() {
 /**
  * Drag-to-resize handle on the dock's left edge: pointer capture keeps the
  * drag alive outside the strip, width is clamped to [MIN_WIDTH, MAX_WIDTH]
- * and persisted by setPanelState on every move.
+ * and persisted by setPanelState on every move. The drag is anchored at
+ * pointerdown — pointer X and dock width are frozen there and the width is
+ * derived from the pointer delta, not the live rect (the aside's left edge
+ * moves with every committed width, so reading it per-move would feed the
+ * last width back into the next one).
  */
 function ResizeHandle() {
-  const dragging = useRef(false)
+  const drag = useRef<{ startX: number; startWidth: number } | null>(null)
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    dragging.current = true
+    const parent = e.currentTarget.parentElement
+    if (!parent) return
+    drag.current = {
+      startX: e.clientX,
+      startWidth: parent.getBoundingClientRect().width,
+    }
     e.currentTarget.setPointerCapture(e.pointerId)
   }
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!dragging.current) return
-    const dockLeft = e.currentTarget.parentElement?.getBoundingClientRect().left
-    if (dockLeft === undefined) return
-    setPanelState({ width: clampWidth(dockLeft - e.clientX) })
+    const start = drag.current
+    if (!start) return
+    setPanelState({
+      width: clampWidth(start.startWidth + (start.startX - e.clientX)),
+    })
   }
   const onPointerUp = () => {
-    dragging.current = false
+    drag.current = null
   }
 
   return (

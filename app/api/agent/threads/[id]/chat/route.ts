@@ -11,15 +11,15 @@ import {
   sseFrame,
   sseResponseHeaders,
 } from "@/lib/agent/sse-writer"
-import type {
-  AgentChatMessage,
-  AgentLoopEvent,
-} from "@/lib/agent/types"
+import type { AgentChatMessage, AgentLoopEvent } from "@/lib/agent/types"
 import type { ChatMessage } from "@/lib/db/schema"
 
 /** Race between the access gate and the store write: thread deleted. */
 function deletedThreadResponse(err: unknown): NextResponse {
-  const message = typeof err === "object" && err !== null ? String((err as Error).message) : ""
+  const message =
+    typeof err === "object" && err !== null
+      ? String((err as Error).message)
+      : ""
   if (message.includes("thread not found")) {
     return NextResponse.json({ error: "not_found" }, { status: 404 })
   }
