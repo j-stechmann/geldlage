@@ -20,7 +20,7 @@ flowchart LR
   N -->|OpenAI-compatible HTTP| L["llama.cpp llama-server (127.0.0.1:8080)"]
   subgraph N[" "]
     direction TB
-    A1["17 REST route handlers"] --- A2["Import job (single-flight)"]
+    A1["25 REST route handlers"] --- A2["Import job (single-flight)"]
     A2 --- A3["Label worker (setInterval 3 s)"]
   end
   L ---|"pinned GGUF model"| M["models/*.gguf (~19 GB)"]
@@ -40,6 +40,13 @@ flowchart LR
   completions with grammar-constrained decoding
   (see [labelling.md](labelling.md) and
   [ADR-0012](adr/adr-0012-local-llama-server.md)).
+- **Agent chat** — a second consumer of the same llama-server: the browser
+  streams a turn via `POST /api/agent/threads/[id]/chat` (SSE), the
+  `lib/agent` loop runs native tool-call rounds against the model, and tools
+  execute read-only queries against SQLite scoped to the session user
+  ([ADR-0033](adr/adr-0033-agent-panel-tool-loop.md)). The chat tables
+  (`chat_threads`/`chat_thread_members`/`chat_messages`) are part of the
+  schema (see [data-model.md](data-model.md)).
 
 ## Process model
 

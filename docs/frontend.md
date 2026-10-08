@@ -1,6 +1,6 @@
 # Frontend
 
-_Last reviewed against v1.14.0 (transactions tab with URL-synced filters)._
+_Last reviewed against v1.14.1 (transactions tab with URL-synced filters; agent panel optimistic-bubble alignment)._
 
 Every page is a **client component**: the entire UI is a live dashboard
 driven by filters, polling, and toasts, with no server-rendered data
@@ -26,7 +26,69 @@ vs. common knowledge — the vendored docs under
 
 Provider nesting (`components/providers.tsx`): ThemeProvider →
 QueryClientProvider → TooltipProvider → ActiveImportProvider →
-DragDropProvider → children + ImportProgressPill + Toaster.
+DragDropProvider → children + ImportProgressPill + Toaster. The agent panel
+([ADR-0033](adr/adr-0033-agent-panel-tool-loop.md)) deliberately adds **no
+provider**: its open/width state lives in a module-level
+`useSyncExternalStore` store (see below).
+
+## Agent panel
+
+The app-wide "KI-Chat" ([ADR-0033](adr/adr-0033-agent-panel-tool-loop.md),
+all in [components/agent/](../components/agent/)): an LLM chat panel with
+native tool access to the user's own finance data, composed into
+`app/layout.tsx` — `AgentToggle` sits in the header's right group
+(before `LabellerHealthBadge`), and `AgentDock` is rendered as a flex sibling
+next to `<main>` in the main content row, so pages and `AppNav` stay
+untouched.
+
+| Component / module                      | Role                                                                                                                                                                                                                                                                                 |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `components/agent/agent-toggle.tsx`     | Header icon button (`aria-pressed`), toggles the dock via the shared panel store                                                                                                                                                                                                     |
+| `components/agent/agent-dock.tsx`       | Dock frame: resizable right column on md+ (`ResizeHandle` with pointer capture), full-screen overlay with close button below md                                                                                                                                                      |
+| `components/agent/agent-chat.tsx`       | Slim orchestrator (~200 lines): composes the four UI parts around the two hooks; owns the mutation handlers with their German toasts                                                                                                                                                 |
+| `components/agent/thread-bar.tsx`       | Thread bar: new-chat, inline rename, owner actions (rename/invite/delete), member leave, grouped dropdown (Meine Chats / Geteilte Chats / Einladungen, `ThreadSelect`/`ThreadGroup`)                                                                                                 |
+| `components/agent/message-list.tsx`     | Message list: persisted rows (`MessageRow`, `UserBubble`), optimistic pending user message (retired once the authoritative view contains the `user`-frame-echoed row id), streaming bubble, pin-to-bottom, invited join panel + empty state                                          |
+| `components/agent/assistant-bubble.tsx` | The ONE assistant bubble: reasoning toggle ("Denkprozess"), tool chips, streamed/persisted content — `streaming` only toggles defaults (thinking open, cursor)                                                                                                                       |
+| `components/agent/tool-chip.tsx`        | Tool round chip (name + expandable JSON args/result), shared by persisted rows and the streaming bubble                                                                                                                                                                              |
+| `components/agent/chat-input.tsx`       | Composer: Enter sends (Shift+Enter / IME excluded), send button swaps to stop while streaming                                                                                                                                                                                        |
+| `components/agent/invite-dialog.tsx`    | Invite dialog: user directory fetched only while open minus existing members, checkbox multi-select                                                                                                                                                                                  |
+| `components/agent/use-agent-threads.ts` | Threads/detail React Query hooks (polling 15 s / 4 s paused while streaming), active-thread derivation with `localStorage` persistence (`geldlage.agent.thread`), lazy thread creation                                                                                               |
+| `components/agent/use-agent-turn.ts`    | Streaming turn state machine: optimistic user message (aligned via the `user` frame's persisted row id), SSE consumption into stream state, abort handling, post-done invalidation of messages+threads (before dropping the optimistic state, so rows and bubble swap in one commit) |
+| `components/agent/agent-api.ts`         | Typed fetchers for all agent endpoints, React Query keys (`THREADS_KEY`/`MESSAGES_KEY`/`USERS_KEY`), `ApiError` on non-OK JSON (a 404 for invited preview surfaces as a query error, not fake data)                                                                                  |
+| `components/agent/sse-events.ts`        | Client-side dispatch of the named SSE frames, built on the SHARED parser `lib/llm/sse.ts` (`sseGenerator`) — the same generator the server-side loop client consumes                                                                                                                 |
+| `components/agent/types.ts`             | Client-side DTOs mirroring the server contract (single source, no inline copies)                                                                                                                                                                                                     |
+| `components/agent/panel-state.ts`       | Module-level `useSyncExternalStore` store: `{open, width}`, persisted to `localStorage` (`geldlage.agent.open`/`.width`); SSR serves closed, lazy first-client hydrate (no provider, no layout flash)                                                                                |
+
+**Dock behavior**: on md+ the panel is a sticky flex column pinned under the
+header (`top-14`, `h-[calc(100svh-3.5rem)]`) whose width the user drags
+between 280 and 720 px (clamped, persisted); below md it renders as a fixed
+full-screen overlay. The chat is streamed over SSE
+(`delta`/`reasoning`/`tool_call`/`tool_result`/`done`/`error` frames):
+content renders incrementally into a streaming bubble, the model's thinking
+trace appears as a collapsible **Denkprozess** (open while streaming,
+collapsed on the persisted row), and each tool round renders as a **tool
+chip** (name + expandable JSON args/result).
+
+**Threads and invites**: the thread bar dropdown groups Meine Chats /
+Geteilte Chats / Einladungen; selecting an invite shows the join panel
+(Annehmen/Ablehnen) instead of messages — content unlocks exactly on join
+(the API 404s for invited users, and `agent-api.ts` turns that 404 into a
+query error so the join panel renders). Owners get rename, invite (the
+`InviteDialog` fetches the user directory from `GET /api/users`, filtering
+out existing members) and delete; joined members get leave; invited users
+decline. Sending the first message can auto-create a thread; the active
+thread id persists in `localStorage`.
+
+**React Query keys** (same conventions as above):
+
+| Query key                      | Fetches                            | Polling                                          |
+| ------------------------------ | ---------------------------------- | ------------------------------------------------ |
+| `["agent-threads"]`            | `/api/agent/threads`               | 15 s                                             |
+| `["agent-messages", threadId]` | `/api/agent/threads/[id]/messages` | 4 s, **paused while streaming** (`retry: false`) |
+| `["agent-users"]`              | `/api/users`                       | — (only while the invite dialog is open)         |
+
+After a turn finishes (`done` or abort), the messages query is invalidated
+and replaced by the persisted rows.
 
 ## React Query conventions
 

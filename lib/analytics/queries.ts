@@ -31,8 +31,6 @@ export interface TransactionFilters {
   dir?: "asc" | "desc"
 }
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
-
 export function parseFilters(sp: URLSearchParams): TransactionFilters {
   const q = sp.get("q")?.trim() || undefined
   const dateFrom = sp.get("dateFrom") || undefined
