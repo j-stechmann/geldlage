@@ -100,7 +100,11 @@ export async function POST(
       } finally {
         // AI titling after the first turn (fire-and-forget, failures
         // swallowed): the single llama-server slot is free now that the
-        // turn's SSE is fully enqueued.
+        // turn's SSE is fully enqueued. Deliberately unconditioned on the
+        // turn outcome — an aborted/errored first turn still titles (the
+        // user message is persisted and the guard in thread-title.ts
+        // keeps a user-chosen name standing), so the thread is never
+        // stuck on "Neuer Chat".
         if (isFirstTurn) maybeAutoTitle(id, content)
         // A client disconnect throws out of enqueue (not close) — swallow
         // so teardown never masks the original error.

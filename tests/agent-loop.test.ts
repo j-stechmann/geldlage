@@ -378,6 +378,41 @@ describe("runAgentTurn", () => {
     }
     expect(parsed.categories).toEqual([])
   })
+
+  it("synthesizes a tool_call id when the stream omits one", async () => {
+    await startServer()
+    // Regression for the accumulator's empty-id path: a delta series that
+    // carries name+args but never an id must still produce a usable
+    // tool_call_id in the protocol trio (same call_<n> scheme as the
+    // non-streaming fold).
+    scripted = [
+      {
+        chunked: {
+          index: 0,
+          id: "",
+          name: "get_category_totals",
+          argsPieces: ['{"period', '":"this_month"}'],
+        },
+      },
+      { content: ["ok"] },
+    ]
+    const events = await collect([{ role: "user", content: "Summen?" }])
+
+    const call = events.find((e) => e.type === "tool_call")
+    if (call?.type === "tool_call")
+      expect(call.args).toBe('{"period":"this_month"}')
+    expect(requests).toHaveLength(2)
+    const second = requests[1].messages as Array<{
+      role: string
+      tool_calls?: Array<{ id?: string }>
+      tool_call_id?: string
+    }>
+    const assistantCall = second.find((m) => Array.isArray(m.tool_calls))
+    expect(assistantCall?.tool_calls?.[0].id).toMatch(/^call_\d+$/)
+    expect(assistantCall?.tool_calls?.[0].id).not.toBe("")
+    const toolMsg = second.find((m) => m.role === "tool")
+    expect(toolMsg?.tool_call_id).toBe(assistantCall?.tool_calls?.[0].id)
+  })
 })
 
 describe("windowHistory unit", () => {

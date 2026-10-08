@@ -85,11 +85,19 @@ export class ToolCallAccumulator {
     }
   }
 
-  /** Complete calls (a name is the minimum validity bar); id synthesized if missing. */
+  /**
+   * Complete calls (a name is the minimum validity bar). A call that never
+   * received an id gets `call_<n>` synthesized — same scheme as the
+   * non-streaming foldToolCalls fallback — so the protocol trio's
+   * tool_call_id is never an empty string (the n is the fragment index,
+   * stable for the whole stream because the calls array never re-orders).
+   */
   complete(): CompletedToolCall[] {
-    return this.calls.filter(
-      (c): c is CompletedToolCall => c !== null && c.name !== ""
-    )
+    return this.calls.flatMap((c, i) => {
+      if (c === null || c.name === "") return []
+      if (c.id === "") c.id = `call_${i}`
+      return [c]
+    })
   }
 }
 

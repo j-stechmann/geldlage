@@ -50,7 +50,9 @@ The agent chat is built from six pieces:
   lib/agent/tools/ — the wire `tools` array (`toolsForRequest()`) and the
   system prompt's tool list derive from it. The registry holds exactly one
   tool, `get_category_totals`
-  (period `this_month | last_month | last_90_days`, ISO-date string
+  (period `this_month | last_month | last_90_days`, optional booking-status
+  filter `Gebucht` (default, matching the transactions table and analytics
+  views) | `Nicht gebucht` | `both`, ISO-date string
   comparison against `booking_date` — exact calendar math, no timezone
   drift). **All tools are read-only** and every tool executes with the
   **speaker's uid** (`ctx.uid`) — in a shared thread the answers reflect

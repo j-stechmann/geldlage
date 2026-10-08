@@ -64,7 +64,11 @@ export async function* runAgentTurn(params: {
   // (the system turn's fixed overhead is negligible next to the 24-cap),
   // chars/4 ≈ tokens like the lib/llm guard. Exceeding ctx gets output
   // clamped by the server — an operator-level misconfiguration surfaced
-  // loudly instead of silently truncating answers.
+  // loudly instead of silently truncating answers. Deliberately NOT
+  // re-estimated inside the loop: tool results appended to `msgs` in later
+  // rounds are unaccounted (advisory-by-design — the window cap bounds the
+  // request side, and a mid-turn warn would fire after output already
+  // streamed).
   const promptChars =
     estimatePromptChars(windowHistory(params.history)) + system.content.length
   if (promptChars > cfg.LLM_CTX * CHARS_PER_TOKEN * CTX_HEADROOM) {

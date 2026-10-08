@@ -18,7 +18,16 @@ import { cn } from "@/lib/utils"
  */
 export function AgentDock() {
   const { open, width } = usePanelState()
-  const [isDesktop, setIsDesktop] = useState(true)
+  // Read the breakpoint synchronously on first render, not in an effect:
+  // with the panel persisted open, a mobile visitor would otherwise paint
+  // the docked <aside> once before matchMedia flips post-paint. Safe even
+  // with SSR — the dock renders null until the client store hydrates
+  // (open defaults false), so the initializer only ever runs client-side.
+  const [isDesktop, setIsDesktop] = useState(
+    () =>
+      typeof window === "undefined" ||
+      window.matchMedia("(min-width: 768px)").matches
+  )
 
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 768px)")

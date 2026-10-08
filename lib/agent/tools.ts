@@ -17,5 +17,6 @@ export {
   periodEndDate,
   type AgentToolName,
   type CategoryTotalsPeriod,
+  type CategoryTotalsStatus,
   type CategoryTotalsResult,
 } from "@/lib/agent/tools/category-totals"

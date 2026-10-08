@@ -45,15 +45,12 @@ export function windowHistory(
   // slice: everything from it onward is kept, everything before it is
   // dropped (the newest message is the current turn and is always inside
   // the cap). Keeps the protocol pairing intact even after heavy trimming
-  // while honoring the 24-message cap.
+  // while honoring the 24-message cap — the anchor shift can only shrink
+  // the window, so the slice(-cap) result above stays within the cap.
   const start = capped.findIndex((m) => m.role === "user")
   if (start === -1) return []
 
-  const windowed = capped.slice(start).map(truncateMessage)
-  if (windowed.length > AGENT_HISTORY_MAX_MESSAGES) {
-    return windowed.slice(-AGENT_HISTORY_MAX_MESSAGES)
-  }
-  return windowed
+  return capped.slice(start).map(truncateMessage)
 }
 
 function truncateMessage(m: AgentChatMessage): AgentChatMessage {

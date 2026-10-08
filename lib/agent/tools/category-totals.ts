@@ -8,7 +8,9 @@ import type { AgentTool, ToolContext } from "@/lib/agent/types"
  * sums for a UI-visible period. Executes against the asking user's own
  * data (ctx.uid scoping — in shared threads the results reflect whoever
  * the loop executes for, never another member's data) and returns plain
- * serializable JSON.
+ * serializable JSON. The booking status is filterable (`Gebucht` /
+ * `Nicht gebucht` / `both`) and defaults to `Gebucht` so the tool's
+ * default matches the transactions table and analytics views.
  */
 
 /** UI-visible periods the tool accepts (validated against before querying). */
@@ -22,6 +24,19 @@ const PERIODS: readonly CategoryTotalsPeriod[] = [
 
 function isPeriod(v: unknown): v is CategoryTotalsPeriod {
   return typeof v === "string" && (PERIODS as readonly string[]).includes(v)
+}
+
+/** Booking status filter ("both" disables the status condition entirely). */
+export type CategoryTotalsStatus = "Gebucht" | "Nicht gebucht" | "both"
+
+const STATUSES: readonly CategoryTotalsStatus[] = [
+  "Gebucht",
+  "Nicht gebucht",
+  "both",
+]
+
+function isStatus(v: unknown): v is CategoryTotalsStatus {
+  return typeof v === "string" && (STATUSES as readonly string[]).includes(v)
 }
 
 /**
@@ -77,6 +92,7 @@ interface CategoryTotal {
 
 export interface CategoryTotalsResult {
   period: CategoryTotalsPeriod
+  status: CategoryTotalsStatus
   categories: CategoryTotal[]
   totalsCents: { inflow: number; outflow: number }
 }
@@ -87,7 +103,7 @@ export type AgentToolName = "get_category_totals"
 export const get_category_totals: AgentTool = {
   name: "get_category_totals",
   description:
-    "Liefert Summen (Einnahmen/Ausgaben) und Transaktionsanzahl pro Kategorie für den Sitzungsbenutzer. Wähle eine Periode: this_month, last_month oder last_90_days. Beträge in Cent (Integer).",
+    "Liefert Summen (Einnahmen/Ausgaben) und Transaktionsanzahl pro Kategorie für den Sitzungsbenutzer. Wähle eine Periode: this_month, last_month oder last_90_days. Optional filter nach Buchungsstatus: Gebucht (Standard), Nicht gebucht (vorgemerkt) oder both. Beträge in Cent (Integer).",
   parameters: {
     type: "object",
     properties: {
@@ -95,14 +111,24 @@ export const get_category_totals: AgentTool = {
         type: "string",
         enum: ["this_month", "last_month", "last_90_days"],
       },
+      status: {
+        type: "string",
+        enum: ["Gebucht", "Nicht gebucht", "both"],
+        description:
+          "Buchungsstatus der Transaktionen. Standard: Gebucht — nur final gebuchte Umsätze. „Nicht gebucht“ = vorgemerkte Umsätze. „both“ = beides zusammen.",
+      },
     },
     required: ["period"],
     additionalProperties: false,
   },
   async execute(args: unknown, ctx: ToolContext): Promise<unknown> {
-    const raw = (args ?? null) as { period?: unknown } | null
+    const raw = (args ?? null) as {
+      period?: unknown
+      status?: unknown
+    } | null
     const period = raw?.period
-    if (!isPeriod(period)) {
+    const status = raw?.status === undefined ? "Gebucht" : raw.status
+    if (!isPeriod(period) || !isStatus(status)) {
       throw new Error("invalid args")
     }
     const start = periodStartDate(period, new Date())
@@ -127,6 +153,11 @@ export const get_category_totals: AgentTool = {
         and(
           eq(transactions.userId, ctx.uid),
           isNotNull(transactions.categoryId),
+          // "both" omits the status condition entirely; a specific status
+          // filters exactly it (status strings match the DB and the UI's
+          // filter values — the UI's no-filter token is "all", this tool's
+          // is "both").
+          status === "both" ? undefined : eq(transactions.status, status),
           gte(transactions.bookingDate, start),
           lt(transactions.bookingDate, end)
         )
@@ -171,6 +202,7 @@ export const get_category_totals: AgentTool = {
 
     const result: CategoryTotalsResult = {
       period,
+      status,
       categories: list,
       totalsCents: { inflow, outflow },
     }

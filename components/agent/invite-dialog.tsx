@@ -21,7 +21,8 @@ interface InviteDialogProps {
   open: boolean
   threadId: string
   members: Member[]
-  onInvite: (userIds: number[]) => Promise<void>
+  /** Resolves to true when the invite succeeded (selection may clear). */
+  onInvite: (userIds: number[]) => Promise<boolean>
   onClose: () => void
 }
 
@@ -42,10 +43,16 @@ export function InviteDialog(props: InviteDialogProps) {
       s.includes(id) ? s.filter((x) => x !== id) : [...s, id]
     )
 
+  // Closing (cancel, backdrop, ESC) drops the selection; a failed invite
+  // keeps it so the user can retry without re-checking rows.
+  const closeAndReset = () => {
+    setSelected([])
+    props.onClose()
+  }
   return (
     <Dialog
       open={props.open}
-      onOpenChange={(o) => (o ? undefined : props.onClose())}
+      onOpenChange={(o) => (o ? undefined : closeAndReset())}
     >
       <DialogContent>
         <DialogHeader>
@@ -74,13 +81,23 @@ export function InviteDialog(props: InviteDialogProps) {
           ))}
         </div>
         <div className="flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={props.onClose}>
+          <Button variant="outline" size="sm" onClick={closeAndReset}>
             Abbrechen
           </Button>
           <Button
             size="sm"
             disabled={selected.length === 0}
-            onClick={() => props.onInvite(selected).then(() => setSelected([]))}
+            // Clear only on success (onInvite resolves false on failure);
+            // .catch keeps a thrown network error from becoming an
+            // unhandled rejection (selection stays for retry).
+            onClick={() =>
+              void props
+                .onInvite(selected)
+                .then((ok) => {
+                  if (ok) setSelected([])
+                })
+                .catch(() => {})
+            }
           >
             Einladen
           </Button>

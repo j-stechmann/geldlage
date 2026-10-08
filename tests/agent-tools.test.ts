@@ -7,7 +7,10 @@ import {
   toolByName,
   toolsForRequest,
 } from "@/lib/agent/tools"
-import type { CategoryTotalsPeriod } from "@/lib/agent/tools"
+import type {
+  CategoryTotalsPeriod,
+  CategoryTotalsStatus,
+} from "@/lib/agent/tools"
 import { seedUser, setupTestDb } from "./helpers"
 
 let db: Db
@@ -27,6 +30,7 @@ function seedTx(opts: {
   categoryId: number
   amountCents: number
   bookingDate: string
+  status?: string
 }): void {
   db.insert(transactions)
     .values({
@@ -34,7 +38,7 @@ function seedTx(opts: {
       userId: opts.userId,
       accountId: accountIdFor(opts.userId),
       bookingDate: opts.bookingDate,
-      status: "Gebucht",
+      status: opts.status ?? "Gebucht",
       payer: "P",
       payee: "Q",
       type: opts.amountCents < 0 ? "Ausgang" : "Eingang",
@@ -114,6 +118,13 @@ describe("toolsForRequest / toolByName", () => {
     expect(wire[0].function.parameters).toMatchObject({
       type: "object",
       required: ["period"],
+      properties: {
+        period: {
+          type: "string",
+          enum: ["this_month", "last_month", "last_90_days"],
+        },
+        status: { type: "string", enum: ["Gebucht", "Nicht gebucht", "both"] },
+      },
     })
   })
 
@@ -334,5 +345,117 @@ describe("get_category_totals", () => {
       }
       expect(result.period).toBe(period)
     }
+  })
+
+  it("defaults to Gebucht and excludes Nicht gebucht rows (matches the UI)", async () => {
+    const tool = toolByName("get_category_totals")!
+    seedTx({
+      userId: uid1,
+      categoryId: cat1,
+      amountCents: -1000,
+      bookingDate: dayFromToday(-1),
+      status: "Gebucht",
+    })
+    // pending row in-window with a category: dashboards don't count it by
+    // default (parseFilters status = "Gebucht"), the tool must match
+    seedTx({
+      userId: uid1,
+      categoryId: cat1,
+      amountCents: -40000,
+      bookingDate: dayFromToday(-1),
+      status: "Nicht gebucht",
+    })
+
+    const def = (await tool.execute(
+      { period: "this_month" },
+      { uid: uid1 }
+    )) as { status: string; totalsCents: { outflow: number } }
+    expect(def.status).toBe("Gebucht")
+    expect(def.totalsCents.outflow).toBe(-1000)
+  })
+
+  it("filters Nicht gebucht only", async () => {
+    const tool = toolByName("get_category_totals")!
+    seedTx({
+      userId: uid1,
+      categoryId: cat1,
+      amountCents: -1000,
+      bookingDate: dayFromToday(-1),
+      status: "Gebucht",
+    })
+    seedTx({
+      userId: uid1,
+      categoryId: cat2,
+      amountCents: -40000,
+      bookingDate: dayFromToday(-1),
+      status: "Nicht gebucht",
+    })
+
+    const r = (await tool.execute(
+      { period: "this_month", status: "Nicht gebucht" },
+      { uid: uid1 }
+    )) as {
+      status: string
+      categories: Array<{ category: string; outflowCents: number }>
+    }
+    expect(r.status).toBe("Nicht gebucht")
+    expect(r.categories).toHaveLength(1)
+    expect(r.categories[0].category).toBe("Reisen")
+    expect(r.categories[0].outflowCents).toBe(-40000)
+  })
+
+  it("status both sums booked and pending rows together", async () => {
+    const tool = toolByName("get_category_totals")!
+    seedTx({
+      userId: uid1,
+      categoryId: cat1,
+      amountCents: -1000,
+      bookingDate: dayFromToday(-1),
+      status: "Gebucht",
+    })
+    seedTx({
+      userId: uid1,
+      categoryId: cat1,
+      amountCents: -40000,
+      bookingDate: dayFromToday(-1),
+      status: "Nicht gebucht",
+    })
+
+    const r = (await tool.execute(
+      { period: "this_month", status: "both" },
+      { uid: uid1 }
+    )) as { status: string; totalsCents: { outflow: number }; count?: never }
+    const withCount = r as typeof r & {
+      categories: Array<{ count: number }>
+    }
+    expect(r.status).toBe("both")
+    expect(r.totalsCents.outflow).toBe(-41000)
+    expect(withCount.categories[0].count).toBe(2)
+  })
+
+  it("accepts every documented status value", async () => {
+    const tool = toolByName("get_category_totals")!
+    const statuses: CategoryTotalsStatus[] = [
+      "Gebucht",
+      "Nicht gebucht",
+      "both",
+    ]
+    for (const status of statuses) {
+      const result = (await tool.execute(
+        { period: "this_month", status },
+        { uid: uid1 }
+      )) as { status: string }
+      expect(result.status).toBe(status)
+    }
+  })
+
+  it("rejects invalid status values", async () => {
+    const tool = toolByName("get_category_totals")!
+    await expect(
+      tool.execute({ period: "this_month", status: "pending" }, { uid: uid1 })
+    ).rejects.toThrow(/invalid args/)
+    await expect(
+      tool.execute({ period: "this_month", status: 1 }, { uid: uid1 })
+    ).rejects.toThrow(/invalid args/)
   })
 })

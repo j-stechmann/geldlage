@@ -122,18 +122,19 @@ export function AgentChat() {
   )
 
   const onInvite = useCallback(
-    async (userIds: number[]) => {
-      if (!activeThreadId) return
+    async (userIds: number[]): Promise<boolean> => {
+      if (!activeThreadId) return false
       const count = await invite(activeThreadId, userIds)
       if (count === null) {
         toast.error("Einladung fehlgeschlagen.")
-        return
+        return false
       }
       toast.success(
         count === 1 ? "1 Einladung gesendet." : `${count} Einladungen gesendet.`
       )
       setInviteOpen(false)
       refresh(activeThreadId)
+      return true
     },
     [activeThreadId, refresh]
   )
