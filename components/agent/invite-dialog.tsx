@@ -9,7 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { USERS_KEY, fetchUsers, invite } from "@/components/agent/agent-api"
+import { USERS_KEY, fetchUsers } from "@/components/agent/agent-api"
 import type { Member, UserRow } from "@/components/agent/types"
 
 /**
@@ -19,7 +19,6 @@ import type { Member, UserRow } from "@/components/agent/types"
 
 interface InviteDialogProps {
   open: boolean
-  threadId: string
   members: Member[]
   /** Resolves to true when the invite succeeded (selection may clear). */
   onInvite: (userIds: number[]) => Promise<boolean>
@@ -108,4 +107,3 @@ export function InviteDialog(props: InviteDialogProps) {
 }
 
 export type { Member }
-export type InviteResult = Awaited<ReturnType<typeof invite>>

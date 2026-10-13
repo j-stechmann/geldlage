@@ -59,6 +59,7 @@ export function AgentChat() {
     stop,
   } = useAgentTurn()
   const {
+    threadsQuery,
     detailQuery,
     threads,
     activeThreadId,
@@ -225,6 +226,7 @@ export function AgentChat() {
       <MessageListView
         data={detailQuery.data}
         hasError={Boolean(detailQuery.error)}
+        threadsError={Boolean(threadsQuery.error)}
         activeThreadId={activeThreadId}
         activeRole={activeRole}
         streaming={streaming}
@@ -239,7 +241,8 @@ export function AgentChat() {
         onJoin={onJoin}
         onDecline={onDecline}
         onRetry={() => {
-          void detailQuery.refetch()
+          if (threadsQuery.error) void threadsQuery.refetch()
+          if (detailQuery.error) void detailQuery.refetch()
         }}
         pinTarget={
           streaming && turnThreadId === activeThreadId
@@ -259,7 +262,6 @@ export function AgentChat() {
       />
       <InviteDialog
         open={inviteOpen}
-        threadId={activeThreadId}
         members={members}
         onInvite={onInvite}
         onClose={() => setInviteOpen(false)}

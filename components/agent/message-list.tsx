@@ -17,7 +17,8 @@ const EMPTY: StoredMessage[] = []
 /**
  * Message list (ADR-0033): persisted rows + optimistic pending user
  * message + the streaming bubble, pinned to the bottom. Handles the three
- * special views: no thread (empty state), invited preview (join panel —
+ * special views: no thread (threads-list error or empty state), invited
+ * preview (join panel —
  * the detail query 404s for invited users by design), and owner/member
  * loading/error states.
  */
@@ -25,6 +26,12 @@ const EMPTY: StoredMessage[] = []
 interface MessageListProps {
   data: ThreadDetail | undefined
   hasError: boolean
+  /**
+   * The threads LIST query failed: with the list gone no thread id can
+   * derive (activeThreadId is ""), so the no-thread view must show this
+   * error — the friendly empty state would silently hide the failure.
+   */
+  threadsError: boolean
   activeThreadId: string
   /** Role from the threads list — decides invited-preview vs. ordinary view. */
   activeRole: ThreadRole | undefined
@@ -94,6 +101,9 @@ export function MessageListView(props: MessageListProps) {
   }, [listEl, turnHere])
 
   if (!props.activeThreadId) {
+    if (props.threadsError) {
+      return <ErrorPanel onRetry={props.onRetry} />
+    }
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
         Stell eine Frage zu deinen Finanzdaten…
@@ -128,16 +138,7 @@ export function MessageListView(props: MessageListProps) {
     )
   }
   if (props.hasError) {
-    return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-        <p className="text-sm text-muted-foreground">
-          Chats konnten nicht geladen werden.
-        </p>
-        <Button size="sm" variant="outline" onClick={props.onRetry}>
-          Erneut versuchen
-        </Button>
-      </div>
-    )
+    return <ErrorPanel onRetry={props.onRetry} />
   }
   if (!props.data) {
     return (
@@ -243,6 +244,20 @@ function UserBubble(props: { content: string }) {
   return (
     <div className="rounded-xl rounded-br-sm bg-primary px-3 py-1.5 text-sm whitespace-pre-wrap text-primary-foreground">
       {props.content}
+    </div>
+  )
+}
+
+/** Shared fetch-failed view: a failed threads list or failed detail fetch. */
+function ErrorPanel(props: { onRetry: () => void }) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+      <p className="text-sm text-muted-foreground">
+        Chats konnten nicht geladen werden.
+      </p>
+      <Button size="sm" variant="outline" onClick={props.onRetry}>
+        Erneut versuchen
+      </Button>
     </div>
   )
 }
