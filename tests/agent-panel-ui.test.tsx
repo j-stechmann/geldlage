@@ -94,6 +94,10 @@ function postTurnMessagesWithUser(): Array<Record<string, unknown>> {
 /** One fetch stub covering the whole thread flow via a mutable script. */
 function stubChatFlow(state: {
   messages: Array<Record<string, unknown>>
+  /** Optional messages for t2 (otherwise t2 serves the 404 preview). */
+  messagesT2?: Array<Record<string, unknown>>
+  /** Makes the chat POST answer this plain JSON error before persisting. */
+  chatReject?: { status: number; body: Record<string, unknown> }
   threads: Array<Record<string, unknown>>
 }) {
   const calls: Array<{ path: string; method: string }> = []
@@ -109,12 +113,20 @@ function stubChatFlow(state: {
         return Response.json(threadDetail(state.messages))
       }
       if (path === "/api/agent/threads/t1/chat" && method === "POST") {
+        if (state.chatReject) {
+          return Response.json(state.chatReject.body, {
+            status: state.chatReject.status,
+          })
+        }
         return new Response(chatStream(state), {
           headers: { "Content-Type": "text/event-stream" },
         })
       }
       if (path === "/api/agent/threads/t2/messages" && method === "GET") {
-        return Response.json({ error: "not_found" }, { status: 404 })
+        if (!state.messagesT2) {
+          return Response.json({ error: "not_found" }, { status: 404 })
+        }
+        return Response.json(threadDetail(state.messagesT2))
       }
       if (path === "/api/agent/threads/t2/join" && method === "POST") {
         return Response.json({ joined: true })
@@ -368,6 +380,91 @@ describe("<AgentChat>", () => {
       screen.queryByText("Stell eine Frage zu deinen Finanzdaten…")
     ).not.toBeInTheDocument()
   })
+
+  it("keeps turn UI out of the other thread's list when switching mid-turn", async () => {
+    // The dropdown stays usable while a turn streams; a thread switch must
+    // not render the optimistic bubble or the streamed answer there.
+    const state = {
+      messages: [
+        msg("m1", "user", "Wie viel habe ich diesen Monat ausgegeben?", 1),
+      ],
+      messagesT2: [msg("s1", "user", "Andere Frage", 1)],
+      threads: [
+        {
+          id: "t1",
+          title: "Haushaltsfragen",
+          role: "owner",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+        {
+          id: "t2",
+          title: "Zweiter Chat",
+          role: "owner",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    }
+    stubChatFlow(state)
+    renderWithQuery(createElement(AgentChat))
+    await waitFor(() =>
+      expect(screen.getByText("Haushaltsfragen")).toBeInTheDocument()
+    )
+    const input = screen.getByPlaceholderText("Nachricht…")
+    await userEvent.type(input, "Wie viel?")
+    await userEvent.click(screen.getByRole("button", { name: "Senden" }))
+    // mid-turn in t1: the optimistic bubble is visible here
+    await waitFor(() =>
+      expect(screen.getByText("Wie viel?")).toBeInTheDocument()
+    )
+    // switch to t2 while the turn holds (the stream is never released)
+    await userEvent.click(screen.getByRole("button", { name: "2 Chats" }))
+    await userEvent.click(screen.getByText("Zweiter Chat"))
+    expect(screen.getByText("Andere Frage")).toBeInTheDocument()
+    // neither the optimistic bubble nor the streamed turn leaks into t2
+    expect(screen.queryByText("Wie viel?")).not.toBeInTheDocument()
+    expect(screen.queryByText("get_category_totals")).not.toBeInTheDocument()
+
+    // the turn still completes normally (held stream released now)
+    await act(async () => {
+      releaseTurn()
+      await Promise.resolve()
+    })
+    expect(screen.getByText("Andere Frage")).toBeInTheDocument()
+    expect(screen.queryByText("Wie viel?")).not.toBeInTheDocument()
+  }, 15_000)
+
+  it("puts the typed message back when the send is rejected pre-persist", async () => {
+    // 400 = the server validated the content away BEFORE any persistence
+    // (nothing was stored), so the composer must get the draft back.
+    const state = {
+      messages: [],
+      chatReject: { status: 400, body: { error: "invalid_content" } },
+      threads: [
+        {
+          id: "t1",
+          title: "Haushaltsfragen",
+          role: "owner",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    }
+    stubChatFlow(state)
+    renderWithQuery(createElement(AgentChat))
+    await waitFor(() =>
+      expect(screen.getByText("Haushaltsfragen")).toBeInTheDocument()
+    )
+    const input = screen.getByPlaceholderText("Nachricht…")
+    await userEvent.type(input, "Meine ausgelöschte Frage")
+    await userEvent.click(screen.getByRole("button", { name: "Senden" }))
+    // the composer holds the message again once the turn hook resolves
+    await waitFor(() => expect(input).toHaveValue("Meine ausgelöschte Frage"))
+    // no optimistic bubble was left hanging either
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Meine ausgelöschte Frage")
+      ).not.toBeInTheDocument()
+    )
+  }, 15_000)
 
   it("shows the invited join panel after selecting the invite, join POSTs", async () => {
     const state = {

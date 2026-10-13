@@ -16,10 +16,14 @@ import type { ToolEvent } from "@/components/agent/types"
  * optimistic UI while the SSE turn streams (polling is paused during the
  * turn, so the DB rows the server persisted are not visible until the
  * post-done refetch), absorbs aborts, and refetches the persisted rows
- * after done/error.
+ * after done/error. `turnThreadId` reports the thread the in-flight turn
+ * belongs to so callers scope the turn UI to it — the thread dropdown
+ * stays usable mid-turn, and other threads' lists must not absorb the
+ * optimistic bubble or the live stream.
  *
  * The thread id is a `send` argument, not hook state: the first send may
- * create the thread (lazily), so a hook-level capture would be stale.
+ * create the thread (lazily), so a hook-level capture would be stale. It
+ * is only mirrored into state for the turn-UI scoping above.
  */
 
 export interface TurnStreams {
@@ -45,6 +49,10 @@ export function useAgentTurn() {
     null
   )
   const [pendingMessageId, setPendingMessageId] = useState<string | null>(null)
+  // The thread the in-flight turn belongs to (set with the pending state,
+  // cleared with it in `finally`): the list renders turn UI only while
+  // viewing this thread.
+  const [turnThreadId, setTurnThreadId] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const queryClient = useQueryClient()
 
@@ -53,21 +61,38 @@ export function useAgentTurn() {
   }, [])
 
   /**
-   * Sends one user turn to the given thread. Resolves when the turn is
-   * fully consumed (or aborted/failed) — the caller can refetch after
-   * awaiting, though this hook already invalidates the queries in its
-   * `finally`. Returns false when the send could not complete.
+   * Sends one user turn to the given thread. Resolves `true` once the
+   * server accepted the turn — from that moment the user message row is
+   * persisted (stream failures and aborts are surfaced here via toasts
+   * and the post-turn refetch), so callers must NOT put the content back
+   * into the composer: a retry would append a duplicate. Resolves `false`
+   * only when the request was rejected before any persistence (HTTP
+   * error, unreachable server) — callers may then restore the typed
+   * content for a retry.
    */
   const send = useCallback(
     async (threadId: string, content: string): Promise<boolean> => {
       setPendingUserMessage(content)
       setPendingMessageId(null)
+      setTurnThreadId(threadId)
       setStreaming(true)
       setStreams({ content: "", reasoning: "", tools: [] })
       const controller = new AbortController()
       abortRef.current = controller
       try {
-        const res = await sendTurn(threadId, content, controller.signal)
+        let res: Response
+        try {
+          res = await sendTurn(threadId, content, controller.signal)
+        } catch (err) {
+          // Aborted before headers: the server may already have persisted
+          // the user row — treat as accepted (restoring the composer
+          // would invite a duplicate resend).
+          if (err instanceof DOMException && err.name === "AbortError") {
+            return true
+          }
+          toast.error("Der Chat-Dienst ist nicht erreichbar.")
+          return false
+        }
         if (!res.ok || !res.body) {
           const body = (await res.json().catch(() => null)) as {
             message?: string
@@ -75,13 +100,17 @@ export function useAgentTurn() {
           toast.error(body?.message ?? "Der Chat-Dienst ist nicht erreichbar.")
           return false
         }
-        await consumeTurn(res.body)
-        return true
-      } catch (err) {
-        if (!(err instanceof DOMException && err.name === "AbortError")) {
-          toast.error("Die Verbindung zum LLM wurde unterbrochen.")
+        // Accepted: everything from here on (mid-stream connection loss,
+        // aborts) still had the user row persisted — failures surface via
+        // toasts below and the refetch, never by restoring the composer.
+        try {
+          await consumeTurn(res.body)
+        } catch (err) {
+          if (!(err instanceof DOMException && err.name === "AbortError")) {
+            toast.error("Die Verbindung zum LLM wurde unterbrochen.")
+          }
         }
-        return false
+        return true
       } finally {
         abortRef.current = null
         // Invalidate BEFORE dropping the optimistic state: the awaited
@@ -97,6 +126,7 @@ export function useAgentTurn() {
           .catch(() => undefined)
         setPendingMessageId(null)
         setPendingUserMessage(null)
+        setTurnThreadId(null)
         setStreaming(false)
       }
     },
@@ -108,6 +138,7 @@ export function useAgentTurn() {
     streams,
     pendingUserMessage,
     pendingMessageId,
+    turnThreadId,
     send,
     stop,
   }

@@ -160,16 +160,20 @@ export async function POST(
 }
 
 /**
- * One loop event → persisted rows + SSE frame for the browser. Frame
- * names: content streams as `delta`, everything else keeps its event
- * name. The done frame echoes content+reasoning and carries the saved
- * message id so the client can align optimistic UI with the stored record.
+ * One loop event → persisted rows + SSE frame for the browser: EVERY event
+ * goes through the persister first (tool_row writes happen per
+ * tool_call/tool_result pair, the assistant row per done), then the frame
+ * streams. Frame names: content streams as `delta`, everything else keeps
+ * its event name. The done frame echoes content+reasoning and carries the
+ * saved message id (onLoopEvent returns it only for done) so the client
+ * can align optimistic UI with the stored record.
  */
 function persistAndEnqueue(
   controller: ReadableStreamDefaultController<Uint8Array>,
   persister: TurnPersister,
   ev: AgentLoopEvent
 ): void {
+  const messageId = persister.onLoopEvent(ev)
   switch (ev.type) {
     case "reasoning":
       controller.enqueue(sseFrame("reasoning", { text: ev.text }))
@@ -187,8 +191,7 @@ function persistAndEnqueue(
         sseFrame("tool_result", { name: ev.name, result: ev.result })
       )
       break
-    case "done": {
-      const messageId = persister.onLoopEvent(ev)
+    case "done":
       controller.enqueue(
         sseFrame("done", {
           messageId,
@@ -197,6 +200,5 @@ function persistAndEnqueue(
         })
       )
       break
-    }
   }
 }

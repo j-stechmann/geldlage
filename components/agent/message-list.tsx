@@ -39,6 +39,13 @@ interface MessageListProps {
    * optimistic bubble.
    */
   pendingMessageId: string | null
+  /**
+   * The thread the in-flight turn belongs to (null between turns): turn
+   * UI — the optimistic bubble, its dedupe and the streamed answer —
+   * renders only in a view of THAT thread, so switching threads mid-turn
+   * cannot leak live state into the other thread's list.
+   */
+  turnThreadId: string | null
   namesById: Map<number, string>
   invitedTitle: string | undefined
   onJoin: (id: string) => Promise<void>
@@ -61,8 +68,12 @@ export function MessageListView(props: MessageListProps) {
   // to the bottom — unless the user scrolled up to read (they win: a
   // scroll event is the only user signal, content growth changes
   // scrollHeight, not scrollTop, so stickiness lives in a scroll-ref).
+  // Reactive to turnHere (not streaming): switching away mid-turn
+  // detaches, switching back re-attaches for the still-running turn.
+  const turnHere =
+    props.streaming && props.turnThreadId === props.activeThreadId
   useEffect(() => {
-    if (!listEl || !props.streaming) return
+    if (!listEl || !turnHere) return
     const nearBottom = () =>
       listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < 80
     let stick = true
@@ -80,7 +91,7 @@ export function MessageListView(props: MessageListProps) {
       observer.disconnect()
       listEl.removeEventListener("scroll", onScroll)
     }
-  }, [listEl, props.streaming])
+  }, [listEl, turnHere])
 
   if (!props.activeThreadId) {
     return (
@@ -145,16 +156,18 @@ export function MessageListView(props: MessageListProps) {
     new Set(messages.filter((m) => m.userId !== null).map((m) => m.userId))
       .size > 1
   // The optimistic bubble fills the gap until the authoritative view shows
-  // the message. The detail fetch races a first-turn send (the lazily
-  // created thread enables the query right after the server persisted the
-  // row), so the fetched list can contain the persisted twin already —
-  // dedupe by the `user` frame's row id once aligned, content-match only
-  // as the unaligned-window fallback; rendering both would duplicate the
-  // first message for the whole streamed turn. The persisted row wins
-  // (authoritative seq order, author name). Content-matching an identical
-  // earlier message hides the bubble for one refetch cycle at worst.
+  // the message — in the TURN's thread only (see turnThreadId). The detail
+  // fetch races a first-turn send (the lazily created thread enables the
+  // query right after the server persisted the row), so the fetched list
+  // can contain the persisted twin already — dedupe by the `user` frame's
+  // row id once aligned, content-match only as the unaligned-window
+  // fallback; rendering both would duplicate the first message for the
+  // whole streamed turn. The persisted row wins (authoritative seq order,
+  // author name). Content-matching an identical earlier message hides the
+  // bubble for one refetch cycle at worst.
   const pending =
     props.pendingUserMessage !== null &&
+    props.turnThreadId === props.activeThreadId &&
     (props.pendingMessageId === null
       ? messages.some(
           (m) => m.role === "user" && m.content === props.pendingUserMessage
@@ -179,7 +192,7 @@ export function MessageListView(props: MessageListProps) {
             <UserBubble content={pending} />
           </div>
         )}
-        {props.streaming && (
+        {turnHere && (
           <AssistantBubble
             content={props.streamContent}
             reasoning={props.streamReasoning}

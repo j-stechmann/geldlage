@@ -1,4 +1,8 @@
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect, beforeEach, afterEach } from "vitest"
+import type { Server } from "node:http"
+import { createServer } from "node:http"
+import { AddressInfo } from "node:net"
+import { resetConfigCache } from "@/lib/config"
 import type { Db } from "@/lib/db"
 import { chatMessages, chatThreadMembers, users } from "@/lib/db/schema"
 import { GET as listUsers } from "@/app/api/users/route"
@@ -358,6 +362,198 @@ describe("chat route gating", () => {
       { params: Promise.resolve({ id: threadId }) }
     )
     expect(outsider.status).toBe(404)
+  })
+})
+
+describe("chat route turn persistence", () => {
+  let server: Server | null = null
+  let agentRequests = 0
+  /**
+   * Scripted tool-call rounds for AGENT (non-title) LLM requests, one
+   * entry per loop round; the auto-title one-shot is answered separately
+   * by its "Chat-Titel" prompt marker.
+   */
+  let scripted: Array<{
+    toolCalls?: Array<{
+      index: number
+      id: string
+      name: string
+      arguments: string
+    }>
+    content?: string[]
+  }> = []
+
+  beforeEach(() => {
+    agentRequests = 0
+    scripted = []
+  })
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      if (!server) return resolve()
+      server.close(() => resolve())
+    })
+    server = null
+    resetConfigCache()
+  })
+
+  /** Lets the fire-and-forget auto-title one-shot land before teardown. */
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 40; i++) await new Promise((r) => setTimeout(r, 10))
+  }
+
+  /** Mock llama-server: scripted agent rounds, fixed answer for titles. */
+  async function startLlmMock(): Promise<void> {
+    server = createServer((req, res) => {
+      const chunks: Buffer[] = []
+      req.on("data", (c: Buffer) => chunks.push(c))
+      req.on("end", () => {
+        const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+          messages: Array<{ content?: unknown }>
+        }
+        const isTitleCall = body.messages.some(
+          (m) =>
+            typeof m.content === "string" && m.content.includes("Chat-Titel")
+        )
+        res.writeHead(200, { "Content-Type": "text/event-stream" })
+        const frames: string[] = []
+        if (isTitleCall) {
+          frames.push(
+            `data: ${JSON.stringify({
+              choices: [{ delta: { content: "Titel" } }],
+            })}`
+          )
+        } else {
+          const round = scripted[agentRequests++] ?? { content: ["fehler"] }
+          for (const c of round.toolCalls ?? []) {
+            frames.push(
+              `data: ${JSON.stringify({
+                choices: [
+                  {
+                    delta: {
+                      tool_calls: [
+                        {
+                          index: c.index,
+                          id: c.id,
+                          function: { name: c.name, arguments: c.arguments },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              })}`
+            )
+          }
+          for (const text of round.content ?? []) {
+            frames.push(
+              `data: ${JSON.stringify({
+                choices: [{ delta: { content: text } }],
+              })}`
+            )
+          }
+        }
+        frames.push("data: [DONE]")
+        res.write(frames.map((f) => f + "\n\n").join(""))
+        res.end()
+      })
+    })
+    await new Promise<void>((resolve) =>
+      server!.listen(0, "127.0.0.1", resolve)
+    )
+    const port = (server!.address() as AddressInfo).port
+    process.env.LLM_BASE_URL = `http://127.0.0.1:${port}`
+    resetConfigCache()
+  }
+
+  /** Runs one chat turn to completion; resolves with the raw SSE text. */
+  async function postChat(content: string): Promise<string> {
+    const res = await chatRoute(
+      await req(`/api/agent/threads/${threadId}/chat`, u1, {
+        method: "POST",
+        body: { content },
+      }),
+      { params: Promise.resolve({ id: threadId }) }
+    )
+    return res.text()
+  }
+
+  function rowsInSeq(): Array<{
+    id: string
+    role: string
+    userId: number | null
+    content: string
+    toolName: string | null
+    toolArgs: string | null
+    threadSeq: number
+  }> {
+    return (
+      db
+        .select()
+        .from(chatMessages)
+        .all()
+        // fresh per-test db → exactly this thread's rows, seq order pinned
+        .sort((a, b) => a.threadSeq - b.threadSeq)
+    )
+  }
+
+  it("persists a tool row (args paired from tool_call) before the assistant row", async () => {
+    await startLlmMock()
+    scripted = [
+      {
+        toolCalls: [
+          {
+            index: 0,
+            id: "call_1",
+            name: "get_category_totals",
+            arguments: '{"period":"this_month"}',
+          },
+        ],
+      },
+      { content: ["Hier sind deine Summen."] },
+    ]
+
+    const text = await postChat("Summen?")
+    await settle()
+    const rows = rowsInSeq()
+    expect(rows.map((r) => r.role)).toEqual(["user", "tool", "assistant"])
+
+    const tool = rows.find((r) => r.role === "tool")
+    expect(tool).toBeDefined()
+    expect(tool!.userId).toBeNull()
+    expect(tool!.toolName).toBe("get_category_totals")
+    expect(tool!.toolArgs).toBe('{"period":"this_month"}')
+    // the tool row carries the EXECUTED result (real tool run, uid-scoped)
+    const parsed = JSON.parse(tool!.content) as { categories?: unknown }
+    expect(parsed.categories).toEqual([])
+
+    const assistant = rows.find((r) => r.role === "assistant")
+    expect(assistant!.content).toBe("Hier sind deine Summen.")
+
+    // done frame's messageId = the assistant row id (client alignment)
+    const doneFrames = text
+      .split("\n\n")
+      .filter((frame) => frame.startsWith("event: done"))
+    expect(doneFrames).toHaveLength(1)
+    const dataLine = doneFrames[0]
+      .split("\n")
+      .find((line) => line.startsWith("data: "))
+    const done = JSON.parse(dataLine!.replace(/^data: /, "")) as {
+      messageId: string
+    }
+    expect(done.messageId).toBe(assistant!.id)
+  })
+
+  it("persists no assistant row for an empty answer while keeping the user row", async () => {
+    await startLlmMock()
+    // empty answer on the tools-allowed round → one tools-free retry, also
+    // empty → the turn ends with only the user row persisted
+    scripted = [{ content: [] }, { content: [] }]
+
+    await postChat("Still?")
+    await settle()
+    const rows = rowsInSeq()
+    // user row only — no tool rounds ran and an empty answer saves nothing
+    expect(rows.map((r) => r.role)).toEqual(["user"])
   })
 })
 

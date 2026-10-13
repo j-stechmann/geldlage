@@ -54,6 +54,7 @@ export function AgentChat() {
     streams,
     pendingUserMessage,
     pendingMessageId,
+    turnThreadId,
     send,
     stop,
   } = useAgentTurn()
@@ -102,9 +103,15 @@ export function AgentChat() {
     let threadId = activeThreadId
     if (!threadId) {
       threadId = (await createThreadAndSelect()) ?? ""
-      if (!threadId) return
+      if (!threadId) {
+        // thread creation failed: keep the typed message for a retry
+        setInput(content)
+        return
+      }
     }
-    await send(threadId, content)
+    // A pre-persist rejection (HTTP error / unreachable service) never
+    // persisted the message — put it back instead of swallowing it.
+    if (!(await send(threadId, content))) setInput(content)
   }, [activeThreadId, createThreadAndSelect, input, send, streaming])
 
   const onRename = useCallback(
@@ -226,6 +233,7 @@ export function AgentChat() {
         streamTools={streams.tools}
         pendingUserMessage={pendingUserMessage}
         pendingMessageId={pendingMessageId}
+        turnThreadId={turnThreadId}
         namesById={namesById}
         invitedTitle={activeThread?.title}
         onJoin={onJoin}
@@ -233,7 +241,11 @@ export function AgentChat() {
         onRetry={() => {
           void detailQuery.refetch()
         }}
-        pinTarget={streaming ? "stream" : String(messages.length)}
+        pinTarget={
+          streaming && turnThreadId === activeThreadId
+            ? "stream"
+            : String(messages.length)
+        }
       />
       <ChatInput
         disabled={
