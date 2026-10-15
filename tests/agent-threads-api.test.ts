@@ -29,6 +29,7 @@ import {
   renameThread,
   roleOf,
 } from "@/lib/agent/store"
+import { AGENT_NO_ANSWER_TEXT } from "@/lib/agent/constants"
 import { setupTestDb, seedUser, authedRequest } from "./helpers"
 
 /**
@@ -381,6 +382,7 @@ describe("chat route turn persistence", () => {
       arguments: string
     }>
     content?: string[]
+    reasoning?: string[]
   }> = []
   /** Captured (non-title) request bodies, in arrival order. */
   let captured: Array<{
@@ -460,6 +462,13 @@ describe("chat route turn persistence", () => {
               })}`
             )
           }
+          for (const r of round.reasoning ?? []) {
+            frames.push(
+              `data: ${JSON.stringify({
+                choices: [{ delta: { reasoning_content: r } }],
+              })}`
+            )
+          }
           for (const text of round.content ?? []) {
             frames.push(
               `data: ${JSON.stringify({
@@ -498,6 +507,7 @@ describe("chat route turn persistence", () => {
     role: string
     userId: number | null
     content: string
+    reasoning: string | null
     toolName: string | null
     toolArgs: string | null
     toolCalls: string | null
@@ -679,6 +689,27 @@ describe("chat route turn persistence", () => {
     const rows = rowsInSeq()
     // user row only — no tool rounds ran and an empty answer saves nothing
     expect(rows.map((r) => r.role)).toEqual(["user"])
+  })
+
+  it("persists no placeholder row for a reasoning-only round that retries", async () => {
+    await startLlmMock()
+    // Regression: a tools-allowed round streaming ONLY a thinking trace
+    // takes the empty-answer retry. The round is not fully empty, so
+    // only the retry flag keeps the AGENT_NO_ANSWER_TEXT placeholder row
+    // out of the transcript — otherwise the fake answer would render
+    // permanently and rowsToPromptHistory would replay it into every
+    // later prompt; only the retry's real answer row persists.
+    scripted = [{ reasoning: ["Nachdenken…"] }, { content: ["Eins"] }]
+
+    await postChat("Still?")
+    await settle()
+    const rows = rowsInSeq()
+    expect(rows.map((r) => r.role)).toEqual(["user", "assistant"])
+    const assistant = rows.find((r) => r.role === "assistant")!
+    expect(assistant.content).toBe("Eins")
+    // the degenerate round's reasoning must not leak into the answer row
+    expect(assistant.reasoning).toBeNull()
+    expect(rows.some((r) => r.content === AGENT_NO_ANSWER_TEXT)).toBe(false)
   })
 })
 

@@ -101,7 +101,11 @@ tool_calls`) followed by its tool rows (paired via `tool_call_id`) —
   Claude Code's session-file semantics); a reasoning-only final round keeps
   the placeholder body rule, a prose-less tool round persists with empty
   content (the protocol needs the assistant `tool_calls` message on record;
-  the UI renders such rounds chips-only). Degradation rules, both directions
+  the UI renders such rounds chips-only). A degenerate empty round that
+  continues the turn (the tools-free retry is next) is `retry`-flagged on
+  the round event and persists nothing, reasoning included — it never
+  entered the wire history, and a placeholder row would permanently fake
+  an answer the retry may still give (and replay into later prompts). Degradation rules, both directions
   of "never send a broken trio": legacy rows (no `tool_calls`/`tool_call_id`)
   replay as plain user/assistant text with tool rows dropped — exactly the
   pre-amendment behavior, no backfill migration; and a concurrent send in a

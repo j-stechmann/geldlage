@@ -197,7 +197,13 @@ describe("runAgentTurn", () => {
     ])
     // One round event per model round: the persister's row unit.
     expect(roundsOf(events)).toEqual([
-      { type: "round", content: "Hallo", reasoning: null, calls: [] },
+      {
+        type: "round",
+        content: "Hallo",
+        reasoning: null,
+        calls: [],
+        retry: false,
+      },
     ])
     expect(events[events.length - 1].type).toBe("done")
     expect(
@@ -406,6 +412,7 @@ describe("runAgentTurn", () => {
         content: "Antwort",
         reasoning: "Denk...nach",
         calls: [],
+        retry: false,
       },
     ])
   })
@@ -443,16 +450,41 @@ describe("runAgentTurn", () => {
 
     expect(requests).toHaveLength(2)
     expect((requests[1] as { tools?: unknown }).tools).toBeUndefined()
-    // the degenerate empty round announces itself (the persister skips
-    // it), the retry round carries the answer
+    // the degenerate empty round announces itself retry-flagged (the
+    // persister skips it), the retry round carries the answer
     const rounds = roundsOf(events)
     expect(rounds[0]).toEqual({
       type: "round",
       content: "",
       reasoning: null,
       calls: [],
+      retry: true,
     })
     expect(rounds[1]).toMatchObject({ type: "round", content: "Eins" })
+    expect(events[events.length - 1].type).toBe("done")
+  })
+
+  it("retry-flags a reasoning-only degenerate round (persister row skip)", async () => {
+    await startServer()
+    // Regression: a tools-allowed round streaming ONLY a thinking trace
+    // takes the empty-answer retry. Reasoning is present, so the
+    // persister's fully-empty skip does not apply — the retry flag is
+    // what keeps the placeholder row out of the transcript (the row
+    // side is asserted in tests/agent-threads-api.test.ts).
+    scripted = [{ reasoning: ["hmm…"] }, { content: ["Eins"] }]
+    const events = await collect([{ role: "user", content: "q" }])
+
+    expect(requests).toHaveLength(2)
+    expect((requests[1] as { tools?: unknown }).tools).toBeUndefined()
+    const rounds = roundsOf(events)
+    expect(rounds[0]).toEqual({
+      type: "round",
+      content: "",
+      reasoning: "hmm…",
+      calls: [],
+      retry: true,
+    })
+    expect(rounds[1]).toMatchObject({ content: "Eins", retry: false })
     expect(events[events.length - 1].type).toBe("done")
   })
 

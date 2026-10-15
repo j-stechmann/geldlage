@@ -44,6 +44,8 @@ const CTX_HEADROOM = 0.9
  *   forces a final answer); any tool calls it still emits are ignored.
  * - an empty answer on a tools-allowed round gets exactly one tools-free
  *   retry, then the turn ends regardless — a silent exit beats a hang.
+ *   The degenerate round announces itself `retry`-flagged on its round
+ *   event (the persister writes no row for it).
  */
 export async function* runAgentTurn(params: {
   history: AgentChatMessage[]
@@ -118,15 +120,25 @@ export async function* runAgentTurn(params: {
       }
     }
 
+    // Retry lookahead, decided BEFORE the round event: an empty callless
+    // round on a tools-allowed round is degenerate — the branch below
+    // will run one tools-free retry, and the round enters nothing into
+    // the wire history (no msgs entry is built for it), so the flag
+    // tells the persister to write no row either: a placeholder would
+    // permanently fake an answer the retry may still give.
+    const retry = roundContent.length === 0 && calls.length === 0 && !noTools
+
     // One assistant record per completed round, before any execution:
     // the persister turns it into one row, so the stored transcript
     // replays as the same per-round protocol messages the wire history
-    // below builds.
+    // below builds. Retry-flagged rounds are the exception — skipped by
+    // the persister because they never reached the wire history.
     yield {
       type: "round",
       content: roundContent,
       reasoning: roundReasoning,
       calls: calls.map((c) => ({ id: c.id, name: c.name, args: c.args })),
+      retry,
     }
 
     if (calls.length > 0 && !noTools) {
@@ -173,7 +185,7 @@ export async function* runAgentTurn(params: {
     // the next round run without tools; the round after that ends the
     // turn no matter what), so the model cannot exit with silence after
     // burning rounds, but a genuinely empty answer never loops forever.
-    if (roundContent.length === 0 && !noTools) {
+    if (retry) {
       retryWithoutTools = true
       continue
     }

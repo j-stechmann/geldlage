@@ -27,6 +27,11 @@ export default function RootLayout({
     <html lang="de" suppressHydrationWarning>
       <body className="font-serif antialiased">
         <Providers>
+          {/* Full-bleed app shell — deliberate (ADR-0033 "UI composition"):
+              composing the agent dock as the right column of the content
+              row dropped the old centered mx-auto max-w-7xl cap. Header
+              and page content render full-width on every viewport, dock
+              open or closed; do not re-add a width cap here. */}
           <div className="flex min-h-svh flex-col">
             <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
               <div className="flex h-14 w-full items-center justify-between gap-4 px-4">

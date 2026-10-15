@@ -152,8 +152,9 @@ export async function POST(
 
 /**
  * One loop event → persisted rows + SSE frame for the browser: EVERY event
- * goes through the persister first (one assistant row per `round`, one
- * tool row per tool_call/tool_result pair), then the frame streams.
+ * goes through the persister first (one assistant row per `round`, except
+ * retry-flagged degenerate rounds; one tool row per tool_call/tool_result
+ * pair), then the frame streams.
  * Frame names: content streams as `delta`, `round` is an empty segment
  * boundary for the client, everything else keeps its event name. The
  * done frame carries the last persisted row id (onLoopEvent returns it

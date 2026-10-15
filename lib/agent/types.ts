@@ -28,8 +28,9 @@ export interface AgentTool {
  * Loop events, in emission order: reasoning/content fragments stream
  * through unchanged, `round` closes one model round with its full prose,
  * reasoning and tool calls (the persister writes ONE assistant row per
- * round, so the stored transcript doubles as replayable protocol history
- * — Claude Code-style), tool_call/tool_result bracket one execution, and
+ * round — except retry-flagged degenerate rounds, see the `retry` field —
+ * so the stored transcript doubles as replayable protocol history,
+ * Claude Code-style), tool_call/tool_result bracket one execution, and
  * `done` closes the turn. The loop stays persistence-free: the route
  * fills the done FRAME's messageId with the last persisted row id.
  */
@@ -41,6 +42,14 @@ export type AgentLoopEvent =
       content: string
       reasoning: string | null
       calls: Array<{ id: string; name: string; args: string }>
+      /**
+       * True when the loop continues with its one tools-free retry
+       * after this round (the degenerate empty answer: no prose, no
+       * calls, tools were advertised). Such a round entered nothing
+       * into the wire history — the persister writes no row, or the
+       * placeholder would fake an answer the retry may still give.
+       */
+      retry: boolean
     }
   | { type: "tool_call"; id: string; name: string; args: string }
   | { type: "tool_result"; id: string; name: string; result: string }

@@ -169,7 +169,7 @@ export function MessageListView(props: MessageListProps) {
     props.pendingUserMessage !== null &&
     props.turnThreadId === props.activeThreadId &&
     (props.pendingMessageId === null
-      ? messages.some(
+      ? !messages.some(
           (m) => m.role === "user" && m.content === props.pendingUserMessage
         )
       : !messages.some((m) => m.id === props.pendingMessageId))
