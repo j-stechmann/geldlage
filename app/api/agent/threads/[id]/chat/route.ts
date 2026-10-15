@@ -8,8 +8,8 @@ import { maybeAutoTitle } from "@/lib/agent/thread-title"
 import { requireThreadAccess } from "@/lib/agent/route-guard"
 import { TurnPersister } from "@/lib/agent/turn-persister"
 import {
+  enqueueFrame,
   errorFrameMessage,
-  sseFrame,
   sseResponseHeaders,
 } from "@/lib/agent/sse-writer"
 import type { AgentLoopEvent } from "@/lib/agent/types"
@@ -114,7 +114,7 @@ export async function POST(
         // detail view (the first send lazily creates the thread, so the
         // detail fetch races the turn and can arrive already containing
         // this row — without the id, content-matching duplicates it).
-        controller.enqueue(sseFrame("user", { id: userMessage.id }))
+        enqueueFrame(controller, "user", { id: userMessage.id })
         for await (const ev of runAgentTurn({
           history,
           uid: gate.session.uid,
@@ -125,8 +125,10 @@ export async function POST(
       } catch (err) {
         // Infrastructure failures stream an error frame then close — the
         // client renders the message instead of hanging on a half-answer.
+        // Client-gone errors (signal abort, cancelled stream) classify as
+        // null: nothing left to tell.
         const message = errorFrameMessage(err)
-        if (message) controller.enqueue(sseFrame("error", { message }))
+        if (message) enqueueFrame(controller, "error", { message })
       } finally {
         // AI titling after the first turn (fire-and-forget, failures
         // swallowed): the single llama-server slot is free now that the
@@ -168,26 +170,26 @@ function persistAndEnqueue(
   const messageId = persister.onLoopEvent(ev)
   switch (ev.type) {
     case "reasoning":
-      controller.enqueue(sseFrame("reasoning", { text: ev.text }))
+      enqueueFrame(controller, "reasoning", { text: ev.text })
       break
     case "content":
-      controller.enqueue(sseFrame("delta", { text: ev.text }))
+      enqueueFrame(controller, "delta", { text: ev.text })
       break
     case "round":
-      controller.enqueue(sseFrame("round", {}))
+      enqueueFrame(controller, "round", {})
       break
     case "tool_call":
-      controller.enqueue(
-        sseFrame("tool_call", { name: ev.name, args: ev.args })
-      )
+      enqueueFrame(controller, "tool_call", { name: ev.name, args: ev.args })
       break
     case "tool_result":
-      controller.enqueue(
-        sseFrame("tool_result", { name: ev.name, result: ev.result })
+      enqueueFrame(
+        controller,
+        "tool_result",
+        { name: ev.name, result: ev.result }
       )
       break
     case "done":
-      controller.enqueue(sseFrame("done", { messageId }))
+      enqueueFrame(controller, "done", { messageId })
       break
   }
 }

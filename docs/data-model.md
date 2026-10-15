@@ -222,8 +222,7 @@ protocol trio restored from `tool_calls`/`tool_call_id` pairing):
 
 Indexes: `chat_messages_thread_sort_idx` on `(thread_id, thread_seq, id)` —
 built for exactly the `ORDER BY thread_seq, id` both the message list and the
-loop's history use — plus `chat_messages_user_created_idx` on
-`(user_id, created_at)`.
+loop's history use.
 
 Thread deletion cascades members and messages (`ON DELETE CASCADE`);
 inviting is deduped by the membership primary key; accepting an invite is a

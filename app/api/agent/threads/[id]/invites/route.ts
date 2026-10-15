@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { INVITE_MAX_USER_IDS } from "@/lib/agent/constants"
 import { getThread, inviteMembers, listMembers } from "@/lib/agent/store"
 import { requireThreadAccess } from "@/lib/agent/route-guard"
 
@@ -41,15 +42,20 @@ export async function POST(
     userIds?: unknown
   } | null
   const userIds = body?.userIds
+  // The length cap is load-bearing, not cosmetic: inviteMembers builds
+  // one multi-row INSERT (4 bind variables per row), so an oversized batch
+  // blows past SQLite's SQL-variable limit and surfaces as a 500 that
+  // the FK-only catch below does not intercept.
   const valid =
     Array.isArray(userIds) &&
     userIds.length > 0 &&
+    userIds.length <= INVITE_MAX_USER_IDS &&
     userIds.every((v) => typeof v === "number" && Number.isInteger(v) && v > 0)
   if (!valid) {
     return NextResponse.json(
       {
         error: "invalid_user_ids",
-        message: "userIds muss eine Liste von Benutzer-IDs sein.",
+        message: `userIds muss eine Liste von 1–${INVITE_MAX_USER_IDS} Benutzer-IDs sein.`,
       },
       { status: 400 }
     )

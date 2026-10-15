@@ -280,7 +280,6 @@ export const chatMessages = sqliteTable(
   },
   (t) => [
     index("chat_messages_thread_sort_idx").on(t.threadId, t.threadSeq, t.id),
-    index("chat_messages_user_created_idx").on(t.userId, t.createdAt),
     // Runtime enforcement comes from the hand-written DDL in lib/db/index.ts
     // (role CHECK); these check() defs only matter for drizzle-kit push and
     // must stay in sync with it.

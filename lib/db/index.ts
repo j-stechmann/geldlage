@@ -295,9 +295,6 @@ export function createSchemaSqlite(db: Db) {
   db.run(
     `CREATE INDEX IF NOT EXISTS chat_messages_thread_sort_idx ON chat_messages (thread_id, thread_seq, id)`
   )
-  db.run(
-    `CREATE INDEX IF NOT EXISTS chat_messages_user_created_idx ON chat_messages (user_id, created_at)`
-  )
   // Runtime role enforcement for the hand-written DDL; the drizzle check()
   // defs in schema.ts must stay in sync with it.
 }
@@ -699,9 +696,11 @@ export function migrateSchema(db: Db) {
   db.run(
     `CREATE INDEX IF NOT EXISTS chat_messages_thread_sort_idx ON chat_messages (thread_id, thread_seq, id)`
   )
-  db.run(
-    `CREATE INDEX IF NOT EXISTS chat_messages_user_created_idx ON chat_messages (user_id, created_at)`
-  )
+  // An earlier iteration carried a (user_id, created_at) index on
+  // chat_messages; no query ever filtered by user_id (message access is
+  // thread-scoped, gated in app code), so it is dropped — healing
+  // databases that still have it, at no per-message write cost anymore.
+  db.run(`DROP INDEX IF EXISTS chat_messages_user_created_idx`)
   // Runtime role enforcement for the hand-written DDL; the drizzle check()
   // defs in schema.ts must stay in sync with it.
 }

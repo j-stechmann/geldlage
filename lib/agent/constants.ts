@@ -17,6 +17,13 @@ export const THREAD_TITLE_MAX_INPUT_CHARS = 80
 export const CHAT_MESSAGE_MAX_CHARS = 8000
 
 /**
+ * Per-request cap on invite batches (route validation): far below
+ * SQLite's SQL-variable limit, where an oversized batch would escape
+ * the FK-only catch as an unhandled 500 instead of a 400.
+ */
+export const INVITE_MAX_USER_IDS = 100
+
+/**
  * Persisted when the model streamed only a reasoning trace and no prose
  * (a reasoning-only `done`). Prevents an empty assistant bubble; the
  * collapsible "Denkprozess" stays, the body states the miss.

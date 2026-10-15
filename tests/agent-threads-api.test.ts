@@ -29,7 +29,7 @@ import {
   renameThread,
   roleOf,
 } from "@/lib/agent/store"
-import { AGENT_NO_ANSWER_TEXT } from "@/lib/agent/constants"
+import { AGENT_NO_ANSWER_TEXT, INVITE_MAX_USER_IDS } from "@/lib/agent/constants"
 import { setupTestDb, seedUser, authedRequest } from "./helpers"
 
 /**
@@ -197,6 +197,25 @@ describe("invites", () => {
       { params: Promise.resolve({ id: threadId }) }
     )
     expect((await asJson(second)).invited).toBe(0)
+  })
+
+  it("rejects oversized batches (400, not a 500 from SQLite's variable limit)", async () => {
+    const res = await inviteRoute(
+      await req(`/api/agent/threads/${threadId}/invites`, u1, {
+        method: "POST",
+        body: {
+          userIds: Array.from(
+            { length: INVITE_MAX_USER_IDS + 1 },
+            (_, i) => i + 1
+          ),
+        },
+      }),
+      { params: Promise.resolve({ id: threadId }) }
+    )
+    expect(res.status).toBe(400)
+    expect(((await asJson(res)) as { error: string }).error).toBe(
+      "invalid_user_ids"
+    )
   })
 
   it("member-lists with owner synthesized; owner-only", async () => {

@@ -24,6 +24,33 @@ export function sseFrame(event: string, data: unknown): Uint8Array {
   return encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
 }
 
+/**
+ * Enqueues one frame via the controller. A TypeError from enqueue means
+ * the response stream left the readable state — the client disconnected
+ * and the stream cancellation raced (and won) against the request.signal
+ * abort, whose AbortError surfaces separately from the in-flight fetch.
+ * Rethrown as a named AbortError so errorFrameMessage classifies it as
+ * client-gone instead of logging a phantom "[agent] LLM turn failed".
+ */
+export function enqueueFrame(
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  event: string,
+  data: unknown
+): void {
+  // Encode BEFORE the try: a serialization TypeError (circular refs,
+  // BigInt) must not reach the catch below, whose TypeError → AbortError
+  // conversion is only valid for a cancelled stream.
+  const frame = sseFrame(event, data)
+  try {
+    controller.enqueue(frame)
+  } catch (err) {
+    if (err instanceof TypeError) {
+      throw new DOMException("response stream cancelled", "AbortError")
+    }
+    throw err
+  }
+}
+
 /** Headers for an infinite streaming SSE response. */
 export function sseResponseHeaders(): Record<string, string> {
   return {
@@ -50,7 +77,11 @@ export function errorFrameMessage(err: unknown): string | null {
   return GENERIC_LLM_FRAME
 }
 
-/** request.signal aborts surface as AbortError (client went away). */
+/**
+ * Client disconnects surface as AbortError: the forwarded request.signal
+ * aborting the in-flight LLM fetch, or (via enqueueFrame) a frame hitting
+ * an already-cancelled response stream.
+ */
 function isClientAbort(err: unknown): boolean {
   return (
     (err instanceof DOMException && err.name === "AbortError") ||
