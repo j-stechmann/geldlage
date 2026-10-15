@@ -1,4 +1,5 @@
 import { isTimeoutError } from "@/lib/llm/sse"
+import { isThreadNotFoundError } from "@/lib/agent/store/messages"
 
 /**
  * SSE wire format for the agent chat endpoint (ADR-0033): frame encoding
@@ -18,6 +19,14 @@ const encoder = new TextEncoder()
  */
 const GENERIC_LLM_FRAME =
   "LLM-Fehler — der Sprachdienst antwortet nicht korrekt."
+
+/**
+ * The owner of a shared thread can delete it while a member's turn is
+ * streaming: the persister's append then throws thread-not-found
+ * mid-stream. Expected concurrency, not an infrastructure failure —
+ * the member deserves the truth instead of a Sprachdienst blame.
+ */
+const THREAD_DELETED_FRAME = "Dieser Chat wurde gelöscht."
 
 /** Encodes one named SSE frame. */
 export function sseFrame(event: string, data: unknown): Uint8Array {
@@ -64,12 +73,18 @@ export function sseResponseHeaders(): Record<string, string> {
 /**
  * Maps a thrown loop/stream error to the client-visible error frame
  * message, or null when the client itself went away (abort — nothing left
- * to tell); the caller skips the frame then and just closes. Non-timeout
- * failures get the generic frame with the raw detail logged server-side.
+ * to tell); the caller skips the frame then and just closes. Thread
+ * deletion gets its own frame (warn-tagged — expected, not a failure);
+ * other non-timeout failures get the generic frame with the raw detail
+ * logged server-side.
  */
 export function errorFrameMessage(err: unknown): string | null {
   if (isClientAbort(err)) return null
   if (isTimeoutError(err)) return "Timeout — die Antwort dauerte zu lange."
+  if (isThreadNotFoundError(err)) {
+    console.warn("[agent] thread deleted mid-turn:", err.message)
+    return THREAD_DELETED_FRAME
+  }
   console.error(
     "[agent] LLM turn failed:",
     err instanceof Error ? err.message : err

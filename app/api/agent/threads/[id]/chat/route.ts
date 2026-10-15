@@ -3,7 +3,11 @@ import { CHAT_MESSAGE_MAX_CHARS } from "@/lib/agent/constants"
 import { AGENT_HISTORY_MAX_MESSAGES } from "@/lib/agent/window"
 import { runAgentTurn } from "@/lib/agent/loop"
 import { rowsToPromptHistory } from "@/lib/agent/history"
-import { appendMessage, listRecentMessages } from "@/lib/agent/store"
+import {
+  appendMessage,
+  isThreadNotFoundError,
+  listRecentMessages,
+} from "@/lib/agent/store"
 import { maybeAutoTitle } from "@/lib/agent/thread-title"
 import { requireThreadAccess } from "@/lib/agent/route-guard"
 import { TurnPersister } from "@/lib/agent/turn-persister"
@@ -17,11 +21,7 @@ import type { ChatMessage } from "@/lib/db/schema"
 
 /** Race between the access gate and the store write: thread deleted. */
 function deletedThreadResponse(err: unknown): NextResponse {
-  const message =
-    typeof err === "object" && err !== null
-      ? String((err as Error).message)
-      : ""
-  if (message.includes("thread not found")) {
+  if (isThreadNotFoundError(err)) {
     return NextResponse.json({ error: "not_found" }, { status: 404 })
   }
   throw err
@@ -182,11 +182,10 @@ function persistAndEnqueue(
       enqueueFrame(controller, "tool_call", { name: ev.name, args: ev.args })
       break
     case "tool_result":
-      enqueueFrame(
-        controller,
-        "tool_result",
-        { name: ev.name, result: ev.result }
-      )
+      enqueueFrame(controller, "tool_result", {
+        name: ev.name,
+        result: ev.result,
+      })
       break
     case "done":
       enqueueFrame(controller, "done", { messageId })

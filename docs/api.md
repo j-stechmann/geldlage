@@ -77,7 +77,7 @@ unknown threads always answer **404, never 403** (see Conventions).
 | `PATCH /api/agent/threads/[id]`                   | `{thread}`                             | 400 `invalid_title`, 404                           | Rename (1–80 chars after trim); **owner-only** — members/outsiders get 404 (no existence leak)                                     |
 | `DELETE /api/agent/threads/[id]`                  | `{deleted: true}` / `{left: true}`     | 404                                                | Role-derived teardown: owner deletes (members + messages cascade), joined member leaves, invited user declines                     |
 | `GET /api/agent/threads/[id]/invites`             | `{members: [...]}` (owner synthesized) | 404                                                | Member roster; **owner-only**                                                                                                      |
-| `POST /api/agent/threads/[id]/invites`            | `{invited}` (rows actually added)      | 400 `invalid_user_ids`, 404                        | Invite `userIds` (1–100 positive integers, deduped, owner un-invitable, idempotent conflict-do-nothing); **owner-only**                                     |
+| `POST /api/agent/threads/[id]/invites`            | `{invited}` (rows actually added)      | 400 `invalid_user_ids`, 404                        | Invite `userIds` (1–100 positive integers, deduped, owner un-invitable, idempotent conflict-do-nothing); **owner-only**            |
 | `DELETE /api/agent/threads/[id]/invites/[userId]` | `{removed}`                            | 400 `invalid_user_id` / `cannot_remove_owner`, 404 | Retract an invite or remove a member; **owner-only**, never themself                                                               |
 | `POST /api/agent/threads/[id]/join`               | `{joined: true}`                       | 404                                                | Accept an invite (`invited → joined`); owner/member no-op; uninvited = 404                                                         |
 | `GET /api/agent/threads/[id]/messages`            | `{thread, role, members, messages}`    | 404                                                | Full thread view (thread meta, roster, messages in `threadSeq` order); invited users get 404 — content unlocks exactly on join     |
@@ -90,9 +90,12 @@ racing detail fetch serves the authoritative row), `delta` (content
 fragment), `reasoning`
 (thinking trace fragment, display-only), `tool_call` (`{name, args}`),
 `tool_result` (`{name, result}`, persisted as a tool row per result),
-`done` (`{messageId, content, reasoning}` — the assistant row is persisted
-at this point), `error` (infrastructure failure; streamed then the stream
-closes). Client disconnects abort the in-flight LLM fetch silently.
+`done` (`{messageId}` — the id of the last persisted assistant row;
+assistant and tool rows persist per round as they stream, `done` only
+closes the turn), `error` (infrastructure failure, or the thread
+vanishing mid-turn — the owner deleting a shared thread while a member's
+turn streams; streamed then the stream closes). Client disconnects
+abort the in-flight LLM fetch silently.
 
 **AI thread titling**: after a thread's FIRST turn completes (post-`done`,
 fire-and-forget) the route asks the model for a 2–5 word title via the same

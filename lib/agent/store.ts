@@ -13,8 +13,10 @@
 
 export {
   appendMessage,
+  isThreadNotFoundError,
   listMessages,
   listRecentMessages,
+  ThreadNotFoundError,
   DEFAULT_THREAD_TITLE,
 } from "@/lib/agent/store/messages"
 

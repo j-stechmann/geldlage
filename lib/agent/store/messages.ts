@@ -12,6 +12,27 @@ import { DEFAULT_THREAD_TITLE } from "@/lib/agent/constants"
 export { DEFAULT_THREAD_TITLE }
 
 /**
+ * Thrown by appendMessage when the thread row vanished before its write
+ * (an owner deleting a shared thread from another session mid-turn).
+ * Structural marker: the chat route's pre-stream 404 mapping and
+ * errorFrameMessage's mid-stream deletion frame classify via
+ * isThreadNotFoundError's instanceof check, not the message text.
+ */
+export class ThreadNotFoundError extends Error {
+  constructor(threadId: string) {
+    super(`thread not found: ${threadId}`)
+    this.name = "ThreadNotFoundError"
+  }
+}
+
+/** True for appendMessage's ThreadNotFoundError throw above. */
+export function isThreadNotFoundError(
+  err: unknown
+): err is ThreadNotFoundError {
+  return err instanceof ThreadNotFoundError
+}
+
+/**
  * Appends one message atomically: the per-thread seq must advance in the
  * same transaction the row inserts in, or two concurrent writers could
  * grab the same threadSeq (better-sqlite3 is single-writer, but the
@@ -42,7 +63,7 @@ export function appendMessage(
       .from(chatThreads)
       .where(eq(chatThreads.id, threadId))
       .get()
-    if (!current) throw new Error(`thread not found: ${threadId}`)
+    if (!current) throw new ThreadNotFoundError(threadId)
     const nextSeq = current.seq + 1
     const bump =
       msg.role === "tool" ? {} : { updatedAt: new Date().toISOString() }

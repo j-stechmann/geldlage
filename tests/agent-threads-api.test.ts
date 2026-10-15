@@ -29,7 +29,10 @@ import {
   renameThread,
   roleOf,
 } from "@/lib/agent/store"
-import { AGENT_NO_ANSWER_TEXT, INVITE_MAX_USER_IDS } from "@/lib/agent/constants"
+import {
+  AGENT_NO_ANSWER_TEXT,
+  INVITE_MAX_USER_IDS,
+} from "@/lib/agent/constants"
 import { setupTestDb, seedUser, authedRequest } from "./helpers"
 
 /**
