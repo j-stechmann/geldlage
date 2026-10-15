@@ -13,6 +13,8 @@ export type AgentStreamEvent =
   | { type: "user"; id: string }
   | { type: "reasoning"; text: string }
   | { type: "delta"; text: string }
+  /** Segment boundary: the streamed round completed (empty payload). */
+  | { type: "round" }
   | { type: "tool_call"; name: string; args: string }
   | { type: "tool_result"; name: string; result: string }
   | { type: "done"; messageId: string | null }
@@ -55,6 +57,9 @@ export async function* parseAgentSse(
         break
       case "delta":
         yield { type: "delta", text: payload.text ?? "" }
+        break
+      case "round":
+        yield { type: "round" }
         break
       case "tool_call":
         yield {

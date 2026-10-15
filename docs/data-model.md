@@ -202,8 +202,9 @@ re-invites idempotent no-ops, one membership per pair. Plus
 `chat_thread_members_user_idx` on `(user_id, state)` for "threads I'm in"
 queries.
 
-`chat_messages` — user, assistant and tool rows in one stream (protocol
-trio for tool rounds is reconstructed by the loop from role-tagged rows):
+`chat_messages` — user, assistant and tool rows in one stream; the stored
+transcript IS the replayable prompt history (one assistant row per round,
+protocol trio restored from `tool_calls`/`tool_call_id` pairing):
 
 | Column                    | Type                   | Notes                                                                                                                                                           |
 | ------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -212,8 +213,10 @@ trio for tool rounds is reconstructed by the loop from role-tagged rows):
 | `user_id`                 | INTEGER FK → users     | **NULL = model-produced** (assistant/tool); user rows carry the author                                                                                          |
 | `role`                    | TEXT NOT NULL          | `user` / `assistant` / `tool` — **CHECK enforced** (`chat_messages_role_check` in the hand-written DDL; the drizzle `check()` def must stay in sync, see below) |
 | `content`                 | TEXT NOT NULL          | for tool rows: the JSON tool result (capped at 8000 chars on persist)                                                                                           |
-| `reasoning`               | TEXT                   | assistant rows: the `reasoning_content` thinking trace (display/persistence only, never replayed into loop input)                                               |
+| `reasoning`               | TEXT                   | assistant rows: that round's `reasoning_content` trace (display only, never replayed into loop input)                                                           |
 | `tool_name` / `tool_args` | TEXT                   | tool rows: registry name + raw JSON args (display + debugging)                                                                                                  |
+| `tool_calls`              | TEXT                   | assistant rows: the round's tool calls in exact OpenAI wire JSON — replay material; NULL on legacy rows (they replay as plain text)                             |
+| `tool_call_id`            | TEXT                   | tool rows: the wire call id pairing the result to its assistant row's `tool_calls` entry; NULL on legacy rows (display-only)                                    |
 | `created_at`              | TEXT                   | ISO                                                                                                                                                             |
 | `thread_seq`              | INTEGER NOT NULL       | the per-thread counter snapshot at insert, `threadSeq` — stable display AND loop order                                                                          |
 

@@ -4,11 +4,11 @@ import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { ToolChip } from "@/components/agent/tool-chip"
 import { AssistantBubble } from "@/components/agent/assistant-bubble"
+import type { TurnStreams } from "@/components/agent/use-agent-turn"
 import type {
   StoredMessage,
   ThreadDetail,
   ThreadRole,
-  ToolEvent,
 } from "@/components/agent/types"
 
 /** Stable empty identity keeps the multi-author memo dependency-safe. */
@@ -36,9 +36,8 @@ interface MessageListProps {
   /** Role from the threads list — decides invited-preview vs. ordinary view. */
   activeRole: ThreadRole | undefined
   streaming: boolean
-  streamContent: string
-  streamReasoning: string
-  streamTools: ToolEvent[]
+  /** Claude Code-style live transcript: frozen rounds + the live round. */
+  streams: TurnStreams
   pendingUserMessage: string | null
   /**
    * The persisted row id the turn's `user` frame echoed back (null until
@@ -194,12 +193,21 @@ export function MessageListView(props: MessageListProps) {
           </div>
         )}
         {turnHere && (
-          <AssistantBubble
-            content={props.streamContent}
-            reasoning={props.streamReasoning}
-            tools={props.streamTools}
-            streaming
-          />
+          <>
+            {props.streams.segments.map((seg, i) => (
+              <AssistantBubble
+                key={i}
+                content={seg.content}
+                reasoning={seg.reasoning || null}
+                tools={seg.tools.length > 0 ? seg.tools : undefined}
+              />
+            ))}
+            <AssistantBubble
+              content={props.streams.current.content}
+              reasoning={props.streams.current.reasoning || null}
+              streaming
+            />
+          </>
         )}
       </div>
     </div>
@@ -220,6 +228,10 @@ function MessageRow(props: {
         result={m.content}
       />
     )
+  // A round that streamed no prose renders chips-only: its tool rows
+  // follow as standalone chips, so an empty bubble body would add a
+  // stray box. (Reasoning-only rounds keep their Denkprozess bubble.)
+  if (m.role === "assistant" && m.content === "" && !m.reasoning) return null
   if (m.role === "user") {
     const author = props.showAuthor
       ? (props.namesById.get(m.userId ?? -1) ?? "?")

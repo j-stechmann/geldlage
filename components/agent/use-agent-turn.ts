@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import {
@@ -16,28 +16,45 @@ import type { ToolEvent } from "@/components/agent/types"
  * optimistic UI while the SSE turn streams (polling is paused during the
  * turn, so the DB rows the server persisted are not visible until the
  * post-done refetch), absorbs aborts, and refetches the persisted rows
- * after done/error. `turnThreadId` reports the thread the in-flight turn
+ * after done/error. Unmounting the owning component (e.g. closing the
+ * dock) aborts the in-flight request — same semantic as the Stop button.
+ * `turnThreadId` reports the thread the in-flight turn
  * belongs to so callers scope the turn UI to it — the thread dropdown
  * stays usable mid-turn, and other threads' lists must not absorb the
  * optimistic bubble or the live stream.
+ *
+ * Claude Code-style live transcript: each `round` frame freezes the
+ * streamed prose/reasoning into its own segment, so multi-round turns
+ * render one bubble per round with the tool chips attached to the round
+ * that called them — mirroring the per-round rows the server persists.
+ * The post-done refetch replaces segments with the authoritative rows.
  *
  * The thread id is a `send` argument, not hook state: the first send may
  * create the thread (lazily), so a hook-level capture would be stale. It
  * is only mirrored into state for the turn-UI scoping above.
  */
 
-export interface TurnStreams {
+/** One round's stream state: prose + reasoning trace + executed tools. */
+export interface TurnSegment {
   content: string
   reasoning: string
   tools: ToolEvent[]
 }
 
+export interface TurnStreams {
+  /** Completed rounds, oldest first (frozen by `round` frames). */
+  segments: TurnSegment[]
+  /** The round currently streaming (empty while its tools execute). */
+  current: TurnSegment
+}
+
+const EMPTY_SEGMENT: TurnSegment = { content: "", reasoning: "", tools: [] }
+
 export function useAgentTurn() {
   const [streaming, setStreaming] = useState(false)
   const [streams, setStreams] = useState<TurnStreams>({
-    content: "",
-    reasoning: "",
-    tools: [],
+    segments: [],
+    current: EMPTY_SEGMENT,
   })
   // The user message of the in-flight turn: rendered optimistically while
   // streaming (see module doc), replaced by the authoritative refetch. The
@@ -60,6 +77,14 @@ export function useAgentTurn() {
     abortRef.current?.abort()
   }, [])
 
+  // Closing the dock unmounts AgentChat; without this the fetch keeps
+  // streaming into dead state and the LLM slot burns to completion.
+  // The post-abort `finally` still invalidates, so reopening shows
+  // whatever the server managed to persist before the signal fired.
+  useEffect(() => {
+    return () => abortRef.current?.abort()
+  }, [])
+
   /**
    * Sends one user turn to the given thread. Resolves `true` once the
    * server accepted the turn — from that moment the user message row is
@@ -76,7 +101,7 @@ export function useAgentTurn() {
       setPendingMessageId(null)
       setTurnThreadId(threadId)
       setStreaming(true)
-      setStreams({ content: "", reasoning: "", tools: [] })
+      setStreams({ segments: [], current: EMPTY_SEGMENT })
       const controller = new AbortController()
       abortRef.current = controller
       try {
@@ -148,30 +173,58 @@ export function useAgentTurn() {
     for await (const ev of parseAgentSse(body)) {
       if (ev.type === "user") {
         if (ev.id) setPendingMessageId(ev.id)
+      } else if (ev.type === "round") {
+        // Freeze the streamed round as its own segment; the server
+        // persists one assistant row per round the same way.
+        setStreams((s) => ({
+          segments: [...s.segments, s.current],
+          current: EMPTY_SEGMENT,
+        }))
       } else if (ev.type === "reasoning") {
-        setStreams((s) => ({ ...s, reasoning: s.reasoning + ev.text }))
+        setStreams((s) => ({
+          ...s,
+          current: { ...s.current, reasoning: s.current.reasoning + ev.text },
+        }))
       } else if (ev.type === "delta") {
-        setStreams((s) => ({ ...s, content: s.content + ev.text }))
+        setStreams((s) => ({
+          ...s,
+          current: { ...s.current, content: s.current.content + ev.text },
+        }))
       } else if (ev.type === "tool_call") {
-        setStreams((s) => ({
-          ...s,
-          tools: [
-            ...s.tools,
-            { kind: "tool_call", name: ev.name, payload: ev.args },
-          ],
-        }))
+        setStreams((s) =>
+          appendTool(s, { kind: "tool_call", name: ev.name, payload: ev.args })
+        )
       } else if (ev.type === "tool_result") {
-        setStreams((s) => ({
-          ...s,
-          tools: [
-            ...s.tools,
-            { kind: "tool_result", name: ev.name, payload: ev.result },
-          ],
-        }))
+        setStreams((s) =>
+          appendTool(s, {
+            kind: "tool_result",
+            name: ev.name,
+            payload: ev.result,
+          })
+        )
       } else if (ev.type === "error") {
         toast.error(ev.message)
       }
       // done: the refetch in `finally` replaces the optimistic UI
     }
   }
+}
+
+/**
+ * Tools execute after their round froze (the `round` frame precedes the
+ * tool_call events), so chips append to the LAST completed segment — the
+ * round that called them. The fallback covers a stream that never sent
+ * a round frame (defensive; the protocol always does).
+ */
+function appendTool(s: TurnStreams, tool: ToolEvent): TurnStreams {
+  if (s.segments.length === 0) {
+    return {
+      ...s,
+      current: { ...s.current, tools: [...s.current.tools, tool] },
+    }
+  }
+  const segments = s.segments.slice()
+  const last = segments[segments.length - 1]
+  segments[segments.length - 1] = { ...last, tools: [...last.tools, tool] }
+  return { ...s, segments }
 }

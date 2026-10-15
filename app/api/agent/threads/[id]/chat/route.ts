@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { CHAT_MESSAGE_MAX_CHARS } from "@/lib/agent/constants"
 import { AGENT_HISTORY_MAX_MESSAGES } from "@/lib/agent/window"
 import { runAgentTurn } from "@/lib/agent/loop"
+import { rowsToPromptHistory } from "@/lib/agent/history"
 import { appendMessage, listRecentMessages } from "@/lib/agent/store"
 import { maybeAutoTitle } from "@/lib/agent/thread-title"
 import { requireThreadAccess } from "@/lib/agent/route-guard"
@@ -11,7 +12,7 @@ import {
   sseFrame,
   sseResponseHeaders,
 } from "@/lib/agent/sse-writer"
-import type { AgentChatMessage, AgentLoopEvent } from "@/lib/agent/types"
+import type { AgentLoopEvent } from "@/lib/agent/types"
 import type { ChatMessage } from "@/lib/db/schema"
 
 /** Race between the access gate and the store write: thread deleted. */
@@ -28,14 +29,6 @@ function deletedThreadResponse(err: unknown): NextResponse {
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
-
-/**
- * Bounded recent-read size for the chat route's history mapping: the loop
- * consumes at most AGENT_HISTORY_MAX_MESSAGES, but tool rows are filtered
- * out BEFORE windowHistory sees the list, so the read takes extra headroom
- * (5 turns × tool rows) to keep the post-filter window fully populated.
- */
-const HISTORY_WINDOW = AGENT_HISTORY_MAX_MESSAGES * 2
 
 /**
  * One streamed agent turn as SSE (ADR-0033). Route = protocol wiring only:
@@ -84,7 +77,7 @@ export async function POST(
   let isFirstTurn: boolean
   let userMessage: ChatMessage
   try {
-    isFirstTurn = !listRecentMessages(id, HISTORY_WINDOW).some(
+    isFirstTurn = !listRecentMessages(id, AGENT_HISTORY_MAX_MESSAGES).some(
       (m) => m.role === "user"
     )
     userMessage = appendMessage(id, {
@@ -96,20 +89,18 @@ export async function POST(
     return deletedThreadResponse(err)
   }
 
-  // Windowed stored history INCLUDING the just-appended user message; the
-  // loop re-windows/sanitizes it (windowHistory), and the loop's cap is
-  // what makes reading only the recent slice safe — nothing older enters
-  // the prompt anyway. Stored `reasoning` is display metadata only and is
-  // not replayed to the model: reasoning tokens belong to the round that
-  // produced them, the chat endpoint's request builder drops them anyway,
-  // and replaying them across turns would bloat the prompt with stale
-  // thinking traces.
-  const history: AgentChatMessage[] = listRecentMessages(id, HISTORY_WINDOW)
-    .filter((m) => m.role !== "tool")
-    .map((m) => ({
-      role: m.role === "user" ? ("user" as const) : ("assistant" as const),
-      content: m.content,
-    }))
+  // Replayable transcript INCLUDING the just-appended user message: the
+  // stored rows map back onto the protocol messages (assistant tool
+  // rounds with their paired tool results), and the loop re-fits the
+  // window to the LLM_CTX-derived budget (windowHistory) — which is
+  // what makes reading only the recent slice safe: nothing older enters
+  // the prompt anyway. Stored `reasoning` is display metadata only and
+  // is not replayed to the model: reasoning tokens belong to the round
+  // that produced them, and replaying them across turns would bloat
+  // the prompt with stale thinking traces.
+  const history = rowsToPromptHistory(
+    listRecentMessages(id, AGENT_HISTORY_MAX_MESSAGES)
+  )
 
   const persister = new TurnPersister(id)
   const stream = new ReadableStream<Uint8Array>({
@@ -161,12 +152,12 @@ export async function POST(
 
 /**
  * One loop event → persisted rows + SSE frame for the browser: EVERY event
- * goes through the persister first (tool_row writes happen per
- * tool_call/tool_result pair, the assistant row per done), then the frame
- * streams. Frame names: content streams as `delta`, everything else keeps
- * its event name. The done frame echoes content+reasoning and carries the
- * saved message id (onLoopEvent returns it only for done) so the client
- * can align optimistic UI with the stored record.
+ * goes through the persister first (one assistant row per `round`, one
+ * tool row per tool_call/tool_result pair), then the frame streams.
+ * Frame names: content streams as `delta`, `round` is an empty segment
+ * boundary for the client, everything else keeps its event name. The
+ * done frame carries the last persisted row id (onLoopEvent returns it
+ * on done) so the client can align optimistic UI with the stored record.
  */
 function persistAndEnqueue(
   controller: ReadableStreamDefaultController<Uint8Array>,
@@ -181,6 +172,9 @@ function persistAndEnqueue(
     case "content":
       controller.enqueue(sseFrame("delta", { text: ev.text }))
       break
+    case "round":
+      controller.enqueue(sseFrame("round", {}))
+      break
     case "tool_call":
       controller.enqueue(
         sseFrame("tool_call", { name: ev.name, args: ev.args })
@@ -192,13 +186,7 @@ function persistAndEnqueue(
       )
       break
     case "done":
-      controller.enqueue(
-        sseFrame("done", {
-          messageId,
-          content: ev.content,
-          reasoning: ev.reasoning,
-        })
-      )
+      controller.enqueue(sseFrame("done", { messageId }))
       break
   }
 }

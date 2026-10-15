@@ -26,11 +26,12 @@ async function collect(body: string) {
 }
 
 describe("parseAgentSse", () => {
-  it("dispatches all seven event types by name", async () => {
+  it("dispatches all eight event types by name", async () => {
     const body = sseFrames([
       { event: "user", data: { id: "m0" } },
       { event: "reasoning", data: { text: "denke" } },
       { event: "delta", data: { text: "Hallo" } },
+      { event: "round", data: {} },
       {
         event: "tool_call",
         data: { name: "get_category_totals", args: '{"period":"this_month"}' },
@@ -39,24 +40,27 @@ describe("parseAgentSse", () => {
         event: "tool_result",
         data: { name: "get_category_totals", result: "{}" },
       },
-      { event: "done", data: { messageId: "m1", content: "Hallo" } },
+      { event: "done", data: { messageId: "m1" } },
     ])
     const events = await collect(body)
     expect(events.map((e) => e.type)).toEqual([
       "user",
       "reasoning",
       "delta",
+      "round",
       "tool_call",
       "tool_result",
       "done",
     ])
     expect(events[0]).toEqual({ type: "user", id: "m0" })
-    expect(events[3]).toEqual({
+    // the round frame is a bare segment boundary
+    expect(events[3]).toEqual({ type: "round" })
+    expect(events[4]).toEqual({
       type: "tool_call",
       name: "get_category_totals",
       args: '{"period":"this_month"}',
     })
-    expect(events[5]).toEqual({ type: "done", messageId: "m1" })
+    expect(events[6]).toEqual({ type: "done", messageId: "m1" })
   })
 
   it("maps error frames to their message", async () => {

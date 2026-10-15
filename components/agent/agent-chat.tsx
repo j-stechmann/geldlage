@@ -230,9 +230,7 @@ export function AgentChat() {
         activeThreadId={activeThreadId}
         activeRole={activeRole}
         streaming={streaming}
-        streamContent={streams.content}
-        streamReasoning={streams.reasoning}
-        streamTools={streams.tools}
+        streams={streams}
         pendingUserMessage={pendingUserMessage}
         pendingMessageId={pendingMessageId}
         turnThreadId={turnThreadId}

@@ -23,6 +23,10 @@ export interface StoredMessage {
   reasoning: string | null
   toolName: string | null
   toolArgs: string | null
+  /** assistant rows: the round's tool calls in OpenAI wire JSON (replay metadata; display never reads it) */
+  toolCalls: string | null
+  /** tool rows: the wire call id pairing the result to its assistant row */
+  toolCallId: string | null
   createdAt: string
   threadSeq: number
 }

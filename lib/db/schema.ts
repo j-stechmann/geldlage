@@ -261,6 +261,17 @@ export const chatMessages = sqliteTable(
     /** tool rows: registry name + raw JSON args (display + debugging) */
     toolName: text("tool_name"),
     toolArgs: text("tool_args"),
+    /**
+     * assistant rows: the round's tool_calls in exact OpenAI wire shape
+     * (JSON) — the stored transcript doubles as replayable prompt history
+     * (ADR-0033 amendment). NULL on pre-amendment rows.
+     */
+    toolCalls: text("tool_calls"),
+    /**
+     * tool rows: the wire tool_call_id pairing this result to its
+     * assistant row's tool_calls entry. NULL on pre-amendment rows.
+     */
+    toolCallId: text("tool_call_id"),
     createdAt: text("created_at")
       .notNull()
       .$defaultFn(() => new Date().toISOString()),

@@ -1,6 +1,9 @@
 # ADR-0033: Agent chat panel with native tool calling over the shared llama-server
 
 _Status: Accepted · Date: 2026-10-06_
+_Amended 2026-10-15: per-round transcript — the stored chat rows double as
+replayable protocol history (Claude Code-style), including prior-turn tool
+activity. See the "SSE to the browser" and "Reasoning" bullets._
 
 ## Context
 
@@ -64,7 +67,10 @@ The agent chat is built from six pieces:
 
 - **Round semantics** (lib/agent/loop.ts, AGENT_MAX_TURNS = 5): the loop
   drives `stream_agent_chat` until the model answers without tool calls, with
-  a hard turn budget. The final allowed round is called **without the
+  a hard turn budget. Every completed round is announced as one `round` event
+  carrying that round's prose, reasoning and tool calls — the persister's
+  row unit, so the stored transcript mirrors the wire history round by
+  round. The final allowed round is called **without the
   `tools` field** (stripping the field, not `tool_choice: "none"` — some
   llama-server builds reject `tools: []`, so an empty registry means the
   field is omitted entirely) to force a real answer; any tool calls that slip
@@ -75,40 +81,59 @@ The agent chat is built from six pieces:
   `{"error": …}` tool results, so the model sees the problem and can
   self-correct; only stream/infrastructure errors propagate.
 
-- **SSE to the browser, persistence-free loop** (app/api/agent/…/chat,
-  lib/agent/sse-writer.ts, lib/agent/turn-persister.ts): the loop yields
-  events and knows nothing about the database; the **route** streams them
-  as named SSE events — `user` (the persisted user row's id, first frame:
-  the client aligns its optimistic bubble against the authoritative detail
-  view, whose fetch races a first-turn send when the thread is lazily
-  created), `delta` (content), `reasoning`, `tool_call`,
-  `tool_result`, `done`, `error` — and does all persistence: the user
-  message immediately, one tool row per `tool_result` (with its preceding
-  `tool_call` args), and the final assistant row (content + reasoning) at
-  `done`. The route is protocol wiring only: frame encoding, headers and
-  the error→frame mapping live in sse-writer.ts; the write-side state
-  machine (tool_call→tool_result args pairing, assistant row, thread
-  touch) lives in turn-persister.ts. All agent routes gate through one
-  shared guard (lib/agent/route-guard.ts: session → CSRF → roleOf → 404)
-  instead of seven copies of the same boilerplate. Persisting per
-  tool_result keeps `threadSeq` order identical to the streamed event
-  order. Client disconnects (`request.signal`) are forwarded into the loop
-  so the in-flight LLM fetch aborts instead of burning tokens for nobody;
+- **SSE to the browser, persistence-free loop, replayable transcript**
+  (app/api/agent/…/chat, lib/agent/sse-writer.ts, lib/agent/turn-persister.ts,
+  lib/agent/history.ts): the loop yields events and knows nothing about the
+  database; the **route** streams them as named SSE events — `user` (the
+  persisted user row's id, first frame: the client aligns its optimistic
+  bubble against the authoritative detail view, whose fetch races a
+  first-turn send when the thread is lazily created), `delta` (content),
+  `reasoning`, `round` (a bare segment boundary: one model round completed),
+  `tool_call`, `tool_result`, `done` (carrying the last persisted row id),
+  `error` — and does all persistence **per round**: the user message
+  immediately, then ONE assistant row per `round` event (that round's prose,
+  reasoning, and its tool calls stored as wire JSON in `chat_messages.
+tool_calls`) followed by its tool rows (paired via `tool_call_id`) —
+  `threadSeq` order identical to the streamed event order. The stored
+  transcript therefore doubles as **replayable protocol history**
+  (lib/agent/history.ts maps rows back onto the OpenAI messages, so
+  follow-up turns see which tools they already ran and what came back —
+  Claude Code's session-file semantics); a reasoning-only final round keeps
+  the placeholder body rule, a prose-less tool round persists with empty
+  content (the protocol needs the assistant `tool_calls` message on record;
+  the UI renders such rounds chips-only). Degradation rules, both directions
+  of "never send a broken trio": legacy rows (no `tool_calls`/`tool_call_id`)
+  replay as plain user/assistant text with tool rows dropped — exactly the
+  pre-amendment behavior, no backfill migration; and a concurrent send in a
+  shared thread that interleaves between an assistant round and its tool
+  rows degrades that trio to prose-only (llama-server rejects orphan tool
+  continuations). The route is protocol wiring only: frame encoding,
+  headers and the error→frame mapping live in sse-writer.ts; the
+  write-side state machine (per-round rows, tool_call→tool_result args
+  pairing, thread touch) lives in turn-persister.ts. All agent routes gate
+  through one shared guard (lib/agent/route-guard.ts: session → CSRF →
+  roleOf → 404) instead of seven copies of the same boilerplate. Client
+  disconnects (`request.signal`) are forwarded into the loop so the
+  in-flight LLM fetch aborts instead of burning tokens for nobody;
   infrastructure failures stream one `error` frame then close.
 
 - **Reasoning is display metadata** (lib/agent/chat-client.ts): llama-server's
   `reasoning_content` streams through as its own event, is shown in the panel
-  (collapsible "Denkprozess") and persisted on the assistant row, but is
-  **never replayed** into later rounds' history — the request builder drops
-  it, because thinking tokens belong to the round that produced them and
-  replaying them would bloat the prompt with stale traces. The request pins
-  `temperature: 0.3` (a chat persona needs some freedom; labeling keeps 0)
-  and `max_tokens = reasoning budget + 2048` (same token accounting as the
-  label path: the thought shares the completion budget). History is windowed
-  per request (lib/agent/window.ts): last 24 messages anchored at the oldest
-  user message inside the cap (slicing may not start mid-protocol —
-  llama-server rejects orphan tool continuations), fields truncated at 4000
-  chars with "…", and a
+  (collapsible "Denkprozess") and persisted **per round** on that round's
+  assistant row, but is **never replayed** into later rounds' history — the
+  request builder drops it, because thinking tokens belong to the round that
+  produced them and replaying them would bloat the prompt with stale traces.
+  The request pins `temperature: 0.3` (a chat persona needs some freedom;
+  labeling keeps 0) and `max_tokens = reasoning budget + 2048` (same token
+  accounting as the label path: the thought shares the completion budget).
+  History is windowed per request (lib/agent/window.ts) by a **token
+  estimate**: the newest messages are taken while a chars/4 estimate stays
+  under `LLM_CTX × 4 × 0.5` (half the context reserved for replayed
+  history, headroom for system turn and output; the route reads at most
+  the 128 most recent rows), then the slice anchors at the oldest user
+  message inside it (slicing may not start mid-protocol — llama-server
+  rejects orphan tool continuations; the anchor also keeps a replayed
+  trio intact). Fields are truncated at 4000 chars with "…", and the
   chars/4 estimate warns once per turn when the prompt exceeds 90% of
   `LLM_CTX`.
 
@@ -116,7 +141,9 @@ The agent chat is built from six pieces:
   chat_tables): `chat_threads` (owner = creator), `chat_thread_members`
   (roles via `roleOf()`: `owner | member | invited`, state `invited →
 joined`) and `chat_messages` (roles `user | assistant | tool`, CHECK
-  enforced in the hand-written DDL). store.ts is a barrel over the split
+  enforced in the hand-written DDL; assistant rows carry their round's
+  `tool_calls` wire JSON, tool rows the pairing `tool_call_id` — the
+  replay columns of the transcript amendment). store.ts is a barrel over the split
   concern modules (store/threads.ts, store/members.ts, store/messages.ts,
   store/thread-access.ts). Invites are idempotent (conflict-
   nothing on the `(thread_id, user_id)` primary key, owner un-invitable);
@@ -161,8 +188,10 @@ pointer-resizable right column** on md+ (280–720 px, open + width persisted
 to `localStorage`) and a full-screen overlay below md. Its open/width state
 is a module-level `useSyncExternalStore` store (panel-state.ts) shared by
 the header toggle and the dock without a provider. `app/layout.tsx` composes it
-into the main `flex` row — `AppNav`, pages and their layouts remain
-untouched. Sidebar groups: Meine Chats / Geteilte Chats / Einladungen.
+into the main `flex` row — `AppNav` and the pages' own markup remain
+untouched, but composing the dock removed the centered width cap: the
+header row and `<main>` render full-bleed (`max-w-full`) instead of
+`mx-auto max-w-7xl`. Sidebar groups: Meine Chats / Geteilte Chats / Einladungen.
 The 1,000+-line chat monolith is split by responsibility: `agent-api.ts`
 (typed fetchers + React Query keys + a typed `ApiError` — the invited-
 preview 404 surfaces as a query error, never as fake success data),
@@ -170,7 +199,10 @@ preview 404 surfaces as a query error, never as fake success data),
 `lib/llm/sse.ts` generator — one SSE parser server- and client-side),
 `use-agent-threads.ts` (queries, active-thread derivation with
 localStorage persistence), `use-agent-turn.ts` (the streaming turn state
-machine: optimistic user message, abort, post-done refetch), and one file
+machine: optimistic user message, per-round segments — each `round` frame
+freezes the streamed prose/reasoning into its own bubble with the tool
+chips of the round that called them, mirroring the per-round persistence —
+abort, post-done refetch), and one file
 per UI part (thread-bar, message-list, assistant-bubble, tool-chip,
 chat-input, invite-dialog) — `agent-chat.tsx` is a ~200-line orchestrator.
 DOM tests (jsdom + testing-library) cover the lifecycle end to end
@@ -206,12 +238,17 @@ if round-trip latency degrades under concurrent label jobs.
 - Positive: one model, one server, two consumers with shared SSE/error
   plumbing; tool extension without prompt-template surgery; per-user data
   isolation holds even in shared threads; the loop stays testable in
-  isolation (pure event stream, no DB).
-- Negative: +3 tables and 8 new route files; `GET /api/users` exposes
+  isolation (pure event stream, no DB); the stored transcript is
+  replayable protocol history — follow-up turns see their prior tool
+  activity, and the DB rows double as the display view and the prompt
+  (one representation, not two).
+- Negative: +2 columns on `chat_messages` and +2 route files originally
+  (`+3 tables and 8 new route files` at acceptance); `GET /api/users` exposes
   every user's name/email to any authenticated user (documented PII
   tradeoff); no write tools until a mutation boundary exists; agent turns
   queue behind (or before) label batches on the single slot; shared-thread
-  freshness relies on polling rather than push.
+  freshness relies on polling rather than push; replayed tool rounds
+  consume history budget (bounded by the estimate window, never by count).
 - Neutral: reasoning tokens are paid once per round (budget reserved in
   `max_tokens`) but stored only where they were shown.
 

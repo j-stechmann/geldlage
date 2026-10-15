@@ -26,23 +26,25 @@ export interface AgentTool {
 
 /**
  * Loop events, in emission order: reasoning/content fragments stream
- * through unchanged, tool_call/tool_result bracket one execution,
- * `done` closes the turn. `done` carries the accumulated content+reasoning
- * so the route persists exactly once after the loop finishes; `messageId`
- * is always null here — the route fills it after inserting the assistant
- * message (the loop is persistence-free by design).
+ * through unchanged, `round` closes one model round with its full prose,
+ * reasoning and tool calls (the persister writes ONE assistant row per
+ * round, so the stored transcript doubles as replayable protocol history
+ * — Claude Code-style), tool_call/tool_result bracket one execution, and
+ * `done` closes the turn. The loop stays persistence-free: the route
+ * fills the done FRAME's messageId with the last persisted row id.
  */
 export type AgentLoopEvent =
   | { type: "reasoning"; text: string }
   | { type: "content"; text: string }
-  | { type: "tool_call"; name: string; args: string }
-  | { type: "tool_result"; name: string; result: string }
   | {
-      type: "done"
-      messageId: string | null
+      type: "round"
       content: string
       reasoning: string | null
+      calls: Array<{ id: string; name: string; args: string }>
     }
+  | { type: "tool_call"; id: string; name: string; args: string }
+  | { type: "tool_result"; id: string; name: string; result: string }
+  | { type: "done" }
 
 /**
  * Conversation message in the OpenAI chat-completions shape. Tool rounds

@@ -28,6 +28,10 @@ export function appendMessage(
     reasoning?: string | null
     toolName?: string | null
     toolArgs?: string | null
+    /** assistant rows: the round's tool_calls in OpenAI wire JSON */
+    toolCalls?: string | null
+    /** tool rows: the wire tool_call_id pairing the result to its round */
+    toolCallId?: string | null
   }
 ): ChatMessage {
   const db = getDb()
@@ -56,6 +60,8 @@ export function appendMessage(
         reasoning: msg.reasoning ?? null,
         toolName: msg.toolName ?? null,
         toolArgs: msg.toolArgs ?? null,
+        toolCalls: msg.toolCalls ?? null,
+        toolCallId: msg.toolCallId ?? null,
         threadSeq: nextSeq,
         createdAt: new Date().toISOString(),
       })

@@ -286,6 +286,8 @@ export function createSchemaSqlite(db: Db) {
       reasoning TEXT,
       tool_name TEXT,
       tool_args TEXT,
+      tool_calls TEXT,
+      tool_call_id TEXT,
       created_at TEXT NOT NULL,
       thread_seq INTEGER NOT NULL DEFAULT 0
     )
@@ -456,6 +458,17 @@ export function migrateSchema(db: Db) {
     db.run(
       `ALTER TABLE categories ADD COLUMN usage_count INTEGER NOT NULL DEFAULT 0`
     )
+  }
+  // ── agent transcript replay (ADR-0033 amendment): assistant rows carry
+  // their round's tool_calls in OpenAI wire JSON, tool rows the pairing
+  // tool_call_id — the stored transcript doubles as replayable prompt
+  // history. NULL on legacy rows: those replay as plain user/assistant
+  // text and their tool rows stay display-only (no backfill).
+  if (!cols("chat_messages").includes("tool_calls")) {
+    db.run(`ALTER TABLE chat_messages ADD COLUMN tool_calls TEXT`)
+  }
+  if (!cols("chat_messages").includes("tool_call_id")) {
+    db.run(`ALTER TABLE chat_messages ADD COLUMN tool_call_id TEXT`)
   }
   {
     // Allocation + backfill in one transaction: SQLite DDL is transactional,
@@ -677,6 +690,8 @@ export function migrateSchema(db: Db) {
       reasoning TEXT,
       tool_name TEXT,
       tool_args TEXT,
+      tool_calls TEXT,
+      tool_call_id TEXT,
       created_at TEXT NOT NULL,
       thread_seq INTEGER NOT NULL DEFAULT 0
     )

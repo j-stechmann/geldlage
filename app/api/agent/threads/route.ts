@@ -5,6 +5,7 @@ import {
   DEFAULT_THREAD_TITLE,
 } from "@/lib/agent/store"
 import { requireSessionGate } from "@/lib/agent/route-guard"
+import { THREAD_TITLE_MAX_INPUT_CHARS } from "@/lib/agent/constants"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -30,7 +31,7 @@ export async function POST(request: NextRequest) {
   let title = DEFAULT_THREAD_TITLE
   if (typeof body?.title === "string") {
     const trimmed = body.title.trim()
-    if (trimmed) title = trimmed.slice(0, 80)
+    if (trimmed) title = trimmed.slice(0, THREAD_TITLE_MAX_INPUT_CHARS)
   }
 
   const thread = createThread(gate.session.uid, title)

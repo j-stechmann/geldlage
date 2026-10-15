@@ -382,10 +382,20 @@ describe("chat route turn persistence", () => {
     }>
     content?: string[]
   }> = []
+  /** Captured (non-title) request bodies, in arrival order. */
+  let captured: Array<{
+    messages: Array<{
+      role: string
+      content?: unknown
+      tool_calls?: Array<{ id?: string }>
+      tool_call_id?: string
+    }>
+  }> = []
 
   beforeEach(() => {
     agentRequests = 0
     scripted = []
+    captured = []
   })
 
   afterEach(async () => {
@@ -409,12 +419,18 @@ describe("chat route turn persistence", () => {
       req.on("data", (c: Buffer) => chunks.push(c))
       req.on("end", () => {
         const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
-          messages: Array<{ content?: unknown }>
+          messages: Array<{
+            role: string
+            content?: unknown
+            tool_calls?: Array<{ id?: string }>
+            tool_call_id?: string
+          }>
         }
         const isTitleCall = body.messages.some(
           (m) =>
             typeof m.content === "string" && m.content.includes("Chat-Titel")
         )
+        if (!isTitleCall) captured.push(body)
         res.writeHead(200, { "Content-Type": "text/event-stream" })
         const frames: string[] = []
         if (isTitleCall) {
@@ -484,6 +500,8 @@ describe("chat route turn persistence", () => {
     content: string
     toolName: string | null
     toolArgs: string | null
+    toolCalls: string | null
+    toolCallId: string | null
     threadSeq: number
   }> {
     return (
@@ -496,7 +514,7 @@ describe("chat route turn persistence", () => {
     )
   }
 
-  it("persists a tool row (args paired from tool_call) before the assistant row", async () => {
+  it("persists one assistant row per round + paired tool rows (replayable transcript)", async () => {
     await startLlmMock()
     scripted = [
       {
@@ -515,21 +533,47 @@ describe("chat route turn persistence", () => {
     const text = await postChat("Summen?")
     await settle()
     const rows = rowsInSeq()
-    expect(rows.map((r) => r.role)).toEqual(["user", "tool", "assistant"])
+    // Claude Code-style transcript: the round-1 assistant row precedes
+    // its tool rows (threadSeq = streamed event order), the final round
+    // appends its own row.
+    expect(rows.map((r) => r.role)).toEqual([
+      "user",
+      "assistant",
+      "tool",
+      "assistant",
+    ])
 
-    const tool = rows.find((r) => r.role === "tool")
-    expect(tool).toBeDefined()
-    expect(tool!.userId).toBeNull()
-    expect(tool!.toolName).toBe("get_category_totals")
-    expect(tool!.toolArgs).toBe('{"period":"this_month"}')
+    const [round1, toolRow, final] = rows.filter((r) => r.role !== "user")
+    // round 1 streamed no prose: empty content + the wire tool_calls
+    expect(round1.content).toBe("")
+    const calls = JSON.parse(round1.toolCalls ?? "[]") as Array<{
+      id: string
+      type: string
+      function: { name: string; arguments: string }
+    }>
+    expect(calls).toEqual([
+      {
+        id: "call_1",
+        type: "function",
+        function: {
+          name: "get_category_totals",
+          arguments: '{"period":"this_month"}',
+        },
+      },
+    ])
+
+    expect(toolRow.userId).toBeNull()
+    expect(toolRow.toolName).toBe("get_category_totals")
+    expect(toolRow.toolArgs).toBe('{"period":"this_month"}')
+    // the tool row pairs to its round via the wire id
+    expect(toolRow.toolCallId).toBe("call_1")
     // the tool row carries the EXECUTED result (real tool run, uid-scoped)
-    const parsed = JSON.parse(tool!.content) as { categories?: unknown }
+    const parsed = JSON.parse(toolRow.content) as { categories?: unknown }
     expect(parsed.categories).toEqual([])
 
-    const assistant = rows.find((r) => r.role === "assistant")
-    expect(assistant!.content).toBe("Hier sind deine Summen.")
+    expect(final.content).toBe("Hier sind deine Summen.")
 
-    // done frame's messageId = the assistant row id (client alignment)
+    // done frame's messageId = the LAST assistant row id (client alignment)
     const doneFrames = text
       .split("\n\n")
       .filter((frame) => frame.startsWith("event: done"))
@@ -540,7 +584,88 @@ describe("chat route turn persistence", () => {
     const done = JSON.parse(dataLine!.replace(/^data: /, "")) as {
       messageId: string
     }
-    expect(done.messageId).toBe(assistant!.id)
+    expect(done.messageId).toBe(final.id)
+  })
+
+  it("replays the prior turn's protocol trio into the follow-up request", async () => {
+    await startLlmMock()
+    scripted = [
+      {
+        toolCalls: [
+          {
+            index: 0,
+            id: "call_1",
+            name: "get_category_totals",
+            arguments: '{"period":"this_month"}',
+          },
+        ],
+      },
+      { content: ["Hier sind deine Summen."] },
+      { content: ["ok"] },
+    ]
+
+    await postChat("Summen?")
+    await postChat("Und jetzt?")
+    await settle()
+
+    // The turn-2 request (found by its trailing user message — the
+    // fire-and-forget title one-shot interleaves nondeterministically)
+    // must replay turn 1's rows as the exact protocol messages: user,
+    // assistant+tool_calls, tool, assistant.
+    const turn2 = captured.find(
+      (c) => c.messages[c.messages.length - 1]?.content === "Und jetzt?"
+    )
+    expect(turn2).toBeDefined()
+    const roles = turn2!.messages.map((m) => m.role)
+    expect(roles[0]).toBe("system")
+    expect(roles.slice(1)).toEqual([
+      "user",
+      "assistant",
+      "tool",
+      "assistant",
+      "user",
+    ])
+    const assistantCall = turn2!.messages.find((m) =>
+      Array.isArray(m.tool_calls)
+    )
+    expect(assistantCall?.tool_calls?.[0].id).toBe("call_1")
+    const toolMsg = turn2!.messages.find((m) => m.role === "tool")
+    expect(toolMsg?.tool_call_id).toBe("call_1")
+    expect(String(toolMsg?.content)).toContain('"categories"')
+  })
+
+  it("replays legacy rows as plain text (tool rows dropped, no backfill)", async () => {
+    await startLlmMock()
+    // Old-shape transcript: one merged assistant row + tool rows without
+    // pairing ids (the pre-amendment persister's output).
+    appendMessage(threadId, {
+      userId: u1,
+      role: "user",
+      content: "Alt?",
+    })
+    appendMessage(threadId, {
+      userId: null,
+      role: "tool",
+      content: '{"legacy":true}',
+      toolName: "get_category_totals",
+      toolArgs: "{}",
+    })
+    appendMessage(threadId, {
+      userId: null,
+      role: "assistant",
+      content: "Alte Antwort.",
+    })
+    scripted = [{ content: ["ok"] }]
+
+    await postChat("Neu?")
+    await settle()
+    const turn2 = captured.find(
+      (c) => c.messages[c.messages.length - 1]?.content === "Neu?"
+    )
+    expect(turn2).toBeDefined()
+    const roles = turn2!.messages.map((m) => m.role)
+    expect(roles).toEqual(["system", "user", "assistant", "user"])
+    expect(turn2!.messages.some((m) => m.role === "tool")).toBe(false)
   })
 
   it("persists no assistant row for an empty answer while keeping the user row", async () => {

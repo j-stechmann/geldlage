@@ -68,15 +68,32 @@ const seedMessages: Array<Record<string, unknown>> = [
   }),
 ]
 
+/**
+ * Post-turn persisted rows in the Claude Code-style transcript shape:
+ * the round-1 assistant row (empty prose, its wire tool_calls), its
+ * paired tool row, then the final round's row.
+ */
 const postTurnMessages: Array<Record<string, unknown>> = [
   ...seedMessages,
-  msg("m-tool", "tool", '{"totalsCents":{"inflow":0,"outflow":-421100}}', 3, {
+  msg("m-r1", "assistant", "", 3, {
+    reasoning: "Nachdenken…",
+    toolCalls: JSON.stringify([
+      {
+        id: "call_1",
+        type: "function",
+        function: {
+          name: "get_category_totals",
+          arguments: '{"period":"this_month"}',
+        },
+      },
+    ]),
+  }),
+  msg("m-tool", "tool", '{"totalsCents":{"inflow":0,"outflow":-421100}}', 4, {
     toolName: "get_category_totals",
     toolArgs: '{"period":"this_month"}',
+    toolCallId: "call_1",
   }),
-  msg("m9", "assistant", "Du hast 4211,00 € ausgegeben.", 4, {
-    reasoning: "Nachdenken…",
-  }),
+  msg("m9", "assistant", "Du hast 4211,00 € ausgegeben.", 5),
 ]
 
 /**
@@ -86,8 +103,8 @@ const postTurnMessages: Array<Record<string, unknown>> = [
  */
 function postTurnMessagesWithUser(): Array<Record<string, unknown>> {
   return [
-    ...postTurnMessages.filter((m) => m.threadSeq !== 3 || m.id !== "m-tool"),
-    { ...msg("m-user", "user", "Wie viel?", 5), id: "m-pending" },
+    ...postTurnMessages.filter((m) => m.id !== "m-tool"),
+    { ...msg("m-user", "user", "Wie viel?", 6), id: "m-pending" },
   ]
 }
 
@@ -139,8 +156,10 @@ function stubChatFlow(state: {
 }
 
 /**
- * The streamed turn: reasoning → tool round → content, then held open
- * until `release` is called (so the mid-stream bubble is assertable).
+ * The streamed turn: reasoning → round boundary → tool round → content,
+ * held open until `release` is called (so the mid-stream bubbles are
+ * assertable). Claude Code-style frames: the first `round` freezes the
+ * prose-less tool round, the trailing one freezes the final answer.
  */
 let chatStream: (state: { messages: unknown[] }) => ReadableStream<Uint8Array>
 let releaseTurn: () => void
@@ -165,6 +184,7 @@ beforeEach(() => {
             sseFrames([
               { event: "user", data: { id: "m-pending" } },
               { event: "reasoning", data: { text: "Nachdenken…" } },
+              { event: "round", data: {} },
               {
                 event: "tool_call",
                 data: {
@@ -190,13 +210,8 @@ beforeEach(() => {
         controller.enqueue(
           enc.encode(
             sseFrames([
-              {
-                event: "done",
-                data: {
-                  messageId: "m9",
-                  content: "Du hast 4211,00 € ausgegeben.",
-                },
-              },
+              { event: "round", data: {} },
+              { event: "done", data: { messageId: "m9" } },
             ])
           )
         )
@@ -290,6 +305,114 @@ describe("<AgentChat>", () => {
     // the state mutation fed the post-turn rows through the shared state
     const persisted = screen.getAllByText(/Du hast/)
     expect(persisted.length).toBe(1)
+  }, 15_000)
+
+  it("renders one bubble per round, chips attached to the calling round", async () => {
+    const state = {
+      messages: [{ ...seedMessages[0] }, { ...seedMessages[1] }] as Array<
+        Record<string, unknown>
+      >,
+      threads: [
+        {
+          id: "t1",
+          title: "Haushaltsfragen",
+          role: "owner",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    }
+    // Custom two-round stream with pre-tool prose: the first round says
+    // something before calling the tool — Claude Code-style, that prose
+    // freezes into its own bubble when the round frame arrives.
+    const enc = new TextEncoder()
+    let releaseMine!: () => void
+    const gateMine = new Promise<void>((r) => {
+      releaseMine = r
+    })
+    chatStream = () =>
+      new ReadableStream<Uint8Array>({
+        async start(controller) {
+          controller.enqueue(
+            enc.encode(
+              sseFrames([
+                { event: "user", data: { id: "m-p" } },
+                { event: "delta", data: { text: "Ich prüfe das." } },
+                { event: "round", data: {} },
+                {
+                  event: "tool_call",
+                  data: {
+                    name: "get_category_totals",
+                    args: '{"period":"this_month"}',
+                  },
+                },
+                {
+                  event: "tool_result",
+                  data: {
+                    name: "get_category_totals",
+                    result: '{"totalsCents":{"outflow":-421100}}',
+                  },
+                },
+                { event: "delta", data: { text: "Ergebnis: 42,11 €." } },
+              ])
+            )
+          )
+          await gateMine
+          controller.close()
+        },
+      })
+    stubChatFlow(state)
+    renderWithQuery(createElement(AgentChat))
+    await waitFor(() =>
+      expect(screen.getByText("4211,00 €")).toBeInTheDocument()
+    )
+
+    const input = screen.getByPlaceholderText("Nachricht…")
+    await userEvent.type(input, "Prüf mal?")
+    await userEvent.click(screen.getByRole("button", { name: "Senden" }))
+
+    // mid-stream: the pre-tool prose froze into its own bubble, the
+    // chip lives with it, the final prose streams into the live bubble
+    await waitFor(() =>
+      expect(screen.getByText("Ich prüfe das.")).toBeInTheDocument()
+    )
+    await waitFor(() =>
+      expect(screen.getByText(/Ergebnis: 42,11 €\./)).toBeInTheDocument()
+    )
+    expect(screen.getAllByText("get_category_totals").length).toBeGreaterThan(0)
+
+    // done: the persisted per-round rows replace the segments — both
+    // bubbles survive as separate stored rows with the chip between
+    const persistedRows = [
+      ...state.messages,
+      msg("p-r1", "assistant", "Ich prüfe das.", 3, {
+        toolCalls: JSON.stringify([
+          {
+            id: "call_1",
+            type: "function",
+            function: {
+              name: "get_category_totals",
+              arguments: '{"period":"this_month"}',
+            },
+          },
+        ]),
+      }),
+      msg("p-tool", "tool", '{"totalsCents":{"outflow":-421100}}', 4, {
+        toolName: "get_category_totals",
+        toolArgs: '{"period":"this_month"}',
+        toolCallId: "call_1",
+      }),
+      msg("p-final", "assistant", "Ergebnis: 42,11 €.", 5),
+    ]
+    await act(async () => {
+      state.messages = persistedRows
+      releaseMine()
+      await Promise.resolve()
+    })
+    await waitFor(() =>
+      expect(screen.getAllByText("Ich prüfe das.")).toHaveLength(1)
+    )
+    expect(screen.getAllByText(/Ergebnis: 42,11 €\./)).toHaveLength(1)
+    expect(screen.getAllByText("get_category_totals").length).toBeGreaterThan(0)
   }, 15_000)
 
   it("raced detail fetch with the persisted user row shows the message once", async () => {

@@ -6,6 +6,7 @@ import {
   renameThread,
 } from "@/lib/agent/store"
 import { requireThreadAccess } from "@/lib/agent/route-guard"
+import { THREAD_TITLE_MAX_INPUT_CHARS } from "@/lib/agent/constants"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -34,9 +35,12 @@ export async function PATCH(
     )
   }
   const title = body.title.trim()
-  if (title.length < 1 || title.length > 80) {
+  if (title.length < 1 || title.length > THREAD_TITLE_MAX_INPUT_CHARS) {
     return NextResponse.json(
-      { error: "invalid_title", message: "Titel: 1–80 Zeichen." },
+      {
+        error: "invalid_title",
+        message: `Titel: 1–${THREAD_TITLE_MAX_INPUT_CHARS} Zeichen.`,
+      },
       { status: 400 }
     )
   }

@@ -6,6 +6,7 @@ import { executeToolCall } from "@/lib/agent/tool-executor"
 import {
   AGENT_MAX_TURNS,
   estimatePromptChars,
+  HISTORY_CTX_SHARE,
   windowHistory,
 } from "@/lib/agent/window"
 import type {
@@ -17,12 +18,13 @@ import type {
 /**
  * The tool loop (ADR-0033): drives streamAgentChat round by round until the
  * model answers without requesting tools (or the turn budget runs out).
- * Persistence-free by design — it only yields AgentLoopEvents; the route
- * streams them to the client and persists the final assistant message once
- * the done event arrives (which is why done carries content+reasoning but
- * a null messageId). A pure turn state machine: registry access is read-
- * only (wire tool list + system prompt names), execution lives in
- * tool-executor.ts.
+ * Persistence-free by design — it only yields AgentLoopEvents. Claude
+ * Code-style transcript: every completed round is announced as one `round`
+ * event (that round's prose, reasoning and tool calls), which the route's
+ * persister writes as one assistant row — the stored rows double as the
+ * replayable protocol history for later turns. A pure turn state machine:
+ * registry access is read-only (wire tool list + system prompt names),
+ * execution lives in tool-executor.ts.
  */
 
 /** Rough chars→tokens divisor, same estimate convention as lib/llm. */
@@ -58,19 +60,24 @@ export async function* runAgentTurn(params: {
       agentTools.map((t) => t.name)
     ),
   }
-  const msgs: AgentPromptMessage[] = [system, ...windowHistory(params.history)]
-
-  // Once per turn (not per round): the estimate uses the windowed history
-  // (the system turn's fixed overhead is negligible next to the 24-cap),
-  // chars/4 ≈ tokens like the lib/llm guard. Exceeding ctx gets output
-  // clamped by the server — an operator-level misconfiguration surfaced
-  // loudly instead of silently truncating answers. Deliberately NOT
-  // re-estimated inside the loop: tool results appended to `msgs` in later
-  // rounds are unaccounted (advisory-by-design — the window cap bounds the
+  // Estimate-based replay window: half the model context is reserved
+  // for history (HISTORY_CTX_SHARE), leaving headroom for the system
+  // turn and output. Once per turn (not per round): the estimate uses
+  // the windowed history, chars/4 ≈ tokens like the lib/llm guard.
+  // Exceeding ctx gets output clamped by the server — an
+  // operator-level misconfiguration surfaced loudly instead of
+  // silently truncating answers. Deliberately NOT re-estimated inside
+  // the loop: tool results appended to `msgs` in later rounds are
+  // unaccounted (advisory-by-design — the window budget bounds the
   // request side, and a mid-turn warn would fire after output already
   // streamed).
-  const promptChars =
-    estimatePromptChars(windowHistory(params.history)) + system.content.length
+  const windowed = windowHistory(
+    params.history,
+    cfg.LLM_CTX * CHARS_PER_TOKEN * HISTORY_CTX_SHARE
+  )
+  const msgs: AgentPromptMessage[] = [system, ...windowed]
+
+  const promptChars = estimatePromptChars(windowed) + system.content.length
   if (promptChars > cfg.LLM_CTX * CHARS_PER_TOKEN * CTX_HEADROOM) {
     console.warn(
       `[agent] estimated prompt ${promptChars} chars (~${Math.ceil(
@@ -83,8 +90,6 @@ export async function* runAgentTurn(params: {
   // Set when a round ended empty: the next round runs tools-free and ends
   // the turn no matter what (one retry max, never a silent-loop hang).
   let retryWithoutTools = false
-  let content = ""
-  let reasoning: string | null = null
 
   while (roundsLeft > 0) {
     roundsLeft--
@@ -93,6 +98,9 @@ export async function* runAgentTurn(params: {
     retryWithoutTools = false
 
     let roundContent = ""
+    // Per-round trace: the round event carries only what this round
+    // produced (stored reasoning never merges across rounds).
+    let roundReasoning: string | null = null
     const calls: Array<{ id: string; name: string; args: string }> = []
 
     for await (const ev of streamAgentChat(msgs, {
@@ -100,7 +108,7 @@ export async function* runAgentTurn(params: {
       tools: noTools ? [] : wireTools,
     })) {
       if (ev.type === "reasoning") {
-        reasoning = (reasoning ?? "") + ev.text
+        roundReasoning = (roundReasoning ?? "") + ev.text
         yield { type: "reasoning", text: ev.text }
       } else if (ev.type === "content") {
         roundContent += ev.text
@@ -109,7 +117,17 @@ export async function* runAgentTurn(params: {
         calls.push(...ev.calls)
       }
     }
-    content += roundContent
+
+    // One assistant record per completed round, before any execution:
+    // the persister turns it into one row, so the stored transcript
+    // replays as the same per-round protocol messages the wire history
+    // below builds.
+    yield {
+      type: "round",
+      content: roundContent,
+      reasoning: roundReasoning,
+      calls: calls.map((c) => ({ id: c.id, name: c.name, args: c.args })),
+    }
 
     if (calls.length > 0 && !noTools) {
       // The assistant tool_calls message is protocol-required even when the
@@ -125,11 +143,21 @@ export async function* runAgentTurn(params: {
         })),
       })
       for (const call of calls) {
-        yield { type: "tool_call", name: call.name, args: call.args || "{}" }
+        yield {
+          type: "tool_call",
+          id: call.id,
+          name: call.name,
+          args: call.args || "{}",
+        }
         const resultString = await executeToolCall(call.name, call.args, {
           uid: params.uid,
         })
-        yield { type: "tool_result", name: call.name, result: resultString }
+        yield {
+          type: "tool_result",
+          id: call.id,
+          name: call.name,
+          result: resultString,
+        }
         msgs.push({
           role: "tool",
           tool_call_id: call.id,
@@ -149,7 +177,7 @@ export async function* runAgentTurn(params: {
       retryWithoutTools = true
       continue
     }
-    yield { type: "done", messageId: null, content, reasoning }
+    yield { type: "done" }
     return
   }
 }

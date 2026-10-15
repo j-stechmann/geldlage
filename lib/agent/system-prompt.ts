@@ -42,7 +42,13 @@ export function agentSystemPrompt(
  * short title, not a conversation turn (never persisted).
  */
 export function titlePrompt(firstMessage: string): string {
-  const clean = firstMessage.replace(/\s+/g, " ").trim()
+  const clean = firstMessage
+    .replace(/\s+/g, " ")
+    .trim()
+    // A title needs only the gist: cap the embedded message so a long
+    // first turn cannot crowd a small LLM context (the answer is 2-5
+    // words regardless).
+    .slice(0, 200)
   return `Gib einen kurzen Chat-Titel für die folgende Nachricht an. Nenne 2-5 Wörter auf Deutsch, ohne Anführungszeichen. Nachricht: ${clean}`
 }
 
