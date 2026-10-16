@@ -15,6 +15,7 @@ import {
   enqueueFrame,
   errorFrameMessage,
   sseResponseHeaders,
+  startSseKeepalive,
 } from "@/lib/agent/sse-writer"
 import type { AgentLoopEvent } from "@/lib/agent/types"
 import type { ChatMessage } from "@/lib/db/schema"
@@ -105,6 +106,13 @@ export async function POST(
   const persister = new TurnPersister(id)
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
+      // Keepalive watchdog: between the `user` frame and the first
+      // `delta`/`reasoning` frame the stream can carry no bytes for
+      // minutes (single llama-server slot, label batches queue ahead) —
+      // proxies with idle read timeouts would cut the turn. Pings a
+      // comment frame only during genuine silence (activity() restarts
+      // the window after every real frame).
+      const keepalive = startSseKeepalive(controller)
       // request.signal fires when the client disconnects; forwarding it
       // into the loop aborts the in-flight LLM fetch instead of burning
       // the rest of the turn for nobody.
@@ -115,12 +123,14 @@ export async function POST(
         // detail fetch races the turn and can arrive already containing
         // this row — without the id, content-matching duplicates it).
         enqueueFrame(controller, "user", { id: userMessage.id })
+        keepalive.activity()
         for await (const ev of runAgentTurn({
           history,
           uid: gate.session.uid,
           signal: request.signal,
         })) {
           persistAndEnqueue(controller, persister, ev)
+          keepalive.activity()
         }
       } catch (err) {
         // Infrastructure failures stream an error frame then close — the
@@ -138,6 +148,7 @@ export async function POST(
         // keeps a user-chosen name standing), so the thread is never
         // stuck on "Neuer Chat".
         if (isFirstTurn) maybeAutoTitle(id, content)
+        keepalive.stop()
         // A client disconnect throws out of enqueue (not close) — swallow
         // so teardown never masks the original error.
         try {

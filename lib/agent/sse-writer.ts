@@ -34,6 +34,68 @@ export function sseFrame(event: string, data: unknown): Uint8Array {
 }
 
 /**
+ * Maximum silent gap on the chat stream before a keepalive comment frame.
+ * 15s keeps reverse-proxy read timeouts (nginx defaults to 60s) from
+ * dropping a turn that legitimately streams nothing for minutes: the
+ * llama-server slot is single (-np 1) and label batches queue ahead of
+ * chat turns, so the silent gap between the `user` frame and the first
+ * `delta`/`reasoning` frame can run up to LLM_TIMEOUT_MS.
+ */
+export const SSE_KEEPALIVE_INTERVAL_MS = 15_000
+
+/** One SSE comment frame: no `data:`/`event:` line, so the shared parser (lib/llm/sse.ts) drops it client-side. */
+export function sseKeepaliveFrame(): Uint8Array {
+  return encoder.encode(": keepalive\n\n")
+}
+
+export interface SseKeepalive {
+  /** A frame went out — restart the silent-window watchdog. */
+  activity(): void
+  /** Turn over — cancel the watchdog (no ping after close). */
+  stop(): void
+}
+
+/**
+ * Watchdog that pings a comment frame whenever the stream has been silent
+ * for intervalMs: proxies between server and browser (a supported
+ * topology, see the CSRF guard's APP_ORIGIN handling) cut idle connections
+ * on read timeouts even though the turn is alive — the keepalive bytes
+ * keep the connection open while the browser client ignores the frames.
+ * activity() restarts the window after every real frame, so keepalives
+ * only flow during genuine silence. A ping hitting a cancelled stream
+ * (client disconnected mid-wait) is swallowed and stops the watchdog —
+ * unlike enqueueFrame it must NOT rethrow: a timer callback has no caller
+ * to classify the AbortError, and request.signal's abort ends the loop
+ * right after.
+ */
+export function startSseKeepalive(
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  intervalMs: number = SSE_KEEPALIVE_INTERVAL_MS
+): SseKeepalive {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const stop = (): void => {
+    if (timer !== null) {
+      clearTimeout(timer)
+      timer = null
+    }
+  }
+  const ping = (): void => {
+    timer = null
+    try {
+      controller.enqueue(sseKeepaliveFrame())
+    } catch {
+      return
+    }
+    timer = setTimeout(ping, intervalMs)
+  }
+  const activity = (): void => {
+    stop()
+    timer = setTimeout(ping, intervalMs)
+  }
+  return { activity, stop }
+}
+
+/**
  * Enqueues one frame via the controller. A TypeError from enqueue means
  * the response stream left the readable state — the client disconnected
  * and the stream cancellation raced (and won) against the request.signal

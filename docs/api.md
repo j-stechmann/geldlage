@@ -95,7 +95,11 @@ assistant and tool rows persist per round as they stream, `done` only
 closes the turn), `error` (infrastructure failure, or the thread
 vanishing mid-turn — the owner deleting a shared thread while a member's
 turn streams; streamed then the stream closes). Client disconnects
-abort the in-flight LLM fetch silently.
+abort the in-flight LLM fetch silently. During silent stretches (the
+single llama-server slot queues behind label batches, so the wait
+before the first token can be minutes) the route emits a `: keepalive`
+comment frame every 15s — pure connection liveness, the client-side
+parser drops comment frames without emitting an event.
 
 **AI thread titling**: after a thread's FIRST turn completes (post-`done`,
 fire-and-forget) the route asks the model for a 2–5 word title via the same

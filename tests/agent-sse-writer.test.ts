@@ -1,8 +1,11 @@
 import { describe, it, expect, afterEach, vi } from "vitest"
 import {
+  SSE_KEEPALIVE_INTERVAL_MS,
   enqueueFrame,
   errorFrameMessage,
   sseFrame,
+  sseKeepaliveFrame,
+  startSseKeepalive,
 } from "@/lib/agent/sse-writer"
 import { ThreadNotFoundError } from "@/lib/agent/store"
 
@@ -97,5 +100,86 @@ describe("errorFrameMessage", () => {
       "[agent] LLM turn failed:",
       "thread not found: t_abc123"
     )
+  })
+})
+
+describe("startSseKeepalive", () => {
+  /** Minimal controller double: record enqueued frames. */
+  function recordingController() {
+    const chunks: Uint8Array[] = []
+    const controller = {
+      enqueue: (chunk: Uint8Array) => {
+        chunks.push(chunk)
+      },
+    } as unknown as ReadableStreamDefaultController<Uint8Array>
+    return { controller, chunks }
+  }
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("pings a comment frame after a silent interval and keeps pinging", () => {
+    vi.useFakeTimers()
+    const { controller, chunks } = recordingController()
+    const keepalive = startSseKeepalive(controller)
+    keepalive.activity()
+    expect(chunks).toHaveLength(0)
+
+    vi.advanceTimersByTime(SSE_KEEPALIVE_INTERVAL_MS)
+    expect(chunks).toHaveLength(1)
+    expect(decoder.decode(chunks[0])).toBe(decoder.decode(sseKeepaliveFrame()))
+    expect(decoder.decode(chunks[0])).toBe(": keepalive\n\n")
+
+    vi.advanceTimersByTime(SSE_KEEPALIVE_INTERVAL_MS)
+    expect(chunks).toHaveLength(2)
+    keepalive.stop()
+  })
+
+  it("resets the silent window on activity — no ping while frames flow", () => {
+    vi.useFakeTimers()
+    const { controller, chunks } = recordingController()
+    const keepalive = startSseKeepalive(controller)
+    keepalive.activity()
+
+    // Frames arrive just inside the interval, forever: no keepalive ever.
+    for (let i = 0; i < 5; i++) {
+      vi.advanceTimersByTime(SSE_KEEPALIVE_INTERVAL_MS - 1)
+      keepalive.activity()
+    }
+    expect(chunks).toHaveLength(0)
+
+    // Then silence: exactly one ping per interval.
+    vi.advanceTimersByTime(SSE_KEEPALIVE_INTERVAL_MS)
+    expect(chunks).toHaveLength(1)
+    keepalive.stop()
+  })
+
+  it("stop() cancels the watchdog", () => {
+    vi.useFakeTimers()
+    const { controller, chunks } = recordingController()
+    const keepalive = startSseKeepalive(controller)
+    keepalive.activity()
+    keepalive.stop()
+    vi.advanceTimersByTime(SSE_KEEPALIVE_INTERVAL_MS * 10)
+    expect(chunks).toHaveLength(0)
+  })
+
+  it("stops silently when the response stream is already cancelled", async () => {
+    vi.useFakeTimers()
+    let controller!: ReadableStreamDefaultController<Uint8Array>
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        controller = c
+      },
+    })
+    await stream.cancel() // client gone before the first silent window ends
+    const keepalive = startSseKeepalive(controller)
+    keepalive.activity()
+    // A throwing timer callback would be an unhandled rejection — ping
+    // must swallow the cancelled-stream error and stop the watchdog.
+    expect(() =>
+      vi.advanceTimersByTime(SSE_KEEPALIVE_INTERVAL_MS * 3)
+    ).not.toThrow()
   })
 })

@@ -4,6 +4,9 @@ _Status: Accepted · Date: 2026-10-06_
 _Amended 2026-10-15: per-round transcript — the stored chat rows double as
 replayable protocol history (Claude Code-style), including prior-turn tool
 activity. See the "SSE to the browser" and "Reasoning" bullets._
+_Amended 2026-10-16: SSE keepalive — silent stretches on the chat stream emit
+`: keepalive` comment frames every 15s so reverse-proxy read timeouts cannot
+cut a live turn. See the "SSE to the browser" bullet._
 
 ## Context
 
@@ -119,7 +122,13 @@ tool_calls`) followed by its tool rows (paired via `tool_call_id`) —
   roleOf → 404) instead of seven copies of the same boilerplate. Client
   disconnects (`request.signal`) are forwarded into the loop so the
   in-flight LLM fetch aborts instead of burning tokens for nobody;
-  infrastructure failures stream one `error` frame then close.
+  infrastructure failures stream one `error` frame then close. A
+  keepalive watchdog (sse-writer.ts) pings a `: keepalive` comment frame
+  whenever the stream has been silent for 15s — the wait before the first
+  token can exceed minutes (`-np 1` queues label batches ahead of chat
+  turns), and reverse proxies behind the supported proxy topology cut
+  idle connections on read timeouts; the shared parser drops
+  comment-only frames, so the browser client never sees them.
 
 - **Reasoning is display metadata** (lib/agent/chat-client.ts): llama-server's
   `reasoning_content` streams through as its own event, is shown in the panel
