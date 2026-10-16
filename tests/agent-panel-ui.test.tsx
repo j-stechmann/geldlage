@@ -24,7 +24,10 @@ import {
 /** Thread detail the messages route returns. */
 function threadDetail(
   messages: Array<Record<string, unknown>>,
-  role: "owner" | "member" = "owner"
+  role: "owner" | "member" = "owner",
+  members: Array<Record<string, unknown>> = [
+    { userId: 1, name: "user-1", email: "u1@x.de", state: "owner" },
+  ]
 ) {
   return {
     thread: {
@@ -36,7 +39,7 @@ function threadDetail(
       updatedAt: "2026-01-01T00:00:00.000Z",
     },
     role,
-    members: [{ userId: 1, name: "user-1", email: "u1@x.de", state: "owner" }],
+    members,
     messages,
   }
 }
@@ -117,6 +120,10 @@ function stubChatFlow(state: {
   /** Makes the chat POST answer this plain JSON error before persisting. */
   chatReject?: { status: number; body: Record<string, unknown> }
   threads: Array<Record<string, unknown>>
+  /** Served by GET /api/users (departed-author name fallback). */
+  users?: Array<Record<string, unknown>>
+  /** Overrides the thread-detail roster (default: only owner userId 1). */
+  members?: Array<Record<string, unknown>>
 }) {
   const calls: Array<{ path: string; method: string }> = []
   const fetchMock = vi.fn(
@@ -127,8 +134,13 @@ function stubChatFlow(state: {
       if (path === "/api/agent/threads" && method === "GET") {
         return Response.json({ threads: state.threads })
       }
+      if (path === "/api/users" && method === "GET") {
+        return Response.json({ users: state.users ?? [] })
+      }
       if (path === "/api/agent/threads/t1/messages" && method === "GET") {
-        return Response.json(threadDetail(state.messages))
+        return Response.json(
+          threadDetail(state.messages, "owner", state.members)
+        )
       }
       if (path === "/api/agent/threads/t1/chat" && method === "POST") {
         if (state.chatReject) {
@@ -227,7 +239,7 @@ afterEach(() => {
 
 describe("<AgentChat>", () => {
   it("renders stored messages (user right, assistant with Denkprozess)", async () => {
-    stubChatFlow({
+    const { calls } = stubChatFlow({
       messages: [{ ...seedMessages[0] }, { ...seedMessages[1] }],
       threads: [
         {
@@ -246,6 +258,39 @@ describe("<AgentChat>", () => {
     )
     expect(screen.getByText("4211,00 €")).toBeInTheDocument()
     expect(screen.getAllByText("Denkprozess").length).toBeGreaterThan(0)
+    // Single-author thread: the departed-name fallback must stay off —
+    // no /api/users request may fire (see the departed-member test).
+    expect(calls.filter((c) => c.path === "/api/users")).toHaveLength(0)
+  })
+
+  it("keeps attribution for departed members (names via /api/users)", async () => {
+    // userId 2 left the thread: their roster row is gone, but their old
+    // user message survives — the user directory must fill the name.
+    stubChatFlow({
+      messages: [
+        msg("m1", "user", "Wie viel habe ich diesen Monat ausgegeben?", 1),
+        msg("m2", "assistant", "4211,00 €", 2),
+        msg("m3", "user", "Und letztes Jahr?", 3, { userId: 2 }),
+        msg("m4", "assistant", "1200,00 €", 4),
+      ],
+      threads: [
+        {
+          id: "t1",
+          title: "Haushaltsfragen",
+          role: "owner",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+      users: [{ id: 2, name: "user-2", email: "u2@x.de" }],
+    })
+    renderWithQuery(createElement(AgentChat))
+    // multi-author thread → both user bubbles carry author labels; the
+    // departed member's name comes from the directory, not the roster.
+    await waitFor(() =>
+      expect(screen.getByText("user-2")).toBeInTheDocument()
+    )
+    expect(screen.getByText("user-1")).toBeInTheDocument()
+    expect(screen.queryByText("?")).not.toBeInTheDocument()
   })
 
   it("streams a turn: bubble mid-stream, persisted rows replace it after done", async () => {

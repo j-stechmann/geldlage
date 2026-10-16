@@ -62,7 +62,10 @@ export async function fetchThreadDetail(
   return readJson(await apiFetch(`/api/agent/threads/${threadId}/messages`))
 }
 
-/** Only fetched while the invite dialog is open. */
+/**
+ * Fetched while the invite dialog is open, and by the chat whenever a
+ * thread has departed authors (name fallback for their messages).
+ */
 export async function fetchUsers(): Promise<{ users: UserRow[] }> {
   return readJson(await apiFetch("/api/users"))
 }

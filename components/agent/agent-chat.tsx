@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useMemo, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { ThreadBar } from "@/components/agent/thread-bar"
 import { MessageListView } from "@/components/agent/message-list"
@@ -9,12 +10,14 @@ import { InviteDialog } from "@/components/agent/invite-dialog"
 import { useAgentThreads } from "@/components/agent/use-agent-threads"
 import { useAgentTurn } from "@/components/agent/use-agent-turn"
 import {
+  USERS_KEY,
   deleteOrLeaveThread,
+  fetchUsers,
   joinThread,
   renameThread,
   invite,
 } from "@/components/agent/agent-api"
-import type { Member } from "@/components/agent/types"
+import type { Member, UserRow } from "@/components/agent/types"
 
 /**
  * Agent chat orchestrator (ADR-0033): composes the thread bar, message
@@ -78,11 +81,29 @@ export function AgentChat() {
   const members: Member[] = detail?.members ?? EMPTY_MEMBERS
 
   // Name resolution for user messages in (potentially shared) threads.
+  // Departed members keep their attribution: leaving deletes the roster
+  // row but not the user row, so the directory (/api/users — the same
+  // key/cache the invite dialog uses) fills the gap. The directory omits
+  // the requesting user, which is fine: viewers are always owner or
+  // member, so their own name resolves from the roster. Fetched only
+  // when some message references an author the roster no longer lists.
+  const hasDepartedAuthors = useMemo(() => {
+    const ids = new Set(members.map((m) => m.userId))
+    return messages.some((m) => m.userId !== null && !ids.has(m.userId))
+  }, [members, messages])
+  const usersQuery = useQuery<{ users: UserRow[] }>({
+    queryKey: USERS_KEY,
+    enabled: hasDepartedAuthors,
+    queryFn: fetchUsers,
+  })
   const namesById = useMemo(() => {
     const m = new Map<number, string>()
     for (const mem of members) m.set(mem.userId, mem.name)
+    for (const u of usersQuery.data?.users ?? []) {
+      if (!m.has(u.id)) m.set(u.id, u.name)
+    }
     return m
-  }, [members])
+  }, [members, usersQuery.data])
 
   const mine = useMemo(
     () => threads.filter((t) => t.role === "owner"),
