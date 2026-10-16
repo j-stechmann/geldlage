@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react"
 import {
   clampWidth,
+  MAX_WIDTH,
+  MIN_WIDTH,
   setPanelState,
   usePanelState,
 } from "@/components/agent/panel-state"
@@ -89,8 +91,16 @@ export function AgentDock() {
  * derived from the pointer delta, not the live rect (the aside's left edge
  * moves with every committed width, so reading it per-move would feed the
  * last width back into the next one).
+ *
+ * Keyboard support (WAI-ARIA separator pattern): the strip is a focusable
+ * separator; ArrowLeft/ArrowRight move the edge by RESIZE_KEY_STEP in the
+ * drag's direction (the handle is on the LEFT edge, so left = wider),
+ * Home/End clamp to the bounds.
  */
+const RESIZE_KEY_STEP = 16
+
 function ResizeHandle() {
+  const { width } = usePanelState()
   const drag = useRef<{ startX: number; startWidth: number } | null>(null)
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -112,12 +122,30 @@ function ResizeHandle() {
   const onPointerUp = () => {
     drag.current = null
   }
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    // preventDefault suppresses the arrow keys' native scroll behavior
+    if (e.key === "ArrowLeft") {
+      e.preventDefault()
+      setPanelState({ width: clampWidth(width + RESIZE_KEY_STEP) })
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault()
+      setPanelState({ width: clampWidth(width - RESIZE_KEY_STEP) })
+    } else if (e.key === "Home") {
+      e.preventDefault()
+      setPanelState({ width: MIN_WIDTH })
+    } else if (e.key === "End") {
+      e.preventDefault()
+      setPanelState({ width: MAX_WIDTH })
+    }
+  }
 
   return (
     <div
-      aria-hidden
       role="separator"
       aria-orientation="vertical"
+      aria-label="Breite des Chats ändern"
+      tabIndex={0}
+      onKeyDown={onKeyDown}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}

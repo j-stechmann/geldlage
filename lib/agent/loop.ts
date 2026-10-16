@@ -1,5 +1,5 @@
 import { getConfig } from "@/lib/config"
-import { streamAgentChat } from "@/lib/agent/chat-client"
+import { agentMaxTokens, streamAgentChat } from "@/lib/agent/chat-client"
 import { agentSystemPrompt } from "@/lib/agent/system-prompt"
 import { agentTools, toolsForRequest } from "@/lib/agent/tool-registry"
 import { executeToolCall } from "@/lib/agent/tool-executor"
@@ -29,9 +29,6 @@ import type {
 
 /** Rough chars→tokens divisor, same estimate convention as lib/llm. */
 const CHARS_PER_TOKEN = 4
-
-/** Fraction of the context window the prompt should stay under. */
-const CTX_HEADROOM = 0.9
 
 /**
  * One chat turn: history in, event stream out. Round semantics:
@@ -63,28 +60,39 @@ export async function* runAgentTurn(params: {
     ),
   }
   // Estimate-based replay window: half the model context is reserved
-  // for history (HISTORY_CTX_SHARE), leaving headroom for the system
-  // turn and output. Once per turn (not per round): the estimate uses
+  // for history (HISTORY_CTX_SHARE), leaving the rest for the system
+  // prompt and output. Once per turn (not per round): the estimate uses
   // the windowed history, chars/4 ≈ tokens like the lib/llm guard.
-  // Exceeding ctx gets output clamped by the server — an
-  // operator-level misconfiguration surfaced loudly instead of
-  // silently truncating answers. Deliberately NOT re-estimated inside
-  // the loop: tool results appended to `msgs` in later rounds are
-  // unaccounted (advisory-by-design — the window budget bounds the
-  // request side, and a mid-turn warn would fire after output already
-  // streamed).
   const windowed = windowHistory(
     params.history,
     cfg.LLM_CTX * CHARS_PER_TOKEN * HISTORY_CTX_SHARE
   )
   const msgs: AgentPromptMessage[] = [system, ...windowed]
 
-  const promptChars = estimatePromptChars(windowed) + system.content.length
-  if (promptChars > cfg.LLM_CTX * CHARS_PER_TOKEN * CTX_HEADROOM) {
+  // Ctx guard mirroring the label path (lib/llm/client.ts): max_tokens +
+  // estimated prompt must fit the server context (LLM_CTX, the `-c` flag
+  // llama-server runs with). Exceeding it gets the output clamped
+  // silently mid-answer — an operator-level misconfiguration surfaced
+  // loudly instead (for most configs the window budget keeps the prompt
+  // under half of ctx and only the completion budget makes the sum
+  // reachable, but windowHistory keeps an oversized newest message
+  // regardless — so small LLM_CTX values with large fields can trip the
+  // guard on the prompt side alone). Deliberately NOT re-estimated
+  // inside the loop: tool results appended to `msgs` in later rounds are
+  // unaccounted (advisory-by-design — the window budget bounds the
+  // request side, and a mid-turn warn would fire after output already
+  // streamed).
+  const maxTokens = agentMaxTokens(cfg)
+  const promptTokens = Math.ceil(
+    (estimatePromptChars(windowed) + system.content.length) / CHARS_PER_TOKEN
+  )
+  if (maxTokens + promptTokens > cfg.LLM_CTX) {
     console.warn(
-      `[agent] estimated prompt ${promptChars} chars (~${Math.ceil(
-        promptChars / CHARS_PER_TOKEN
-      )} tokens) exceeds 90% of LLM_CTX (${cfg.LLM_CTX}) — output may clamp`
+      `[agent] completion budget (${maxTokens}) + estimated prompt ` +
+        `(${promptTokens} tokens) exceeds LLM_CTX (${cfg.LLM_CTX}) — the ` +
+        `answer will be clamped mid-stream. Raise LLM_CTX on both sides ` +
+        `(make llm LLM_CTX=… for the server; the app reads the same env ` +
+        `var and must be restarted with it).`
     )
   }
 

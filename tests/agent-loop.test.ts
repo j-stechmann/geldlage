@@ -376,6 +376,54 @@ describe("runAgentTurn", () => {
     }
   })
 
+  it("warns when the completion budget + prompt exceed LLM_CTX", async () => {
+    await startServer()
+    // Regression: the old prompt-only guard (prompt > 90% of LLM_CTX) was
+    // effectively unreachable — windowHistory caps history at half of
+    // ctx, so ordinary turns stay well below the threshold (only an
+    // oversized single message, which windowing keeps regardless, could
+    // reach it on small-LLM_CTX configs). Including max_tokens (2048
+    // with the test default reasoning=off, see agentMaxTokens) makes
+    // the guard meaningful again: LLM_CTX 1024 (the schema minimum) is
+    // below the completion budget alone.
+    const prevCtx = process.env.LLM_CTX
+    process.env.LLM_CTX = "1024"
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      resetConfigCache()
+      scripted = [{ content: ["ok"] }]
+      await collect([{ role: "user", content: "q" }])
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(String(warnSpy.mock.calls[0]?.[0])).toContain("LLM_CTX")
+    } finally {
+      warnSpy.mockRestore()
+      if (prevCtx === undefined) delete process.env.LLM_CTX
+      else process.env.LLM_CTX = prevCtx
+      resetConfigCache()
+    }
+  })
+
+  it("does not warn when the completion budget fits LLM_CTX", async () => {
+    await startServer()
+    // Hermetic: an ambient LLM_CTX exported on the operator's machine
+    // (e.g. a small-model setup) would flip this test's outcome — pin a
+    // comfortably large ctx, like the sibling warn test pins a small one.
+    const prevCtx = process.env.LLM_CTX
+    process.env.LLM_CTX = "8192"
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      resetConfigCache()
+      scripted = [{ content: ["ok"] }]
+      await collect([{ role: "user", content: "q" }])
+      expect(warnSpy).not.toHaveBeenCalled()
+    } finally {
+      warnSpy.mockRestore()
+      if (prevCtx === undefined) delete process.env.LLM_CTX
+      else process.env.LLM_CTX = prevCtx
+      resetConfigCache()
+    }
+  })
+
   it("sends the full history when it fits the budget", async () => {
     await startServer()
     scripted = [{ content: ["ok"] }]

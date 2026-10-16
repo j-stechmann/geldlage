@@ -21,6 +21,15 @@ import type { AgentLoopEvent } from "@/lib/agent/types"
 /** Per-tool-row char cap for persisted tool results (loop caps args). */
 const TOOL_RESULT_MAX_CHARS = 8000
 
+/**
+ * Marker appended when a stored tool result is cut at the cap. The
+ * current turn's wire history carries the full result, but later turns
+ * replay the stored row verbatim (rowsToPromptHistory) — without the
+ * marker the model would read a syntactically broken JSON answer that
+ * looks like the tool's real output instead of a capped copy.
+ */
+const TOOL_RESULT_TRUNCATION_SUFFIX = " …[Ergebnis gekürzt]"
+
 export class TurnPersister {
   private threadId: string
   private pendingToolArgs: string | null = null
@@ -44,7 +53,7 @@ export class TurnPersister {
       appendMessage(this.threadId, {
         userId: null,
         role: "tool",
-        content: ev.result.slice(0, TOOL_RESULT_MAX_CHARS),
+        content: truncateToolResult(ev.result),
         toolName: ev.name,
         toolArgs: this.pendingToolArgs,
         toolCallId: ev.id,
@@ -106,4 +115,9 @@ export class TurnPersister {
     }
     return null
   }
+}
+
+function truncateToolResult(s: string): string {
+  if (s.length <= TOOL_RESULT_MAX_CHARS) return s
+  return s.slice(0, TOOL_RESULT_MAX_CHARS) + TOOL_RESULT_TRUNCATION_SUFFIX
 }

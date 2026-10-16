@@ -27,7 +27,8 @@ let cat2: number
  */
 function seedTx(opts: {
   userId: number
-  categoryId: number
+  /** Omit/null for uncategorized rows (label_status pending/failed). */
+  categoryId?: number | null
   amountCents: number
   bookingDate: string
   status?: string
@@ -45,7 +46,7 @@ function seedTx(opts: {
       amountCents: opts.amountCents,
       sourceHash: `hash-${crypto.randomUUID()}`,
       labelStatus: "labeled",
-      categoryId: opts.categoryId,
+      categoryId: opts.categoryId ?? null,
     })
     .run()
 }
@@ -317,6 +318,51 @@ describe("get_category_totals", () => {
     }
     expect(r1.totalsCents.outflow).toBe(-50)
     expect(r2.totalsCents.outflow).toBe(-9999)
+  })
+
+  it("counts uncategorized rows in totalsCents under an Ohne Kategorie bucket", async () => {
+    const tool = toolByName("get_category_totals")!
+    seedTx({
+      userId: uid1,
+      categoryId: cat1,
+      amountCents: -3000,
+      bookingDate: firstOfThisMonth(),
+    })
+    // uncategorized (label run still pending/failed — the normal state of
+    // a fresh import): must not vanish from the totals (analytics parity)
+    seedTx({
+      userId: uid1,
+      amountCents: -7000,
+      bookingDate: dayFromToday(0),
+    })
+    seedTx({
+      userId: uid1,
+      amountCents: 500,
+      bookingDate: dayFromToday(0),
+    })
+
+    const r = (await tool.execute({ period: "this_month" }, { uid: uid1 })) as {
+      categories: Array<{
+        category: string
+        inflowCents: number
+        outflowCents: number
+        count: number
+      }>
+      totalsCents: { inflow: number; outflow: number }
+    }
+    expect(r.totalsCents).toEqual({ inflow: 500, outflow: -10000 })
+    expect(r.categories).toContainEqual({
+      category: "Ohne Kategorie",
+      inflowCents: 500,
+      outflowCents: -7000,
+      count: 2,
+    })
+    expect(r.categories).toContainEqual({
+      category: "Lebensmittel",
+      inflowCents: 0,
+      outflowCents: -3000,
+      count: 1,
+    })
   })
 
   it("rejects invalid args", async () => {

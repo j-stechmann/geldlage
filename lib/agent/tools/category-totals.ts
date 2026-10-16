@@ -1,4 +1,4 @@
-import { and, eq, gte, isNotNull, lt } from "drizzle-orm"
+import { and, eq, gte, lt } from "drizzle-orm"
 import { getDb } from "@/lib/db"
 import { categories, transactions } from "@/lib/db/schema"
 import type { AgentTool, ToolContext } from "@/lib/agent/types"
@@ -11,7 +11,16 @@ import type { AgentTool, ToolContext } from "@/lib/agent/types"
  * serializable JSON. The booking status is filterable (`Gebucht` /
  * `Nicht gebucht` / `both`) and defaults to `Gebucht` so the tool's
  * default matches the transactions table and analytics views.
+ *
+ * Uncategorized transactions (label_status pending/failed, or a category
+ * deleted since) fold into one "Ohne Kategorie" bucket and count toward
+ * `totalsCents`: the analytics views sum every filtered transaction with
+ * no category predicate (lib/analytics/engine.ts buildWhere), so the
+ * tool's totals must not silently drop them.
  */
+
+/** Label of the synthetic bucket for rows without a resolvable category. */
+const UNCATEGORIZED = "Ohne Kategorie"
 
 /** UI-visible periods the tool accepts (validated against before querying). */
 export type CategoryTotalsPeriod = "this_month" | "last_month" | "last_90_days"
@@ -103,7 +112,7 @@ export type AgentToolName = "get_category_totals"
 export const get_category_totals: AgentTool = {
   name: "get_category_totals",
   description:
-    "Liefert Summen (Einnahmen/Ausgaben) und Transaktionsanzahl pro Kategorie für den Sitzungsbenutzer. Wähle eine Periode: this_month, last_month oder last_90_days. Optional filter nach Buchungsstatus: Gebucht (Standard), Nicht gebucht (vorgemerkt) oder both. Beträge in Cent (Integer).",
+    "Liefert Summen (Einnahmen/Ausgaben) und Transaktionsanzahl pro Kategorie für den Sitzungsbenutzer. Wähle eine Periode: this_month, last_month oder last_90_days. Optional filter nach Buchungsstatus: Gebucht (Standard), Nicht gebucht (vorgemerkt) oder both. Nicht kategorisierte Transaktionen laufen unter „Ohne Kategorie“ auf und zählen zu den Gesamtsummen. Beträge in Cent (Integer).",
   parameters: {
     type: "object",
     properties: {
@@ -143,16 +152,17 @@ export const get_category_totals: AgentTool = {
     const db = getDb()
     const rows = db
       .select({
-        categoryId: transactions.categoryId,
         amountCents: transactions.amountCents,
         name: categories.name,
       })
       .from(transactions)
-      .innerJoin(categories, eq(categories.id, transactions.categoryId))
+      // leftJoin (not inner): rows without a category must reach the fold
+      // below so totalsCents matches the analytics views — they never
+      // filter on category.
+      .leftJoin(categories, eq(categories.id, transactions.categoryId))
       .where(
         and(
           eq(transactions.userId, ctx.uid),
-          isNotNull(transactions.categoryId),
           // "both" omits the status condition entirely; a specific status
           // filters exactly it (status strings match the DB and the UI's
           // filter values — the UI's no-filter token is "all", this tool's
@@ -164,23 +174,28 @@ export const get_category_totals: AgentTool = {
       )
       .all()
 
-    // Group in JS: categoryId → (inflow, outflow, count). Negative
-    // amounts stay negative (outflowCents is reported as a negative sum —
-    // the JSON contract says so), positives as inflow.
-    const byCategory = new Map<number, CategoryTotal>()
+    // Group in JS: name → (inflow, outflow, count). Negative amounts stay
+    // negative (outflowCents is reported as a negative sum — the JSON
+    // contract says so), positives as inflow. Rows without a category
+    // (never labeled, or their category deleted since — deletions reset
+    // transactions transactionally, so this is belt-and-braces) share the
+    // "Ohne Kategorie" bucket; the join nulls `name` for both. Category
+    // names are unique per user ((user_id, name_key) unique index), so
+    // only a category literally named "Ohne Kategorie" could collide.
+    const byCategory = new Map<string, CategoryTotal>()
     let inflow = 0
     let outflow = 0
     for (const row of rows) {
-      if (row.categoryId === null) continue
-      let entry = byCategory.get(row.categoryId)
+      const name = row.name ?? UNCATEGORIZED
+      let entry = byCategory.get(name)
       if (!entry) {
         entry = {
-          category: row.name,
+          category: name,
           inflowCents: 0,
           outflowCents: 0,
           count: 0,
         }
-        byCategory.set(row.categoryId, entry)
+        byCategory.set(name, entry)
       }
       if (row.amountCents < 0) {
         entry.outflowCents += row.amountCents

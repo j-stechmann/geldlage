@@ -42,6 +42,16 @@ export interface StreamAgentChatOptions {
 }
 
 /**
+ * Per-round completion budget: reasoning reserve + 2048 answer tokens
+ * (same accounting as the label path — the thinking trace counts against
+ * max_tokens). Exported so the loop's ctx guard estimates the exact
+ * number this client sends, not a duplicate formula that can drift.
+ */
+export function agentMaxTokens(cfg: ReturnType<typeof getConfig>): number {
+  return (cfg.LLM_REASONING ? cfg.LLM_REASONING_BUDGET : 0) + 2048
+}
+
+/**
  * Non-streaming message fallback shape (a backend that ignored `stream` or
  * answered 200 with a JSON error-shaped body): one message object instead
  * of deltas.
@@ -80,7 +90,7 @@ export async function* streamAgentChat(
   const body: Record<string, unknown> = {
     messages: messages.map((m) => toWireMessage(m)),
     temperature: 0.3,
-    max_tokens: (cfg.LLM_REASONING ? cfg.LLM_REASONING_BUDGET : 0) + 2048,
+    max_tokens: agentMaxTokens(cfg),
     stream: true,
   }
   if (cfg.LLM_REASONING) {

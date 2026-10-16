@@ -456,17 +456,6 @@ export function migrateSchema(db: Db) {
       `ALTER TABLE categories ADD COLUMN usage_count INTEGER NOT NULL DEFAULT 0`
     )
   }
-  // ── agent transcript replay (ADR-0033 amendment): assistant rows carry
-  // their round's tool_calls in OpenAI wire JSON, tool rows the pairing
-  // tool_call_id — the stored transcript doubles as replayable prompt
-  // history. NULL on legacy rows: those replay as plain user/assistant
-  // text and their tool rows stay display-only (no backfill).
-  if (!cols("chat_messages").includes("tool_calls")) {
-    db.run(`ALTER TABLE chat_messages ADD COLUMN tool_calls TEXT`)
-  }
-  if (!cols("chat_messages").includes("tool_call_id")) {
-    db.run(`ALTER TABLE chat_messages ADD COLUMN tool_call_id TEXT`)
-  }
   {
     // Allocation + backfill in one transaction: SQLite DDL is transactional,
     // so a crash mid-backfill rolls the ALTER back and the next boot re-runs
@@ -696,6 +685,23 @@ export function migrateSchema(db: Db) {
   db.run(
     `CREATE INDEX IF NOT EXISTS chat_messages_thread_sort_idx ON chat_messages (thread_id, thread_seq, id)`
   )
+  // ── agent transcript replay (ADR-0033 amendment): assistant rows carry
+  // their round's tool_calls in OpenAI wire JSON, tool rows the pairing
+  // tool_call_id — the stored transcript doubles as replayable prompt
+  // history. The ALTERs run BELOW the CREATE TABLE chat_messages above
+  // (unlike the column upgrades further up, whose tables predate this
+  // function): a DB that predates the chat tables gets the table from
+  // the CREATE — already carrying both columns, turning the guarded
+  // ALTERs into no-ops — while a pre-amendment chat_messages is
+  // upgraded here. NULL on legacy rows: those replay as plain
+  // user/assistant text and their tool rows stay display-only (no
+  // backfill).
+  if (!cols("chat_messages").includes("tool_calls")) {
+    db.run(`ALTER TABLE chat_messages ADD COLUMN tool_calls TEXT`)
+  }
+  if (!cols("chat_messages").includes("tool_call_id")) {
+    db.run(`ALTER TABLE chat_messages ADD COLUMN tool_call_id TEXT`)
+  }
   // An earlier iteration carried a (user_id, created_at) index on
   // chat_messages; no query ever filtered by user_id (message access is
   // thread-scoped, gated in app code), so it is dropped — healing
