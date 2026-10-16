@@ -147,8 +147,10 @@ tool_calls`) followed by its tool rows (paired via `tool_call_id`) —
   message inside it (slicing may not start mid-protocol — llama-server
   rejects orphan tool continuations; the anchor also keeps a replayed
   trio intact). Fields are truncated at 4000 chars with "…", and the
-  chars/4 estimate warns once per turn when the prompt exceeds 90% of
-  `LLM_CTX`.
+  chars/4 estimate warns once per turn when the estimated prompt plus
+  the completion budget (`max_tokens`) exceeds `LLM_CTX` — the same
+  client-side context guard as the label path (ADR-0016), not
+  re-estimated inside the loop.
 
 - **Threads with invite-based sharing** (lib/agent/store.ts + lib/agent/store/*,
   chat_tables): `chat_threads` (owner = creator), `chat_thread_members`

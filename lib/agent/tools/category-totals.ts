@@ -146,8 +146,9 @@ export const get_category_totals: AgentTool = {
     if (!isPeriod(period) || !isStatus(status)) {
       throw new Error("invalid args")
     }
-    const start = periodStartDate(period, new Date())
-    const end = periodEndDate(period, new Date())
+    const now = new Date()
+    const start = periodStartDate(period, now)
+    const end = periodEndDate(period, now)
 
     // Select-and-fold instead of SQL GROUP BY with signed CASE aggregates:
     // rows are per-user and small (local bank data), and folding in TS keeps

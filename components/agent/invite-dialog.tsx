@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { ErrorState } from "@/components/error-state"
 import { USERS_KEY, fetchUsers } from "@/components/agent/agent-api"
 import type { Member, UserRow } from "@/components/agent/types"
 
@@ -27,15 +28,13 @@ interface InviteDialogProps {
 
 export function InviteDialog(props: InviteDialogProps) {
   const [selected, setSelected] = useState<number[]>([])
-  const usersQuery = useQuery<{ users: UserRow[] }>({
+  const { data, isLoading, isError, refetch } = useQuery<{ users: UserRow[] }>({
     queryKey: USERS_KEY,
     enabled: props.open,
     queryFn: fetchUsers,
   })
   const memberIds = new Set(props.members.map((m) => m.userId))
-  const candidates = (usersQuery.data?.users ?? []).filter(
-    (u) => !memberIds.has(u.id)
-  )
+  const candidates = (data?.users ?? []).filter((u) => !memberIds.has(u.id))
 
   const toggle = (id: number) =>
     setSelected((s) =>
@@ -58,26 +57,31 @@ export function InviteDialog(props: InviteDialogProps) {
           <DialogTitle>Chateinladung</DialogTitle>
         </DialogHeader>
         <div className="max-h-64 overflow-y-auto">
-          {candidates.length === 0 && (
+          {isLoading ? (
+            <p className="text-sm text-muted-foreground">…</p>
+          ) : isError && !data ? (
+            <ErrorState onRetry={() => void refetch()} />
+          ) : candidates.length === 0 ? (
             <p className="text-sm text-muted-foreground">Niemand zu laden.</p>
+          ) : (
+            candidates.map((u) => (
+              <label
+                key={u.id}
+                className="flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-accent"
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.includes(u.id)}
+                  onChange={() => toggle(u.id)}
+                  className="size-3.5 accent-primary"
+                />
+                <span className="truncate">{u.name}</span>
+                <span className="truncate text-xs text-muted-foreground">
+                  {u.email}
+                </span>
+              </label>
+            ))
           )}
-          {candidates.map((u) => (
-            <label
-              key={u.id}
-              className="flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-accent"
-            >
-              <input
-                type="checkbox"
-                checked={selected.includes(u.id)}
-                onChange={() => toggle(u.id)}
-                className="size-3.5 accent-primary"
-              />
-              <span className="truncate">{u.name}</span>
-              <span className="truncate text-xs text-muted-foreground">
-                {u.email}
-              </span>
-            </label>
-          ))}
         </div>
         <div className="flex justify-end gap-2">
           <Button variant="outline" size="sm" onClick={closeAndReset}>
