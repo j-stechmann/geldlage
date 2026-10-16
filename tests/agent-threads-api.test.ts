@@ -295,6 +295,23 @@ describe("invites", () => {
     expect((await asJson(ok)).removed).toBe(true)
     expect(listMembers(threadId).filter((m) => m.userId === u2)).toHaveLength(0)
   })
+
+  it("rejects non-canonical userId segments (400, not a silent retarget)", async () => {
+    // parseInt("3.7") would read user 3 — the round-trip check in the
+    // route must 400 instead of removing some other user's invite
+    for (const bad of ["3.7", "abc", "0", "-1", "1e2", " 2"]) {
+      const res = await removeInviteRoute(
+        await req(`/api/agent/threads/${threadId}/invites/${bad}`, u1, {
+          method: "DELETE",
+        }),
+        { params: Promise.resolve({ id: threadId, userId: bad }) }
+      )
+      expect(res.status).toBe(400)
+      expect(((await asJson(res)) as { error: string }).error).toBe(
+        "invalid_user_id"
+      )
+    }
+  })
 })
 
 describe("join + message visibility", () => {

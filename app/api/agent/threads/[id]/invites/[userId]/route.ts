@@ -15,7 +15,13 @@ export async function DELETE(
   if (!gate.ok) return gate.response
 
   const userId = Number.parseInt(rawUserId, 10)
-  if (!Number.isInteger(userId) || userId <= 0) {
+  // The segment must be one canonical positive integer: parseInt alone
+  // would read "3.7" as 3, silently retargeting the removal at user 3.
+  if (
+    !Number.isInteger(userId) ||
+    userId <= 0 ||
+    String(userId) !== rawUserId
+  ) {
     return NextResponse.json({ error: "invalid_user_id" }, { status: 400 })
   }
 

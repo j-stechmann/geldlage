@@ -96,12 +96,20 @@ function truncateField(s: string): string {
 }
 
 /**
+ * The shape the estimate reads: content plus optional tool calls. The
+ * system message satisfies it too (no tool_calls), so the loop can
+ * estimate its whole request array including the system turn.
+ */
+type EstimableMessage = Pick<AgentChatMessage, "content" | "tool_calls">
+
+/**
  * Cheap char estimate of the request size (roughly 4 chars ≈ 1 token):
  * content and tool args lengths plus a fixed per-message overhead for the
  * JSON envelope role/id fields. Used by windowHistory's budget walk and
- * by the loop to warn once per turn when the prompt approaches LLM_CTX.
+ * by the loop to warn per round when the request approaches LLM_CTX
+ * (mid-turn tool output included).
  */
-export function estimatePromptChars(messages: AgentChatMessage[]): number {
+export function estimatePromptChars(messages: EstimableMessage[]): number {
   let chars = 0
   for (const m of messages) {
     chars += m.content.length + 20

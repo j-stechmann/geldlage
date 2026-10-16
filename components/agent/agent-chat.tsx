@@ -118,9 +118,22 @@ export function AgentChat() {
   const onRename = useCallback(
     async (threadId: string | undefined, title: string) => {
       if (!threadId) return
-      const ok = await renameThread(threadId, title)
-      if (!ok) {
-        toast.error("Umbenennen fehlgeschlagen (1–80 Zeichen).")
+      // 400 means the server rejected the title itself; anything else
+      // (404 after a concurrent delete, a network failure — which
+      // rejects fetch and lands in the catch) is not a length problem,
+      // so the generic toast must not claim it was.
+      let status: number
+      try {
+        status = await renameThread(threadId, title)
+      } catch {
+        status = 0
+      }
+      if (status !== 200) {
+        toast.error(
+          status === 400
+            ? "Umbenennen fehlgeschlagen (1–80 Zeichen)."
+            : "Umbenennen fehlgeschlagen."
+        )
         return
       }
       setRenamingThreadId(null)

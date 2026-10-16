@@ -62,8 +62,9 @@ export async function* runAgentTurn(params: {
   }
   // Estimate-based replay window: half the model context is reserved
   // for history (HISTORY_CTX_SHARE), leaving the rest for the system
-  // prompt and output. Once per turn (not per round): the estimate uses
-  // the windowed history, chars/4 ≈ tokens like the lib/llm guard.
+  // prompt and output. Cut once per turn (not per round): later rounds
+  // only append protocol messages to the msgs copy below. chars/4 ≈
+  // tokens like the lib/llm guard.
   const windowed = windowHistory(
     params.history,
     cfg.LLM_CTX * CHARS_PER_TOKEN * HISTORY_CTX_SHARE
@@ -78,24 +79,13 @@ export async function* runAgentTurn(params: {
   // under half of ctx and only the completion budget makes the sum
   // reachable, but windowHistory keeps an oversized newest message
   // regardless — so small LLM_CTX values with large fields can trip the
-  // guard on the prompt side alone). Deliberately NOT re-estimated
-  // inside the loop: tool results appended to `msgs` in later rounds are
-  // unaccounted (advisory-by-design — the window budget bounds the
-  // request side, and a mid-turn warn would fire after output already
-  // streamed).
+  // guard on the prompt side alone). Re-estimated at the top of every
+  // round: the assistant tool_calls message and tool results appended to
+  // msgs grow the request mid-turn, and the estimate must see them.
+  // Still advisory (console.warn only) — the clamp is a server-side
+  // effect the loop cannot prevent, but the operator sees which rounds
+  // of a turn exceeded it.
   const maxTokens = agentMaxTokens(cfg)
-  const promptTokens = Math.ceil(
-    (estimatePromptChars(windowed) + system.content.length) / CHARS_PER_TOKEN
-  )
-  if (maxTokens + promptTokens > cfg.LLM_CTX) {
-    console.warn(
-      `[agent] completion budget (${maxTokens}) + estimated prompt ` +
-        `(${promptTokens} tokens) exceeds LLM_CTX (${cfg.LLM_CTX}) — the ` +
-        `answer will be clamped mid-stream. Raise LLM_CTX on both sides ` +
-        `(make llm LLM_CTX=… for the server; the app reads the same env ` +
-        `var and must be restarted with it).`
-    )
-  }
 
   let roundsLeft = AGENT_MAX_TURNS
   // Set when a round ended empty: the next round runs tools-free and ends
@@ -103,6 +93,16 @@ export async function* runAgentTurn(params: {
   let retryWithoutTools = false
 
   while (roundsLeft > 0) {
+    const promptTokens = Math.ceil(estimatePromptChars(msgs) / CHARS_PER_TOKEN)
+    if (maxTokens + promptTokens > cfg.LLM_CTX) {
+      console.warn(
+        `[agent] completion budget (${maxTokens}) + estimated prompt ` +
+          `(${promptTokens} tokens) exceeds LLM_CTX (${cfg.LLM_CTX}) — the ` +
+          `answer will be clamped mid-stream. Raise LLM_CTX on both sides ` +
+          `(make llm LLM_CTX=… for the server; the app reads the same env ` +
+          `var and must be restarted with it).`
+      )
+    }
     roundsLeft--
     // tools-free on the granted-final round or on the empty-answer retry
     const noTools = retryWithoutTools || roundsLeft === 0

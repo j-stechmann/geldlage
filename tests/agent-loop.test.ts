@@ -2,10 +2,17 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import type { Server } from "node:http"
 import { createServer } from "node:http"
 import { AddressInfo } from "node:net"
-import { resetConfigCache } from "@/lib/config"
+import { getConfig, resetConfigCache } from "@/lib/config"
 import { AGENT_MAX_FIELD_CHARS } from "@/lib/agent/constants"
+import { agentMaxTokens } from "@/lib/agent/chat-client"
+import { agentSystemPrompt } from "@/lib/agent/system-prompt"
+import { agentTools } from "@/lib/agent/tool-registry"
 import { runAgentTurn } from "@/lib/agent/loop"
-import { AGENT_MAX_TURNS, windowHistory } from "@/lib/agent/window"
+import {
+  AGENT_MAX_TURNS,
+  estimatePromptChars,
+  windowHistory,
+} from "@/lib/agent/window"
 import { setTestDb, createTestDb, type Db } from "@/lib/db"
 import type { AgentChatMessage, AgentLoopEvent } from "@/lib/agent/types"
 import { seedUser } from "./helpers"
@@ -413,6 +420,56 @@ describe("runAgentTurn", () => {
       scripted = [{ content: ["ok"] }]
       await collect([{ role: "user", content: "q" }])
       expect(warnSpy).not.toHaveBeenCalled()
+    } finally {
+      warnSpy.mockRestore()
+      if (prevCtx === undefined) delete process.env.LLM_CTX
+      else process.env.LLM_CTX = prevCtx
+      resetConfigCache()
+    }
+  })
+
+  it("re-estimates the ctx guard per round — mid-turn tool results count", async () => {
+    await startServer()
+    // Regression: the guard used to be computed once before the loop
+    // from the windowed history, so the assistant tool_calls message
+    // and tool result appended mid-turn were unaccounted — a turn that
+    // started inside the budget could exceed it on round 2 without a
+    // warn. Pin LLM_CTX to exactly max_tokens + the round-1 estimate:
+    // round 1 fits (the guard is a strict >), the protocol trio the
+    // tool round appends pushes round 2 over it.
+    const cfg = getConfig()
+    const maxTokens = agentMaxTokens(cfg)
+    // Same system prompt the loop builds (its date is isoDate-stable),
+    // same chars/4 ≈ tokens estimate convention.
+    const system = agentSystemPrompt(
+      cfg.LLM_LANGUAGE,
+      new Date(),
+      agentTools.map((t) => t.name)
+    )
+    const round1PromptTokens = Math.ceil(
+      estimatePromptChars([{ content: system }, { content: "q" }]) / 4
+    )
+    const prevCtx = process.env.LLM_CTX
+    process.env.LLM_CTX = String(maxTokens + round1PromptTokens)
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      resetConfigCache()
+      scripted = [
+        {
+          toolCalls: [
+            {
+              index: 0,
+              id: "call_1",
+              name: "get_category_totals",
+              arguments: '{"period":"this_month"}',
+            },
+          ],
+        },
+        { content: ["ok"] },
+      ]
+      await collect([{ role: "user", content: "q" }])
+      expect(requests).toHaveLength(2) // tool round + final answer
+      expect(warnSpy).toHaveBeenCalledTimes(1) // round 2 only
     } finally {
       warnSpy.mockRestore()
       if (prevCtx === undefined) delete process.env.LLM_CTX

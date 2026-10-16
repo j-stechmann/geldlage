@@ -91,16 +91,22 @@ export async function sendTurn(
   })
 }
 
+/**
+ * PATCH /threads/[id] rename, returning the HTTP status so the caller
+ * can attribute failures (400 = title validation, 404 = thread gone;
+ * a network error rejects like any fetch) instead of collapsing them
+ * into one misleading message.
+ */
 export async function renameThread(
   threadId: string,
   title: string
-): Promise<boolean> {
+): Promise<number> {
   const res = await apiFetch(`/api/agent/threads/${threadId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title }),
   })
-  return res.ok
+  return res.status
 }
 
 export async function invite(
