@@ -286,9 +286,7 @@ describe("<AgentChat>", () => {
     renderWithQuery(createElement(AgentChat))
     // multi-author thread → both user bubbles carry author labels; the
     // departed member's name comes from the directory, not the roster.
-    await waitFor(() =>
-      expect(screen.getByText("user-2")).toBeInTheDocument()
-    )
+    await waitFor(() => expect(screen.getByText("user-2")).toBeInTheDocument())
     expect(screen.getByText("user-1")).toBeInTheDocument()
     expect(screen.queryByText("?")).not.toBeInTheDocument()
   })

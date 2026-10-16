@@ -175,9 +175,12 @@ export async function POST(
  * Frame names: content streams as `delta`, `round` is a segment boundary
  * for the client (its `retry` flag marks the degenerate round the
  * persister skips, so the client discards that segment), everything else
- * keeps its event name. The done frame carries the last persisted row id
- * (onLoopEvent returns it on done) so the client can align optimistic UI
- * with the stored record.
+ * keeps its event name. The done frame carries the last persisted
+ * ASSISTANT row id (onLoopEvent returns it on done — tool rows may
+ * persist later, they never update it) as the observable persistence
+ * invariant — the API tests assert it against the final assistant row.
+ * The client does NOT consume it: it refetches the authoritative rows
+ * after done (see components/agent/use-agent-turn.ts).
  */
 function persistAndEnqueue(
   controller: ReadableStreamDefaultController<Uint8Array>,

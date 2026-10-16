@@ -638,7 +638,8 @@ describe("chat route turn persistence", () => {
 
     expect(final.content).toBe("Hier sind deine Summen.")
 
-    // done frame's messageId = the LAST assistant row id (client alignment)
+    // done frame's messageId = the LAST assistant row id (persistence
+    // invariant; the client refetches after done instead of consuming it)
     const doneFrames = text
       .split("\n\n")
       .filter((frame) => frame.startsWith("event: done"))
