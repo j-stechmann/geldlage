@@ -185,11 +185,16 @@ export function useAgentTurn() {
         if (ev.id) setPendingMessageId(ev.id)
       } else if (ev.type === "round") {
         // Freeze the streamed round as its own segment; the server
-        // persists one assistant row per round the same way.
-        setStreams((s) => ({
-          segments: [...s.segments, s.current],
-          current: EMPTY_SEGMENT,
-        }))
+        // persists one assistant row per round the same way. A
+        // retry-flagged round (the degenerate empty answer) persists
+        // no row — discard the segment instead of freezing it, or a
+        // Denkprozess-only bubble lingers until the post-done refetch
+        // drops it.
+        setStreams((s) =>
+          ev.retry
+            ? { ...s, current: EMPTY_SEGMENT }
+            : { segments: [...s.segments, s.current], current: EMPTY_SEGMENT }
+        )
       } else if (ev.type === "reasoning") {
         setStreams((s) => ({
           ...s,

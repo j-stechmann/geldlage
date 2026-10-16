@@ -107,6 +107,22 @@ describe("POST /api/agent/threads", () => {
     // no session → 401 (guard order: session before CSRF)
     expect([401, 403]).toContain(res.status)
   })
+
+  it("401s (not a 500) when the cookie outlives the users row (dangling uid)", async () => {
+    // ADR-0032 fresh-start wipe: the stateless JWT still verifies while
+    // the users row is gone — createThread would die on the
+    // chat_threads→users FK (unhandled 500). The 401 bounces apiFetch
+    // into a fresh OIDC round-trip, which re-provisions the user.
+    const gone = u3 + 1000 // signed cookie for a uid with no users row
+    const created = await createThreadRoute(
+      await req("/api/agent/threads", gone, { method: "POST", body: {} })
+    )
+    expect(created.status).toBe(401)
+    // the same guard covers the list route (requireSessionGate is
+    // shared by every agent route)
+    const listed = await listThreads(await req("/api/agent/threads", gone))
+    expect(listed.status).toBe(401)
+  })
 })
 
 describe("GET /api/agent/threads", () => {
@@ -723,7 +739,7 @@ describe("chat route turn persistence", () => {
     // later prompt; only the retry's real answer row persists.
     scripted = [{ reasoning: ["Nachdenken…"] }, { content: ["Eins"] }]
 
-    await postChat("Still?")
+    const text = await postChat("Still?")
     await settle()
     const rows = rowsInSeq()
     expect(rows.map((r) => r.role)).toEqual(["user", "assistant"])
@@ -732,6 +748,20 @@ describe("chat route turn persistence", () => {
     // the degenerate round's reasoning must not leak into the answer row
     expect(assistant.reasoning).toBeNull()
     expect(rows.some((r) => r.content === AGENT_NO_ANSWER_TEXT)).toBe(false)
+
+    // the round frames carry the retry flag so the client can discard
+    // the degenerate segment (no persisted row behind it): degenerate
+    // first, real answer second
+    const roundPayloads = text
+      .split("\n\n")
+      .filter((f) => f.startsWith("event: round"))
+      .map((f) => {
+        const dataLine = f.split("\n").find((l) => l.startsWith("data: "))
+        return JSON.parse(dataLine!.replace(/^data: /, "")) as {
+          retry: boolean
+        }
+      })
+    expect(roundPayloads.map((p) => p.retry)).toEqual([true, false])
   })
 })
 

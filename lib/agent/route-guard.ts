@@ -5,6 +5,7 @@ import {
   requireSession,
   unauthorized,
 } from "@/lib/auth/guard"
+import { findUserById } from "@/lib/auth/users"
 import { roleOf, type ThreadRole } from "@/lib/agent/store/thread-access"
 
 /**
@@ -23,8 +24,9 @@ export type Gate =
   | { ok: false; response: Response }
 
 /**
- * Session + CSRF only (routes with no thread id: list/create). CSRF skips
- * for GETs via `csrf: false` — mutating verbs run assertSameOrigin.
+ * Session + CSRF + dangling-uid check (routes with no thread id:
+ * list/create). CSRF skips for GETs via `csrf: false` — mutating verbs
+ * run assertSameOrigin.
  */
 export async function requireSessionGate(
   request: NextRequest,
@@ -32,6 +34,15 @@ export async function requireSessionGate(
 ): Promise<Gate> {
   const session = await requireSession(request)
   if (!session) return { ok: false, response: unauthorized() }
+  // The session JWT is stateless — a uid can dangle (DB wiped by the
+  // multi-user fresh-start migration, ADR-0032) while the cookie still
+  // verifies. Without this check every store write keyed on that uid
+  // dies on its FK (createThread → chat_threads.user_id → unhandled
+  // 500, the same class the imports route guards). A 401 sends
+  // apiFetch through a fresh OIDC round-trip, which re-provisions.
+  if (!findUserById(session.uid)) {
+    return { ok: false, response: unauthorized() }
+  }
   if (options.csrf !== false) {
     const csrf = assertSameOrigin(request)
     if (csrf) return { ok: false, response: csrf }

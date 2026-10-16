@@ -172,10 +172,12 @@ export async function POST(
  * goes through the persister first (one assistant row per `round`, except
  * retry-flagged degenerate rounds; one tool row per tool_call/tool_result
  * pair), then the frame streams.
- * Frame names: content streams as `delta`, `round` is an empty segment
- * boundary for the client, everything else keeps its event name. The
- * done frame carries the last persisted row id (onLoopEvent returns it
- * on done) so the client can align optimistic UI with the stored record.
+ * Frame names: content streams as `delta`, `round` is a segment boundary
+ * for the client (its `retry` flag marks the degenerate round the
+ * persister skips, so the client discards that segment), everything else
+ * keeps its event name. The done frame carries the last persisted row id
+ * (onLoopEvent returns it on done) so the client can align optimistic UI
+ * with the stored record.
  */
 function persistAndEnqueue(
   controller: ReadableStreamDefaultController<Uint8Array>,
@@ -191,7 +193,7 @@ function persistAndEnqueue(
       enqueueFrame(controller, "delta", { text: ev.text })
       break
     case "round":
-      enqueueFrame(controller, "round", {})
+      enqueueFrame(controller, "round", { retry: ev.retry })
       break
     case "tool_call":
       enqueueFrame(controller, "tool_call", { name: ev.name, args: ev.args })

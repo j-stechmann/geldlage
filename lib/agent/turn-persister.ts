@@ -1,5 +1,8 @@
 import { appendMessage, touchThread } from "@/lib/agent/store"
-import { AGENT_NO_ANSWER_TEXT } from "@/lib/agent/constants"
+import {
+  AGENT_MAX_FIELD_CHARS,
+  AGENT_NO_ANSWER_TEXT,
+} from "@/lib/agent/constants"
 import type { AgentLoopEvent } from "@/lib/agent/types"
 
 /**
@@ -18,9 +21,6 @@ import type { AgentLoopEvent } from "@/lib/agent/types"
  * doesn't carry them); the wire id comes from the events themselves.
  */
 
-/** Per-tool-row char cap for persisted tool results (loop caps args). */
-const TOOL_RESULT_MAX_CHARS = 8000
-
 /**
  * Marker appended when a stored tool result is cut at the cap. The
  * current turn's wire history carries the full result, but later turns
@@ -29,6 +29,17 @@ const TOOL_RESULT_MAX_CHARS = 8000
  * looks like the tool's real output instead of a capped copy.
  */
 const TOOL_RESULT_TRUNCATION_SUFFIX = " …[Ergebnis gekürzt]"
+
+/**
+ * Per-tool-row char cap for persisted tool results: the slice kept when
+ * the marker is appended. Aligned with AGENT_MAX_FIELD_CHARS because
+ * later turns replay the stored row through windowHistory, whose
+ * per-field truncation re-cuts anything beyond that cap with a bare
+ * "…" — slice + marker must fit it exactly, or the replay cut would
+ * silently drop the marker right back out of the model's context.
+ */
+export const TOOL_RESULT_MAX_CHARS =
+  AGENT_MAX_FIELD_CHARS - TOOL_RESULT_TRUNCATION_SUFFIX.length
 
 export class TurnPersister {
   private threadId: string
@@ -118,6 +129,8 @@ export class TurnPersister {
 }
 
 function truncateToolResult(s: string): string {
-  if (s.length <= TOOL_RESULT_MAX_CHARS) return s
+  // Fits the replay cap as-is: no cut, no marker (windowHistory would
+  // pass it through untouched — marking an uncut result would lie).
+  if (s.length <= AGENT_MAX_FIELD_CHARS) return s
   return s.slice(0, TOOL_RESULT_MAX_CHARS) + TOOL_RESULT_TRUNCATION_SUFFIX
 }

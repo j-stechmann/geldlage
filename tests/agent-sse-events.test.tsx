@@ -53,14 +53,30 @@ describe("parseAgentSse", () => {
       "done",
     ])
     expect(events[0]).toEqual({ type: "user", id: "m0" })
-    // the round frame is a bare segment boundary
-    expect(events[3]).toEqual({ type: "round" })
+    // the round frame is a segment boundary; an absent retry flag
+    // parses as false (old server / malformed payload → freeze)
+    expect(events[3]).toEqual({ type: "round", retry: false })
     expect(events[4]).toEqual({
       type: "tool_call",
       name: "get_category_totals",
       args: '{"period":"this_month"}',
     })
     expect(events[6]).toEqual({ type: "done", messageId: "m1" })
+  })
+
+  it("carries the retry flag on round frames", async () => {
+    // the degenerate empty-answer round announces itself so the client
+    // discards its segment instead of freezing it
+    const events = await collect(
+      sseFrames([
+        { event: "round", data: { retry: true } },
+        { event: "round", data: { retry: false } },
+      ])
+    )
+    expect(events).toEqual([
+      { type: "round", retry: true },
+      { type: "round", retry: false },
+    ])
   })
 
   it("maps error frames to their message", async () => {

@@ -416,6 +416,91 @@ describe("<AgentChat>", () => {
     expect(screen.getAllByText("get_category_totals").length).toBeGreaterThan(0)
   }, 15_000)
 
+  it("discards a retry-flagged round's segment (no Denkprozess-only bubble)", async () => {
+    // The degenerate empty answer: the model streams ONLY a thinking
+    // trace, the server retries tools-free. The retry-flagged round
+    // persists no row — the client must discard the streamed segment
+    // instead of freezing it, or a Denkprozess-only bubble lingers
+    // until the post-done refetch drops it (the persisted transcript
+    // has no row behind it).
+    const state = {
+      messages: [{ ...seedMessages[0] }, { ...seedMessages[1] }] as Array<
+        Record<string, unknown>
+      >,
+      threads: [
+        {
+          id: "t1",
+          title: "Haushaltsfragen",
+          role: "owner",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    }
+    const enc = new TextEncoder()
+    let releaseMine!: () => void
+    const gateMine = new Promise<void>((r) => {
+      releaseMine = r
+    })
+    chatStream = () =>
+      new ReadableStream<Uint8Array>({
+        async start(controller) {
+          controller.enqueue(
+            enc.encode(
+              sseFrames([
+                { event: "user", data: { id: "m-p" } },
+                { event: "reasoning", data: { text: "Erster Gedanke…" } },
+                { event: "round", data: { retry: true } },
+                { event: "delta", data: { text: "Eins" } },
+              ])
+            )
+          )
+          await gateMine
+          controller.enqueue(
+            enc.encode(
+              sseFrames([
+                { event: "round", data: {} },
+                { event: "done", data: { messageId: "m10" } },
+              ])
+            )
+          )
+          controller.close()
+        },
+      })
+    stubChatFlow(state)
+    renderWithQuery(createElement(AgentChat))
+    await waitFor(() =>
+      expect(screen.getByText("4211,00 €")).toBeInTheDocument()
+    )
+
+    const input = screen.getByPlaceholderText("Nachricht…")
+    await userEvent.type(input, "Was?")
+    await userEvent.click(screen.getByRole("button", { name: "Senden" }))
+
+    // mid-stream: the retry's answer streams; the degenerate round's
+    // segment is gone — only the seeded row's Denkprozess toggle remains
+    // (with the freeze-the-segment bug the discarded round would add a
+    // second, reasoning-only bubble)
+    await waitFor(() => expect(screen.getByText("Eins")).toBeInTheDocument())
+    expect(screen.queryByText("Erster Gedanke…")).not.toBeInTheDocument()
+    expect(screen.getAllByText("Denkprozess")).toHaveLength(1)
+
+    // done: the persisted transcript — user row + the retry's answer
+    // row only (the degenerate round left no row) — replaces the
+    // optimistic UI
+    await act(async () => {
+      state.messages = [
+        ...seedMessages,
+        msg("m-p", "user", "Was?", 3),
+        msg("m10", "assistant", "Eins", 4),
+      ]
+      releaseMine()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(screen.getAllByText("Eins")).toHaveLength(1))
+    expect(screen.getAllByText("Was?")).toHaveLength(1)
+    expect(screen.getAllByText("Denkprozess")).toHaveLength(1)
+  }, 15_000)
+
   it("raced detail fetch with the persisted user row shows the message once", async () => {
     // The first-send path: the turn's POST and the enable-racing detail
     // GET hit together, and the fetch result already contains the

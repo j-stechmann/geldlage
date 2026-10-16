@@ -13,8 +13,12 @@ export type AgentStreamEvent =
   | { type: "user"; id: string }
   | { type: "reasoning"; text: string }
   | { type: "delta"; text: string }
-  /** Segment boundary: the streamed round completed (empty payload). */
-  | { type: "round" }
+  /**
+   * Segment boundary: the streamed round completed. `retry` marks the
+   * degenerate empty-answer round the server persists no row for — the
+   * client discards the segment instead of freezing it.
+   */
+  | { type: "round"; retry: boolean }
   | { type: "tool_call"; name: string; args: string }
   | { type: "tool_result"; name: string; result: string }
   | { type: "done"; messageId: string | null }
@@ -28,6 +32,7 @@ interface FramePayload {
   result?: string
   message?: string
   messageId?: string | null
+  retry?: boolean
 }
 
 /**
@@ -59,7 +64,9 @@ export async function* parseAgentSse(
         yield { type: "delta", text: payload.text ?? "" }
         break
       case "round":
-        yield { type: "round" }
+        // absent flag (old server / malformed payload) → false: freeze,
+        // the pre-flag behavior
+        yield { type: "round", retry: payload.retry === true }
         break
       case "tool_call":
         yield {

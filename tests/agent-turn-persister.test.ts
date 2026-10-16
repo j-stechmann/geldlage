@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import { createTestDb, setTestDb, type Db } from "@/lib/db"
-import { TurnPersister } from "@/lib/agent/turn-persister"
-import { createThread, listMessages } from "@/lib/agent/store"
+import {
+  TurnPersister,
+  TOOL_RESULT_MAX_CHARS,
+} from "@/lib/agent/turn-persister"
+import { AGENT_MAX_FIELD_CHARS } from "@/lib/agent/constants"
+import { rowsToPromptHistory } from "@/lib/agent/history"
+import { windowHistory } from "@/lib/agent/window"
+import { appendMessage, createThread, listMessages } from "@/lib/agent/store"
 import { seedUser } from "./helpers"
 
 /**
@@ -10,16 +16,15 @@ import { seedUser } from "./helpers"
  * persistence contract later turns replay via rowsToPromptHistory.
  */
 
-/** Mirrors the persister's cap; the cut itself is asserted via content. */
-const TOOL_RESULT_MAX_CHARS = 8000
-
 let db: Db
+let uid: number
 let threadId: string
 
 beforeEach(() => {
   db = createTestDb()
   setTestDb(db)
-  threadId = createThread(seedUser(db)).id
+  uid = seedUser(db)
+  threadId = createThread(uid).id
 })
 
 describe("TurnPersister tool results", () => {
@@ -44,7 +49,9 @@ describe("TurnPersister tool results", () => {
     expect(rows[0].role).toBe("tool")
     expect(rows[0].content).toBe('{"ok":true}')
     expect(rows[0].toolCallId).toBe("c1")
-    // the boundary itself stays unmarked: exactly the cap is not a cut
+    // the replay-cap boundary itself stays unmarked: exactly
+    // AGENT_MAX_FIELD_CHARS is not a cut — windowHistory passes it
+    // through untouched, and marking an uncut result would lie
     const p2 = new TurnPersister(threadId)
     p2.onLoopEvent({
       type: "tool_call",
@@ -56,10 +63,10 @@ describe("TurnPersister tool results", () => {
       type: "tool_result",
       id: "c2",
       name: "get_category_totals",
-      result: "x".repeat(TOOL_RESULT_MAX_CHARS),
+      result: "x".repeat(AGENT_MAX_FIELD_CHARS),
     })
     expect(listMessages(threadId)[1].content).toBe(
-      "x".repeat(TOOL_RESULT_MAX_CHARS)
+      "x".repeat(AGENT_MAX_FIELD_CHARS)
     )
   })
 
@@ -96,5 +103,51 @@ describe("TurnPersister tool results", () => {
     expect(rows[0].content).toBe(
       big.slice(0, TOOL_RESULT_MAX_CHARS) + " …[Ergebnis gekürzt]"
     )
+    // slice + marker fit the replay cap exactly: windowHistory's
+    // per-field truncation must never re-cut the stored row
+    expect(rows[0].content.length).toBe(AGENT_MAX_FIELD_CHARS)
+  })
+
+  it("keeps the truncation marker through the replay window (regression)", () => {
+    // Regression: the stored cap (8000) used to exceed
+    // AGENT_MAX_FIELD_CHARS (4000), so a later turn's replay re-cut the
+    // stored row through windowHistory — the marker fell off and the
+    // model saw broken JSON with a bare "…". The stored copy must fit
+    // the replay cap, marker included.
+    appendMessage(threadId, { userId: uid, role: "user", content: "Summen?" })
+    const p = new TurnPersister(threadId)
+    p.onLoopEvent({
+      type: "round",
+      content: "",
+      reasoning: null,
+      calls: [{ id: "c1", name: "get_category_totals", args: "{}" }],
+      retry: false,
+    })
+    p.onLoopEvent({
+      type: "tool_call",
+      id: "c1",
+      name: "get_category_totals",
+      args: "{}",
+    })
+    p.onLoopEvent({
+      type: "tool_result",
+      id: "c1",
+      name: "get_category_totals",
+      result: "x".repeat(AGENT_MAX_FIELD_CHARS * 3),
+    })
+    p.onLoopEvent({ type: "done" })
+
+    // A later turn's view of the thread: stored rows → protocol
+    // history → the loop's replay window. A generous budget isolates
+    // the per-field truncation from the head/tail slicing.
+    const windowed = windowHistory(
+      rowsToPromptHistory(listMessages(threadId)),
+      Number.MAX_SAFE_INTEGER
+    )
+    const toolMsg = windowed.find((m) => m.role === "tool")
+    expect(toolMsg).toBeDefined()
+    // the marker survived truncateField — not re-cut with a bare "…"
+    expect(toolMsg!.content.endsWith(" …[Ergebnis gekürzt]")).toBe(true)
+    expect(toolMsg!.content.length).toBeLessThanOrEqual(AGENT_MAX_FIELD_CHARS)
   })
 })
