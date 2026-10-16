@@ -2,7 +2,7 @@ import { asc } from "drizzle-orm"
 import { NextRequest, NextResponse } from "next/server"
 import { getDb } from "@/lib/db"
 import { users } from "@/lib/db/schema"
-import { requireSession, unauthorized } from "@/lib/auth/guard"
+import { requireSessionGate } from "@/lib/agent/route-guard"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -18,8 +18,9 @@ export const dynamic = "force-dynamic"
  * client-side instead.
  */
 export async function GET(request: NextRequest) {
-  const session = await requireSession(request)
-  if (!session) return unauthorized()
+  const gate = await requireSessionGate(request, { csrf: false })
+  if (!gate.ok) return gate.response
+  const session = gate.session
   const db = getDb()
   const rows = db
     .select({ id: users.id, name: users.name, email: users.email })
