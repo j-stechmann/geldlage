@@ -71,21 +71,27 @@ export async function POST(
   // bounded recent read can't answer "any user message at all", but a
   // thread old enough to overflow the window-by-headroom necessarily has
   // user messages, so the check is only load-bearing for small threads.
-  // Both reads live inside the catch: the gate's roleOf check and the
-  // insert are separate transactions, so an owner deleting the thread in
-  // another session between them must surface as the same 404 body (never
-  // a 500 from appendMessage's internal "thread not found" throw).
+  // The read and the append live inside the catch: the gate's roleOf
+  // check and the insert are separate transactions, so an owner deleting
+  // the thread in another session between them must surface as the same
+  // 404 body (never a 500 from appendMessage's internal "thread not
+  // found" throw).
   let isFirstTurn: boolean
   let userMessage: ChatMessage
+  let replayRows: ChatMessage[]
   try {
-    isFirstTurn = !listRecentMessages(id, AGENT_HISTORY_MAX_MESSAGES).some(
-      (m) => m.role === "user"
-    )
+    const recent = listRecentMessages(id, AGENT_HISTORY_MAX_MESSAGES)
+    isFirstTurn = !recent.some((m) => m.role === "user")
     userMessage = appendMessage(id, {
       userId: gate.session.uid,
       role: "user",
       content,
     })
+    // No second DB read: the persisted row is by definition the newest
+    // (per-thread seq bumped in the same transaction), so the pre-append
+    // slice + it — re-bounded by the same cap a fresh read would apply —
+    // IS the post-append listRecentMessages result.
+    replayRows = [...recent, userMessage].slice(-AGENT_HISTORY_MAX_MESSAGES)
   } catch (err) {
     return deletedThreadResponse(err)
   }
@@ -99,9 +105,7 @@ export async function POST(
   // is not replayed to the model: reasoning tokens belong to the round
   // that produced them, and replaying them across turns would bloat
   // the prompt with stale thinking traces.
-  const history = rowsToPromptHistory(
-    listRecentMessages(id, AGENT_HISTORY_MAX_MESSAGES)
-  )
+  const history = rowsToPromptHistory(replayRows)
 
   const persister = new TurnPersister(id)
   const stream = new ReadableStream<Uint8Array>({

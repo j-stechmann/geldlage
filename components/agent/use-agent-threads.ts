@@ -58,15 +58,23 @@ export function useAgentThreads(streaming: boolean) {
       ? storedThreadId || newestOwnId
       : ""
 
+  const activeThread = threads.find((t) => t.id === activeThreadId)
+
+  // Invited threads are title-preview-only (the join panel branches on
+  // the threads-list role, never on detail data), and the messages route
+  // 404s for them by design — an enabled query would fire a doomed
+  // request every 4s poll until the user accepts or declines. Joining
+  // flips the role in the list, which re-enables the query.
   const detailQuery = useQuery({
     queryKey: MESSAGES_KEY(activeThreadId),
-    enabled: Boolean(activeThreadId) && Boolean(threadsQuery.data),
+    enabled:
+      Boolean(activeThreadId) &&
+      Boolean(threadsQuery.data) &&
+      activeThread?.role !== "invited",
     queryFn: () => fetchThreadDetail(activeThreadId),
     refetchInterval: streaming ? false : 4_000,
     retry: false,
   })
-
-  const activeThread = threads.find((t) => t.id === activeThreadId)
 
   useEffect(() => {
     if (threadsQuery.data) {

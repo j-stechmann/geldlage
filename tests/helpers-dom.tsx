@@ -167,6 +167,11 @@ export function stubScrollTo() {
   Element.prototype.scrollTo = vi.fn()
 }
 
+/** jsdom lacks the Pointer Capture API (the dock's drag handle). */
+export function stubSetPointerCapture() {
+  Element.prototype.setPointerCapture = () => undefined
+}
+
 /** jsdom lacks ResizeObserver (stream-follow pinning in message-list). */
 export function stubResizeObserver() {
   class FakeResizeObserver implements ResizeObserver {

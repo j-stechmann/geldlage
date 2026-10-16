@@ -81,7 +81,7 @@ unknown threads always answer **404, never 403** (see Conventions).
 | `DELETE /api/agent/threads/[id]/invites/[userId]` | `{removed}`                            | 400 `invalid_user_id` / `cannot_remove_owner`, 404 | Retract an invite or remove a member; **owner-only**, never themself                                                               |
 | `POST /api/agent/threads/[id]/join`               | `{joined: true}`                       | 404                                                | Accept an invite (`invited → joined`); owner/member no-op; uninvited = 404                                                         |
 | `GET /api/agent/threads/[id]/messages`            | `{thread, role, members, messages}`    | 404                                                | Full thread view (thread meta, roster, messages in `threadSeq` order); invited users get 404 — content unlocks exactly on join     |
-| `POST /api/agent/threads/[id]/chat`               | **SSE stream** (see below)             | 400 `invalid_content` (1–8000 chars), 404          | One streamed agent turn (`text/event-stream`); owner and joined members only                                                       |
+| `POST /api/agent/threads/[id]/chat`               | **SSE stream** (see below)             | 400 `invalid_content` (1–4000 chars), 404          | One streamed agent turn (`text/event-stream`); owner and joined members only                                                       |
 
 The chat endpoint's SSE vocabulary: named frames
 `event: <name>\ndata: <json>\n\n` — `user` (`{id}`, the persisted user row's

@@ -3,12 +3,9 @@ import type { Server } from "node:http"
 import { createServer } from "node:http"
 import { AddressInfo } from "node:net"
 import { resetConfigCache } from "@/lib/config"
+import { AGENT_MAX_FIELD_CHARS } from "@/lib/agent/constants"
 import { runAgentTurn } from "@/lib/agent/loop"
-import {
-  AGENT_MAX_FIELD_CHARS,
-  AGENT_MAX_TURNS,
-  windowHistory,
-} from "@/lib/agent/window"
+import { AGENT_MAX_TURNS, windowHistory } from "@/lib/agent/window"
 import { setTestDb, createTestDb, type Db } from "@/lib/db"
 import type { AgentChatMessage, AgentLoopEvent } from "@/lib/agent/types"
 import { seedUser } from "./helpers"

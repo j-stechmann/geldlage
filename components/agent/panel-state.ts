@@ -55,13 +55,28 @@ function getSnapshot(): PanelState {
   return state
 }
 
-export function setPanelState(partial: Partial<PanelState>) {
+/** In-memory update + listener notify; no persistence. */
+function applyPanelState(partial: Partial<PanelState>) {
   state = { ...state, ...partial }
+  for (const listener of listeners) listener()
+}
+
+/** State change that persists immediately (discrete UI: toggle, keypress). */
+export function setPanelState(partial: Partial<PanelState>) {
+  applyPanelState(partial)
   if (typeof window !== "undefined") {
     window.localStorage.setItem(OPEN_KEY, state.open ? "1" : "0")
     window.localStorage.setItem(WIDTH_KEY, String(state.width))
   }
-  for (const listener of listeners) listener()
+}
+
+/**
+ * Drag frames only: the dock re-renders from the live width on every
+ * pointermove, but the localStorage write happens once via setPanelState
+ * when the drag ends — not dozens of synchronous setItem calls per drag.
+ */
+export function previewPanelState(partial: Partial<PanelState>) {
+  applyPanelState(partial)
 }
 
 export function togglePanel() {

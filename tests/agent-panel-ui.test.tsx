@@ -671,6 +671,78 @@ describe("<AgentChat>", () => {
     )
   }, 15_000)
 
+  it("never fetches the invited thread's messages; joining unlocks the fetch", async () => {
+    // Regression: the detail query used to be enabled for invited
+    // threads too — a role whose messages route 404s by design — so the
+    // 4s poll fired a doomed request per tick until the user acted.
+    const state = {
+      messages: [],
+      threads: [
+        {
+          id: "t2",
+          title: "Geteilter Chat",
+          role: "invited",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    }
+    const { calls } = stubChatFlow(state)
+    // bespoke stub: the join flips the list role to member, as the real
+    // threads endpoint would on refetch
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input).split("?")[0]
+        const method = (init?.method ?? "GET").toUpperCase()
+        calls.push({ path, method })
+        if (path === "/api/agent/threads" && method === "GET") {
+          return Response.json({ threads: state.threads })
+        }
+        if (path === "/api/agent/threads/t2/join" && method === "POST") {
+          state.threads[0].role = "member"
+          return Response.json({ joined: true })
+        }
+        if (path === "/api/agent/threads/t2/messages" && method === "GET") {
+          if (state.threads[0].role === "invited") {
+            return Response.json({ error: "not_found" }, { status: 404 })
+          }
+          return Response.json(threadDetail([], "member"))
+        }
+        throw new TypeError(`unscripted ${path} ${method}`)
+      })
+    )
+    renderWithQuery(createElement(AgentChat))
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "1 Chats" })
+      ).toBeInTheDocument()
+    )
+    await userEvent.click(screen.getByRole("button", { name: "1 Chats" }))
+    await userEvent.click(screen.getByText("Geteilter Chat"))
+    await waitFor(() =>
+      expect(screen.getByText(/Einladung zu/)).toBeInTheDocument()
+    )
+    // the join panel renders from the list role alone: no messages
+    // request fired for the still-invited thread
+    expect(
+      calls.filter(
+        (c) => c.path === "/api/agent/threads/t2/messages" && c.method === "GET"
+      )
+    ).toHaveLength(0)
+
+    await userEvent.click(screen.getByRole("button", { name: "Annehmen" }))
+    // the refetched list reports member: the detail query unlocks and
+    // fetches the now-readable messages
+    await waitFor(() =>
+      expect(
+        calls.filter(
+          (c) =>
+            c.path === "/api/agent/threads/t2/messages" && c.method === "GET"
+        ).length
+      ).toBeGreaterThan(0)
+    )
+  }, 15_000)
+
   it("shows the empty state with no active thread", async () => {
     stubChatFlow({ messages: [], threads: [] })
     renderWithQuery(createElement(AgentChat))

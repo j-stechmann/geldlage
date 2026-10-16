@@ -8,7 +8,7 @@ import { CHAT_MESSAGE_MAX_CHARS } from "@/lib/agent/constants"
 /**
  * Message composer (ADR-0033): Enter sends (Shift+Enter and IME
  * composition excluded), the send button swaps to stop while a turn
- * streams. maxLength enforces the route's 1–8000-char contract client-side
+ * streams. maxLength enforces the route's char contract client-side
  * (mirrors THREAD_TITLE_MAX_INPUT_CHARS for the rename editor).
  */
 

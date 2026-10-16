@@ -5,6 +5,7 @@ import {
   clampWidth,
   MAX_WIDTH,
   MIN_WIDTH,
+  previewPanelState,
   setPanelState,
   usePanelState,
 } from "@/components/agent/panel-state"
@@ -77,11 +78,13 @@ export function AgentDock() {
 /**
  * Drag-to-resize handle on the dock's left edge: pointer capture keeps the
  * drag alive outside the strip, width is clamped to [MIN_WIDTH, MAX_WIDTH]
- * and persisted by setPanelState on every move. The drag is anchored at
- * pointerdown — pointer X and dock width are frozen there and the width is
- * derived from the pointer delta, not the live rect (the aside's left edge
- * moves with every committed width, so reading it per-move would feed the
- * last width back into the next one).
+ * and persisted by setPanelState once on pointerup — the moves in between
+ * only preview the width in memory (a synchronous localStorage write per
+ * pointermove would fire dozens of times per drag). The drag is anchored
+ * at pointerdown — pointer X and dock width are frozen there and the
+ * width is derived from the pointer delta, not the live rect (the aside's
+ * left edge moves with every committed width, so reading it per-move
+ * would feed the last width back into the next one).
  *
  * Keyboard support (WAI-ARIA separator pattern): the strip is a focusable
  * separator; ArrowLeft/ArrowRight move the edge by RESIZE_KEY_STEP in the
@@ -92,26 +95,31 @@ const RESIZE_KEY_STEP = 16
 
 function ResizeHandle() {
   const { width } = usePanelState()
-  const drag = useRef<{ startX: number; startWidth: number } | null>(null)
+  const drag = useRef<{
+    startX: number
+    startWidth: number
+    width: number
+  } | null>(null)
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     const parent = e.currentTarget.parentElement
     if (!parent) return
-    drag.current = {
-      startX: e.clientX,
-      startWidth: parent.getBoundingClientRect().width,
-    }
+    const startWidth = parent.getBoundingClientRect().width
+    drag.current = { startX: e.clientX, startWidth, width: startWidth }
     e.currentTarget.setPointerCapture(e.pointerId)
   }
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const start = drag.current
     if (!start) return
-    setPanelState({
-      width: clampWidth(start.startWidth + (start.startX - e.clientX)),
-    })
+    start.width = clampWidth(start.startWidth + (start.startX - e.clientX))
+    previewPanelState({ width: start.width })
   }
-  const onPointerUp = () => {
+  // pointer capture funnels up/cancel here even outside the strip: one
+  // persist per drag (skipped when it never started)
+  const endDrag = () => {
+    const start = drag.current
     drag.current = null
+    if (start) setPanelState({ width: start.width })
   }
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     // preventDefault suppresses the arrow keys' native scroll behavior
@@ -139,8 +147,8 @@ function ResizeHandle() {
       onKeyDown={onKeyDown}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
       className={cn(
         "absolute top-0 left-0 z-10 h-full w-1.5 -translate-x-1/2 cursor-col-resize",
         "hover:bg-border focus-visible:bg-ring"

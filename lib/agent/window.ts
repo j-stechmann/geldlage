@@ -1,3 +1,4 @@
+import { AGENT_MAX_FIELD_CHARS } from "@/lib/agent/constants"
 import type { AgentChatMessage } from "@/lib/agent/types"
 
 /**
@@ -18,9 +19,6 @@ export const AGENT_HISTORY_MAX_MESSAGES = 128
 
 /** Share of the model context reserved for replayed history. */
 export const HISTORY_CTX_SHARE = 0.5
-
-/** Per-field character cap before truncation (content, args). */
-export const AGENT_MAX_FIELD_CHARS = 4000
 
 /** Tool rounds allowed per chat turn before forcing a final answer. */
 export const AGENT_MAX_TURNS = 5
