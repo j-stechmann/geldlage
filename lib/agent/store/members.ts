@@ -91,9 +91,16 @@ export function inviteMembers(
   return inserted.length
 }
 
-export function removeMember(threadId: string, userId: number): boolean {
+/**
+ * Retracts/removes one roster row, returning the deleted row's prior
+ * state ("invited" | "joined") or null when no row existed. The invite
+ * route echoes the state so the owner's toast names what actually got
+ * removed — the roster the click was aimed at may be stale (an invited
+ * user may have joined since that fetch).
+ */
+export function removeMember(threadId: string, userId: number): string | null {
   const db = getDb()
-  const result = db
+  const removed = db
     .delete(chatThreadMembers)
     .where(
       and(
@@ -101,8 +108,9 @@ export function removeMember(threadId: string, userId: number): boolean {
         eq(chatThreadMembers.userId, userId)
       )
     )
-    .run()
-  return result.changes > 0
+    .returning({ state: chatThreadMembers.state })
+    .get()
+  return removed?.state ?? null
 }
 
 /**

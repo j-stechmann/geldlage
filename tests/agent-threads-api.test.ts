@@ -292,8 +292,61 @@ describe("invites", () => {
       }),
       { params: Promise.resolve({ id: threadId, userId: String(u2) }) }
     )
-    expect((await asJson(ok)).removed).toBe(true)
+    // the response echoes the removed row's PRIOR state — the client
+    // toasts what the server removed, never its stale roster copy
+    const removedBody = (await asJson(ok)) as {
+      removed: boolean
+      state: string | null
+    }
+    expect(removedBody.removed).toBe(true)
+    expect(removedBody.state).toBe("invited")
     expect(listMembers(threadId).filter((m) => m.userId === u2)).toHaveLength(0)
+
+    // a repeat on the already-gone row stays 200 (removed: false,
+    // state: null) — concurrent removals are success, not errors
+    const again = await removeInviteRoute(
+      await req(`/api/agent/threads/${threadId}/invites/${u2}`, u1, {
+        method: "DELETE",
+      }),
+      { params: Promise.resolve({ id: threadId, userId: String(u2) }) }
+    )
+    const goneBody = (await asJson(again)) as {
+      removed: boolean
+      state: string | null
+    }
+    expect(goneBody.removed).toBe(false)
+    expect(goneBody.state).toBeNull()
+  })
+
+  it("echoes the prior state of a JOINED member (join raced the roster)", async () => {
+    // Regression shape: the owner's dialog fetched the roster while u2
+    // was still "invited"; u2 joins before the owner clicks remove. The
+    // toast must say what the server removed — joined, not invited.
+    await inviteRoute(
+      await req(`/api/agent/threads/${threadId}/invites`, u1, {
+        method: "POST",
+        body: { userIds: [u2] },
+      }),
+      { params: Promise.resolve({ id: threadId }) }
+    )
+    await joinRoute(
+      await req(`/api/agent/threads/${threadId}/join`, u2, {
+        method: "POST",
+      }),
+      { params: Promise.resolve({ id: threadId }) }
+    )
+    const ok = await removeInviteRoute(
+      await req(`/api/agent/threads/${threadId}/invites/${u2}`, u1, {
+        method: "DELETE",
+      }),
+      { params: Promise.resolve({ id: threadId, userId: String(u2) }) }
+    )
+    const removedBody = (await asJson(ok)) as {
+      removed: boolean
+      state: string | null
+    }
+    expect(removedBody.removed).toBe(true)
+    expect(removedBody.state).toBe("joined")
   })
 
   it("rejects non-canonical userId segments (400, not a silent retarget)", async () => {

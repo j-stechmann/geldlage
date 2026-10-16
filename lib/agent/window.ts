@@ -96,6 +96,41 @@ function truncateField(s: string): string {
 }
 
 /**
+ * Marker appended when a tool result is cut at the cap. Without it the
+ * model would read a syntactically broken JSON answer that looks like
+ * the tool's real output instead of a capped copy — mid-turn on the
+ * wire copy (the loop's msgs) and on later turns' replay of the stored
+ * row (the persister) alike.
+ */
+const TOOL_RESULT_TRUNCATION_SUFFIX = " …[Ergebnis gekürzt]"
+
+/**
+ * Per-tool-result char cap: the slice kept when the marker is appended.
+ * Aligned with AGENT_MAX_FIELD_CHARS because replayed tool rows pass
+ * through truncateField above, which re-cuts anything beyond that cap
+ * with a bare "…" — slice + marker must fit it exactly, or the replay
+ * cut would silently drop the marker right back out of the model's
+ * context.
+ */
+export const TOOL_RESULT_MAX_CHARS =
+  AGENT_MAX_FIELD_CHARS - TOOL_RESULT_TRUNCATION_SUFFIX.length
+
+/**
+ * Bounds one tool result to the per-field cap, marking the cut. The
+ * model-facing copies share this: the loop's wire history (a 200-
+ * category get_category_totals is ~20k chars ≈ 5k tokens — alone enough
+ * to push the next round's prompt past LLM_CTX) and the persister's
+ * stored row (later turns replay it through windowHistory). The
+ * streamed tool_result event keeps the full result for the UI.
+ */
+export function truncateToolResult(s: string): string {
+  // Fits the replay cap as-is: no cut, no marker (truncateField would
+  // pass it through untouched — marking an uncut result would lie).
+  if (s.length <= AGENT_MAX_FIELD_CHARS) return s
+  return s.slice(0, TOOL_RESULT_MAX_CHARS) + TOOL_RESULT_TRUNCATION_SUFFIX
+}
+
+/**
  * The shape the estimate reads: content plus optional tool calls. The
  * system message satisfies it too (no tool_calls), so the loop can
  * estimate its whole request array including the system turn.

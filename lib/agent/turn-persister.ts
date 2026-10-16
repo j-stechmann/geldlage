@@ -1,8 +1,6 @@
 import { appendMessage, touchThread } from "@/lib/agent/store"
-import {
-  AGENT_MAX_FIELD_CHARS,
-  AGENT_NO_ANSWER_TEXT,
-} from "@/lib/agent/constants"
+import { truncateToolResult } from "@/lib/agent/window"
+import { AGENT_NO_ANSWER_TEXT } from "@/lib/agent/constants"
 import type { AgentLoopEvent } from "@/lib/agent/types"
 
 /**
@@ -12,34 +10,20 @@ import type { AgentLoopEvent } from "@/lib/agent/types"
  * round's prose + reasoning + its tool calls as wire JSON — except
  * retry-flagged degenerate rounds, which enter nothing) and one tool
  * row per tool_result, in threadSeq order identical to streamed event
- * order — the stored rows double as the replayable protocol history for
- * later turns.
+ * order — the stored rows double as the replayable protocol history
+ * for later turns.
  *
  * The tool_call → tool_result pairing exploits the loop's strict
  * sequential execution: the tool_call immediately preceding a tool_result
  * IS its pair — the raw args are remembered here (the result event
  * doesn't carry them); the wire id comes from the events themselves.
+ *
+ * Stored tool rows are capped at the per-field cap with the shared
+ * marker (lib/agent/window.ts truncateToolResult — the same cut the
+ * loop applies to its wire copy); TOOL_RESULT_MAX_CHARS is re-exported
+ * for the historical import surface.
  */
-
-/**
- * Marker appended when a stored tool result is cut at the cap. The
- * current turn's wire history carries the full result, but later turns
- * replay the stored row verbatim (rowsToPromptHistory) — without the
- * marker the model would read a syntactically broken JSON answer that
- * looks like the tool's real output instead of a capped copy.
- */
-const TOOL_RESULT_TRUNCATION_SUFFIX = " …[Ergebnis gekürzt]"
-
-/**
- * Per-tool-row char cap for persisted tool results: the slice kept when
- * the marker is appended. Aligned with AGENT_MAX_FIELD_CHARS because
- * later turns replay the stored row through windowHistory, whose
- * per-field truncation re-cuts anything beyond that cap with a bare
- * "…" — slice + marker must fit it exactly, or the replay cut would
- * silently drop the marker right back out of the model's context.
- */
-export const TOOL_RESULT_MAX_CHARS =
-  AGENT_MAX_FIELD_CHARS - TOOL_RESULT_TRUNCATION_SUFFIX.length
+export { TOOL_RESULT_MAX_CHARS } from "@/lib/agent/window"
 
 export class TurnPersister {
   private threadId: string
@@ -126,11 +110,4 @@ export class TurnPersister {
     }
     return null
   }
-}
-
-function truncateToolResult(s: string): string {
-  // Fits the replay cap as-is: no cut, no marker (windowHistory would
-  // pass it through untouched — marking an uncut result would lie).
-  if (s.length <= AGENT_MAX_FIELD_CHARS) return s
-  return s.slice(0, TOOL_RESULT_MAX_CHARS) + TOOL_RESULT_TRUNCATION_SUFFIX
 }

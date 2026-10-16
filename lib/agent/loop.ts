@@ -7,6 +7,7 @@ import {
   AGENT_MAX_TURNS,
   estimatePromptChars,
   HISTORY_CTX_SHARE,
+  truncateToolResult,
   windowHistory,
 } from "@/lib/agent/window"
 import type {
@@ -185,11 +186,18 @@ export async function* runAgentTurn(params: {
           name: call.name,
           result: resultString,
         }
+        // The wire copy is capped (the event above keeps the full
+        // result for UI + persistence — the persister applies the same
+        // cap to its stored row): tool results join msgs verbatim
+        // otherwise, and a big one (200+ categories ≈ 5k tokens) alone
+        // could push the next round's prompt past LLM_CTX mid-turn.
+        // The marker keeps the model from reading the cut JSON as the
+        // tool's real output.
         msgs.push({
           role: "tool",
           tool_call_id: call.id,
           name: call.name,
-          content: resultString,
+          content: truncateToolResult(resultString),
         })
       }
       continue

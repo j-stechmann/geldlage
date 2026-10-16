@@ -14,6 +14,7 @@ import {
   deleteOrLeaveThread,
   fetchUsers,
   joinThread,
+  removeMember,
   renameThread,
   invite,
 } from "@/components/agent/agent-api"
@@ -165,8 +166,20 @@ export function AgentChat() {
 
   const onInvite = useCallback(
     async (userIds: number[]): Promise<boolean> => {
-      if (!activeThreadId) return false
-      const count = await invite(activeThreadId, userIds)
+      // The thread vanished mid-dialog (deleted in another tab): the
+      // invite has nothing to act on — notify, never a silent no-op.
+      if (!activeThreadId) {
+        toast.error("Dieser Chat existiert nicht mehr.")
+        return false
+      }
+      // A fetch rejection (server unreachable) lands in the catch —
+      // never a silent no-op; the dialog keeps the selection for retry.
+      let count: number | null
+      try {
+        count = await invite(activeThreadId, userIds)
+      } catch {
+        count = null
+      }
       if (count === null) {
         toast.error("Einladung fehlgeschlagen.")
         return false
@@ -175,6 +188,43 @@ export function AgentChat() {
         count === 1 ? "1 Einladung gesendet." : `${count} Einladungen gesendet.`
       )
       setInviteOpen(false)
+      refresh(activeThreadId)
+      return true
+    },
+    [activeThreadId, refresh]
+  )
+
+  // Retracts a pending invite or removes a joined member — one DELETE
+  // for both roster states. The toast names what the SERVER removed:
+  // the roster row the click aimed at may be stale (an invited user
+  // may have joined between the roster fetch and the click).
+  const onRemoveMember = useCallback(
+    async (member: Member): Promise<boolean> => {
+      // The thread vanished mid-dialog (deleted in another tab): the
+      // removal has nothing to act on — notify, never a silent no-op.
+      if (!activeThreadId) {
+        toast.error("Dieser Chat existiert nicht mehr.")
+        return false
+      }
+      // A fetch rejection (server unreachable) lands in the catch —
+      // a destructive action must never fail silently.
+      let result: { removed: boolean; state: string | null } | null
+      try {
+        result = await removeMember(activeThreadId, member.userId)
+      } catch {
+        result = null
+      }
+      if (!result) {
+        toast.error("Entfernen fehlgeschlagen.")
+        return false
+      }
+      toast.success(
+        result.state === "joined"
+          ? "Mitglied entfernt."
+          : result.state === "invited"
+            ? "Einladung zurückgezogen."
+            : "Bereits entfernt."
+      )
       refresh(activeThreadId)
       return true
     },
@@ -294,8 +344,9 @@ export function AgentChat() {
       />
       <InviteDialog
         open={inviteOpen}
-        members={members}
+        threadId={activeThreadId}
         onInvite={onInvite}
+        onRemove={onRemoveMember}
         onClose={() => setInviteOpen(false)}
       />
     </div>

@@ -206,19 +206,19 @@ queries.
 transcript IS the replayable prompt history (one assistant row per round,
 protocol trio restored from `tool_calls`/`tool_call_id` pairing):
 
-| Column                    | Type                   | Notes                                                                                                                                                           |
-| ------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                      | TEXT PK                | UUID; deterministic tiebreak in message ordering                                                                                                                |
-| `thread_id`               | TEXT FK → chat_threads | **ON DELETE CASCADE**                                                                                                                                           |
-| `user_id`                 | INTEGER FK → users     | **NULL = model-produced** (assistant/tool); user rows carry the author                                                                                          |
-| `role`                    | TEXT NOT NULL          | `user` / `assistant` / `tool` — **CHECK enforced** (`chat_messages_role_check` in the hand-written DDL; the drizzle `check()` def must stay in sync, see below) |
-| `content`                 | TEXT NOT NULL          | for tool rows: the JSON tool result (capped at 8000 chars on persist)                                                                                           |
-| `reasoning`               | TEXT                   | assistant rows: that round's `reasoning_content` trace (display only, never replayed into loop input)                                                           |
-| `tool_name` / `tool_args` | TEXT                   | tool rows: registry name + raw JSON args (display + debugging)                                                                                                  |
-| `tool_calls`              | TEXT                   | assistant rows: the round's tool calls in exact OpenAI wire JSON — replay material; NULL on legacy rows (they replay as plain text)                             |
-| `tool_call_id`            | TEXT                   | tool rows: the wire call id pairing the result to its assistant row's `tool_calls` entry; NULL on legacy rows (display-only)                                    |
-| `created_at`              | TEXT                   | ISO                                                                                                                                                             |
-| `thread_seq`              | INTEGER NOT NULL       | the per-thread counter snapshot at insert, `threadSeq` — stable display AND loop order                                                                          |
+| Column                    | Type                   | Notes                                                                                                                                                                                        |
+| ------------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                      | TEXT PK                | UUID; deterministic tiebreak in message ordering                                                                                                                                             |
+| `thread_id`               | TEXT FK → chat_threads | **ON DELETE CASCADE**                                                                                                                                                                        |
+| `user_id`                 | INTEGER FK → users     | **NULL = model-produced** (assistant/tool); user rows carry the author                                                                                                                       |
+| `role`                    | TEXT NOT NULL          | `user` / `assistant` / `tool` — **CHECK enforced** (`chat_messages_role_check` in the hand-written DDL; the drizzle `check()` def must stay in sync, see below)                              |
+| `content`                 | TEXT NOT NULL          | for tool rows: the JSON tool result (capped at 4000 chars on persist with a ` …[Ergebnis gekürzt]` marker — the same cut the loop applies to its wire copy, shared via `truncateToolResult`) |
+| `reasoning`               | TEXT                   | assistant rows: that round's `reasoning_content` trace (display only, never replayed into loop input)                                                                                        |
+| `tool_name` / `tool_args` | TEXT                   | tool rows: registry name + raw JSON args (display + debugging)                                                                                                                               |
+| `tool_calls`              | TEXT                   | assistant rows: the round's tool calls in exact OpenAI wire JSON — replay material; NULL on legacy rows (they replay as plain text)                                                          |
+| `tool_call_id`            | TEXT                   | tool rows: the wire call id pairing the result to its assistant row's `tool_calls` entry; NULL on legacy rows (display-only)                                                                 |
+| `created_at`              | TEXT                   | ISO                                                                                                                                                                                          |
+| `thread_seq`              | INTEGER NOT NULL       | the per-thread counter snapshot at insert, `threadSeq` — stable display AND loop order                                                                                                       |
 
 Indexes: `chat_messages_thread_sort_idx` on `(thread_id, thread_seq, id)` —
 built for exactly the `ORDER BY thread_seq, id` both the message list and the

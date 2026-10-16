@@ -25,9 +25,7 @@ import {
 function threadDetail(
   messages: Array<Record<string, unknown>>,
   role: "owner" | "member" = "owner",
-  members: Array<Record<string, unknown>> = [
-    { userId: 1, name: "user-1", email: "u1@x.de", state: "owner" },
-  ]
+  members: Array<Record<string, unknown>> = DEFAULT_MEMBERS
 ) {
   return {
     thread: {
@@ -43,6 +41,11 @@ function threadDetail(
     messages,
   }
 }
+
+/** Owner-only roster the detail view and GET /invites default to. */
+const DEFAULT_MEMBERS: Array<Record<string, unknown>> = [
+  { userId: 1, name: "user-1", email: "u1@x.de", state: "owner" },
+]
 
 function msg(
   id: string,
@@ -124,6 +127,12 @@ function stubChatFlow(state: {
   users?: Array<Record<string, unknown>>
   /** Overrides the thread-detail roster (default: only owner userId 1). */
   members?: Array<Record<string, unknown>>
+  /** Makes DELETE /threads/t1/invites/[uid] answer this error instead. */
+  removeReject?: { status: number; body: Record<string, unknown> }
+  /** Holds the DELETE response until resolved (in-flight assertions). */
+  removeGate?: Promise<void>
+  /** DELETE answers {removed: false, state: null} without roster change. */
+  removeAbsent?: boolean
 }) {
   const calls: Array<{ path: string; method: string }> = []
   const fetchMock = vi.fn(
@@ -136,6 +145,34 @@ function stubChatFlow(state: {
       }
       if (path === "/api/users" && method === "GET") {
         return Response.json({ users: state.users ?? [] })
+      }
+      if (path === "/api/agent/threads/t1/invites" && method === "GET") {
+        return Response.json({
+          members: state.members ?? DEFAULT_MEMBERS,
+        })
+      }
+      if (
+        path.startsWith("/api/agent/threads/t1/invites/") &&
+        method === "DELETE"
+      ) {
+        if (state.removeReject) {
+          return Response.json(state.removeReject.body, {
+            status: state.removeReject.status,
+          })
+        }
+        if (state.removeGate) await state.removeGate
+        if (state.removeAbsent) {
+          // the row vanished concurrently: removed: false, no roster
+          // mutation (the served roster still lists the member)
+          return Response.json({ removed: false, state: null })
+        }
+        // Mutate the served roster like the real endpoint: the next
+        // GET (detail or invites) no longer lists the removed member.
+        const removedId = Number(path.split("/").pop())
+        state.members = (state.members ?? DEFAULT_MEMBERS).filter(
+          (m) => m.userId !== removedId
+        )
+        return Response.json({ removed: true, state: "invited" })
       }
       if (path === "/api/agent/threads/t1/messages" && method === "GET") {
         return Response.json(
@@ -869,6 +906,197 @@ describe("<AgentChat>", () => {
         ).length
       ).toBeGreaterThan(0)
     )
+  }, 15_000)
+
+  it("retracts an invite from the member dialog; the removed user becomes a candidate again", async () => {
+    const state = {
+      messages: [] as Array<Record<string, unknown>>,
+      threads: [
+        {
+          id: "t1",
+          title: "Haushaltsfragen",
+          role: "owner",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+      members: [
+        { userId: 1, name: "user-1", email: "u1@x.de", state: "owner" },
+        { userId: 2, name: "user-2", email: "u2@x.de", state: "joined" },
+        { userId: 3, name: "user-3", email: "u3@x.de", state: "invited" },
+      ],
+      // user-3 is in the directory too: after the retraction they must
+      // reappear as an invitable candidate.
+      users: [
+        { id: 3, name: "user-3", email: "u3@x.de" },
+        { id: 4, name: "user-4", email: "u4@x.de" },
+      ],
+      // declared so the mid-test assignment below type-checks
+      removeGate: undefined as Promise<void> | undefined,
+    }
+    const { calls } = stubChatFlow(state)
+    renderWithQuery(createElement(AgentChat))
+    await waitFor(() =>
+      expect(screen.getByText("Haushaltsfragen")).toBeInTheDocument()
+    )
+    await userEvent.click(
+      screen.getByRole("button", { name: "Andere einladen" })
+    )
+    // roster (GET /invites) and directory both load while the dialog is open
+    await waitFor(() =>
+      expect(screen.getByText("Mitglieder & Einladungen")).toBeInTheDocument()
+    )
+    await waitFor(() => expect(screen.getByText("user-4")).toBeInTheDocument())
+    // roster states as badges; the owner row offers no removal
+    expect(screen.getByText("Besitzer")).toBeInTheDocument()
+    expect(screen.getByText("Mitglied")).toBeInTheDocument()
+    expect(screen.getByText("Eingeladen")).toBeInTheDocument()
+    expect(
+      screen.getAllByRole("button", { name: "Mitglied entfernen" })
+    ).toHaveLength(1)
+    expect(
+      screen.getAllByRole("button", { name: "Einladung zurückziehen" })
+    ).toHaveLength(1)
+    // candidates = directory minus roster: user-3 is a member, not a
+    // candidate (their name lives in the roster row, a div — candidates
+    // render as checkbox labels)
+    expect(screen.getByText("user-3").closest("label")).toBeNull()
+    expect(screen.getByText("user-4").closest("label")).not.toBeNull()
+
+    const successSpy = vi.spyOn(toast, "success")
+    try {
+      // Hold the DELETE mid-flight: the row's button must disable for
+      // the whole flight (a second click would race the first).
+      let releaseRemove!: () => void
+      state.removeGate = new Promise<void>((r) => {
+        releaseRemove = r
+      })
+      const retractButton = screen.getByRole("button", {
+        name: "Einladung zurückziehen",
+      })
+      await userEvent.click(retractButton)
+      expect(retractButton).toBeDisabled()
+      // per-row disable: the OTHER row's removal stays clickable (a
+      // single-id guard would go stale here once any removal settles)
+      expect(
+        screen.getByRole("button", { name: "Mitglied entfernen" })
+      ).toBeEnabled()
+      releaseRemove()
+      await waitFor(() =>
+        expect(
+          calls.some(
+            (c) =>
+              c.path === "/api/agent/threads/t1/invites/3" &&
+              c.method === "DELETE"
+          )
+        ).toBe(true)
+      )
+      // the toast names the state the SERVER reported, not the (here
+      // agreeing) roster copy
+      await waitFor(() =>
+        expect(successSpy).toHaveBeenCalledWith("Einladung zurückgezogen.")
+      )
+      // the roster refetch (invalidate) drops the invited row and the
+      // retracted user reappears as an invitable candidate
+      await waitFor(() =>
+        expect(screen.queryByText("Eingeladen")).not.toBeInTheDocument()
+      )
+      await waitFor(() =>
+        expect(screen.getByText("user-3").closest("label")).not.toBeNull()
+      )
+    } finally {
+      successSpy.mockRestore()
+    }
+  }, 15_000)
+
+  it("toasts 'Bereits entfernt.' when the row vanished concurrently (removed: false)", async () => {
+    // Another session removed the member first: the DELETE answers
+    // {removed: false, state: null} — still success (the desired roster
+    // holds either way), with a toast that says what happened.
+    const state = {
+      messages: [] as Array<Record<string, unknown>>,
+      threads: [
+        {
+          id: "t1",
+          title: "Haushaltsfragen",
+          role: "owner",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+      members: [
+        { userId: 1, name: "user-1", email: "u1@x.de", state: "owner" },
+        { userId: 2, name: "user-2", email: "u2@x.de", state: "joined" },
+      ],
+      removeAbsent: true,
+    }
+    stubChatFlow(state)
+    const successSpy = vi.spyOn(toast, "success")
+    try {
+      renderWithQuery(createElement(AgentChat))
+      await waitFor(() =>
+        expect(screen.getByText("Haushaltsfragen")).toBeInTheDocument()
+      )
+      await userEvent.click(
+        screen.getByRole("button", { name: "Andere einladen" })
+      )
+      await waitFor(() =>
+        expect(screen.getByText("user-2")).toBeInTheDocument()
+      )
+      await userEvent.click(
+        screen.getByRole("button", { name: "Mitglied entfernen" })
+      )
+      await waitFor(() =>
+        expect(successSpy).toHaveBeenCalledWith("Bereits entfernt.")
+      )
+      // the served roster is untouched: the row stays
+      expect(screen.getByText("Mitglied")).toBeInTheDocument()
+    } finally {
+      successSpy.mockRestore()
+    }
+  }, 15_000)
+
+  it("keeps the member row and toasts when the removal fails", async () => {
+    // 404 = the thread vanished concurrently (owner deleted it in
+    // another tab): the roster row must survive, the toast says so.
+    const state = {
+      messages: [] as Array<Record<string, unknown>>,
+      threads: [
+        {
+          id: "t1",
+          title: "Haushaltsfragen",
+          role: "owner",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+      members: [
+        { userId: 1, name: "user-1", email: "u1@x.de", state: "owner" },
+        { userId: 2, name: "user-2", email: "u2@x.de", state: "joined" },
+      ],
+      removeReject: { status: 404, body: { error: "not_found" } },
+    }
+    stubChatFlow(state)
+    const errorSpy = vi.spyOn(toast, "error")
+    try {
+      renderWithQuery(createElement(AgentChat))
+      await waitFor(() =>
+        expect(screen.getByText("Haushaltsfragen")).toBeInTheDocument()
+      )
+      await userEvent.click(
+        screen.getByRole("button", { name: "Andere einladen" })
+      )
+      await waitFor(() =>
+        expect(screen.getByText("user-2")).toBeInTheDocument()
+      )
+      await userEvent.click(
+        screen.getByRole("button", { name: "Mitglied entfernen" })
+      )
+      await waitFor(() =>
+        expect(errorSpy).toHaveBeenCalledWith("Entfernen fehlgeschlagen.")
+      )
+      // no refresh on failure: the roster row stays as-is
+      expect(screen.getByText("Mitglied")).toBeInTheDocument()
+    } finally {
+      errorSpy.mockRestore()
+    }
   }, 15_000)
 
   it("shows the empty state with no active thread", async () => {

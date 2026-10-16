@@ -11,7 +11,9 @@ import { runAgentTurn } from "@/lib/agent/loop"
 import {
   AGENT_MAX_TURNS,
   estimatePromptChars,
+  truncateToolResult,
   windowHistory,
+  TOOL_RESULT_MAX_CHARS,
 } from "@/lib/agent/window"
 import { setTestDb, createTestDb, type Db } from "@/lib/db"
 import type { AgentChatMessage, AgentLoopEvent } from "@/lib/agent/types"
@@ -657,6 +659,47 @@ describe("runAgentTurn", () => {
     expect(parsed.categories).toEqual([])
   })
 
+  it("caps an oversized tool result on the wire; the event keeps the full result", async () => {
+    await startServer()
+    // A 200-category get_category_totals is ~20k chars ≈ 5k tokens —
+    // pushed into msgs verbatim, one such result could push the next
+    // round's prompt past LLM_CTX mid-turn (clamped answer, not a
+    // crash). The wire copy takes the same cut + marker the persister
+    // stores; the tool_result event (UI chip, persister input) keeps
+    // the full result.
+    const payload = { blob: "x".repeat(AGENT_MAX_FIELD_CHARS * 3) }
+    const fullResult = JSON.stringify(payload)
+    vi.spyOn(agentTools[0], "execute").mockResolvedValue(payload)
+    scripted = [
+      {
+        toolCalls: [
+          {
+            index: 0,
+            id: "call_big",
+            name: "get_category_totals",
+            arguments: '{"period":"this_month"}',
+          },
+        ],
+      },
+      { content: ["ok"] },
+    ]
+    const events = await collect([{ role: "user", content: "Summen?" }])
+
+    const result = events.find((e) => e.type === "tool_result")
+    expect(result).toBeDefined()
+    if (result?.type === "tool_result") {
+      expect(result.result).toBe(fullResult)
+    }
+    const toolMsg = (
+      requests[1].messages as Array<{ role: string; content?: string }>
+    ).find((m) => m.role === "tool")
+    const wire = String(toolMsg?.content)
+    expect(wire.length).toBe(AGENT_MAX_FIELD_CHARS)
+    expect(wire).toBe(
+      fullResult.slice(0, TOOL_RESULT_MAX_CHARS) + " …[Ergebnis gekürzt]"
+    )
+  })
+
   it("synthesizes a tool_call id when the stream omits one", async () => {
     await startServer()
     // Regression for the accumulator's empty-id path: a delta series that
@@ -694,6 +737,19 @@ describe("runAgentTurn", () => {
     expect(assistantCall?.tool_calls?.[0].id).not.toBe("")
     const toolMsg = second.find((m) => m.role === "tool")
     expect(toolMsg?.tool_call_id).toBe(assistantCall?.tool_calls?.[0].id)
+  })
+})
+
+describe("truncateToolResult unit", () => {
+  it("passes a result at exactly the field cap through unmarked", () => {
+    const fits = "x".repeat(AGENT_MAX_FIELD_CHARS)
+    expect(truncateToolResult(fits)).toBe(fits)
+  })
+
+  it("caps an oversized result: slice + marker fit the field cap exactly", () => {
+    const out = truncateToolResult("x".repeat(AGENT_MAX_FIELD_CHARS + 500))
+    expect(out.length).toBe(AGENT_MAX_FIELD_CHARS)
+    expect(out.endsWith(" …[Ergebnis gekürzt]")).toBe(true)
   })
 })
 

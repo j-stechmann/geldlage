@@ -1,5 +1,6 @@
 import { apiFetch } from "@/lib/api-fetch"
 import type {
+  Member,
   ThreadDetail,
   ThreadSummary,
   UserRow,
@@ -14,6 +15,8 @@ import type {
 export const THREADS_KEY = ["agent-threads"] as const
 export const MESSAGES_KEY = (threadId: string) =>
   ["agent-messages", threadId] as const
+export const MEMBERS_KEY = (threadId: string) =>
+  ["agent-members", threadId] as const
 export const USERS_KEY = ["agent-users"] as const
 
 async function readJson<T>(res: Response): Promise<T> {
@@ -127,6 +130,37 @@ export async function invite(
 }
 
 /**
+ * GET /threads/[id]/invites — the owner-only member roster (owner row
+ * synthesized with state "owner"). Fetched while the member-management
+ * dialog is open.
+ */
+export async function fetchMembers(
+  threadId: string
+): Promise<{ members: Member[] }> {
+  return readJson(await apiFetch(`/api/agent/threads/${threadId}/invites`))
+}
+
+/**
+ * DELETE /threads/[id]/invites/[userId] retracts a pending invite or
+ * removes a joined member — one owner-only call for both roster states.
+ * The response echoes the removed row's prior state so the toast names
+ * what actually got removed (null state = row already gone — still
+ * success, the desired roster holds either way). Returns null on a
+ * non-OK response.
+ */
+export async function removeMember(
+  threadId: string,
+  userId: number
+): Promise<{ removed: boolean; state: string | null } | null> {
+  const res = await apiFetch(
+    `/api/agent/threads/${threadId}/invites/${userId}`,
+    { method: "DELETE" }
+  )
+  if (!res.ok) return null
+  return readJson<{ removed: boolean; state: string | null }>(res)
+}
+
+/**
  * DELETE /threads/[id] is role-polymorphic (owner deletes, member leaves,
  * invited declines) — one client call for all three.
  */
@@ -144,7 +178,11 @@ export async function joinThread(threadId: string): Promise<boolean> {
   return res.ok
 }
 
-/** Post-mutation cache refresh: threads list, plus a thread's messages. */
+/**
+ * Post-mutation cache refresh: threads list, plus a thread's messages
+ * and member roster (the roster also feeds the invite section's
+ * candidate filtering, so a removal re-opens the removed user).
+ */
 export function invalidate(
   queryClient: {
     invalidateQueries: (opts: { queryKey: readonly unknown[] }) => Promise<void>
@@ -157,6 +195,9 @@ export function invalidate(
   if (threadId) {
     jobs.push(
       queryClient.invalidateQueries({ queryKey: MESSAGES_KEY(threadId) })
+    )
+    jobs.push(
+      queryClient.invalidateQueries({ queryKey: MEMBERS_KEY(threadId) })
     )
   }
   for (const job of jobs) job.catch(() => undefined)

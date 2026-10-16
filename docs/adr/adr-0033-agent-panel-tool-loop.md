@@ -146,11 +146,19 @@ tool_calls`) followed by its tool rows (paired via `tool_call_id`) —
   the 128 most recent rows), then the slice anchors at the oldest user
   message inside it (slicing may not start mid-protocol — llama-server
   rejects orphan tool continuations; the anchor also keeps a replayed
-  trio intact). Fields are truncated at 4000 chars with "…", and the
-  chars/4 estimate warns once per turn when the estimated prompt plus
-  the completion budget (`max_tokens`) exceeds `LLM_CTX` — the same
-  client-side context guard as the label path (ADR-0016), not
-  re-estimated inside the loop.
+  trio intact). Fields are truncated at 4000 chars with "…". Tool
+  results are bounded on every model-facing copy: the wire history's
+  tool messages take the same 4000-char cut, marked
+  ` …[Ergebnis gekürzt]` (window.ts's `truncateToolResult`, shared with
+  the persister's stored row — a 200-category `get_category_totals` is
+  ~20k chars ≈ 5k tokens, which alone could push the next round's
+  prompt past LLM_CTX), while the streamed `tool_result` event keeps the
+  full result for the UI. The chars/4 estimate warns **per round** when
+  the estimated prompt plus the completion budget (`max_tokens`)
+  exceeds `LLM_CTX` — the same client-side context guard as the label
+  path (ADR-0016), re-estimated at the top of every round because the
+  protocol trio and (capped) tool results appended mid-turn grow the
+  request.
 
 - **Threads with invite-based sharing** (lib/agent/store.ts + lib/agent/store/*,
   chat_tables): `chat_threads` (owner = creator), `chat_thread_members`
@@ -162,7 +170,13 @@ joined`) and `chat_messages` (roles `user | assistant | tool`, CHECK
   concern modules (store/threads.ts, store/members.ts, store/messages.ts,
   store/thread-access.ts). Invites are idempotent (conflict-
   nothing on the `(thread_id, user_id)` primary key, owner un-invitable);
-  **`GET /api/users`** serves the invite dialog the full user directory — a
+  the owner's member dialog manages the whole share lifecycle from the
+  roster — GET /invites lists it (owner row synthesized), DELETE
+  /invites/[userId] retracts a pending invite or removes a joined
+  member (the response echoes the removed row's prior state, so the
+  toast names what the server removed — never the client's possibly-
+  stale roster copy), POST invites from the user directory; **`GET /api/users`**
+  serves the invite section the full user directory — a
   deliberate PII exposure on a local, single-instance app where every
   provisioned identity sits inside the same trust boundary (the OIDC
   provider already gates who gets a workspace at all); per-row redaction

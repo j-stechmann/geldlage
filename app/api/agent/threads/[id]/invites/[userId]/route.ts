@@ -35,6 +35,11 @@ export async function DELETE(
     )
   }
 
-  const removed = removeMember(id, userId)
-  return NextResponse.json({ removed })
+  // The state is the removed row's PRIOR state (null when the row was
+  // already gone — still success, the desired roster holds either
+  // way): the client toasts what the server removed, never its
+  // possibly-stale roster copy (an invited user may have joined since
+  // the roster was fetched).
+  const state = removeMember(id, userId)
+  return NextResponse.json({ removed: state !== null, state })
 }
