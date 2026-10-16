@@ -1,3 +1,4 @@
+import { AGENT_NO_ANSWER_TEXT } from "@/lib/agent/constants"
 import type { AgentChatMessage } from "@/lib/agent/types"
 import type { ChatMessage } from "@/lib/db/schema"
 
@@ -17,7 +18,11 @@ import type { ChatMessage } from "@/lib/db/schema"
  *   between an assistant round and its tool rows: when the rows
  *   following an assistant-with-calls row are not exactly its paired
  *   tool results (in call order), the whole trio degrades to prose-only
- *   — llama-server rejects orphan tool continuations.
+ *   — llama-server rejects orphan tool continuations,
+ * - the display placeholder for reasoning-only turn ends
+ *   (AGENT_NO_ANSWER_TEXT) is UI copy the persister writes to keep the
+ *   bubble non-empty — it replays as empty content, never as the
+ *   model's own words.
  */
 export function rowsToPromptHistory(rows: ChatMessage[]): AgentChatMessage[] {
   const out: AgentChatMessage[] = []
@@ -31,8 +36,9 @@ export function rowsToPromptHistory(rows: ChatMessage[]): AgentChatMessage[] {
     }
     if (row.role === "assistant") {
       const calls = parseToolCalls(row.toolCalls)
+      const content = row.content === AGENT_NO_ANSWER_TEXT ? "" : row.content
       if (calls.length === 0) {
-        out.push({ role: "assistant", content: row.content })
+        out.push({ role: "assistant", content })
         i++
         continue
       }
@@ -54,7 +60,7 @@ export function rowsToPromptHistory(rows: ChatMessage[]): AgentChatMessage[] {
         results.push(expected)
       }
       if (paired) {
-        out.push({ role: "assistant", content: row.content, tool_calls: calls })
+        out.push({ role: "assistant", content, tool_calls: calls })
         for (const r of results) {
           out.push({
             role: "tool",
@@ -65,7 +71,7 @@ export function rowsToPromptHistory(rows: ChatMessage[]): AgentChatMessage[] {
         }
         i += 1 + results.length
       } else {
-        out.push({ role: "assistant", content: row.content })
+        out.push({ role: "assistant", content })
         i++
       }
       continue

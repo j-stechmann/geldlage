@@ -38,6 +38,8 @@ export const INVITE_MAX_USER_IDS = 100
 /**
  * Persisted when the model streamed only a reasoning trace and no prose
  * (a reasoning-only `done`). Prevents an empty assistant bubble; the
- * collapsible "Denkprozess" stays, the body states the miss.
+ * collapsible "Denkprozess" stays, the body states the miss. Display
+ * copy only — rowsToPromptHistory strips it from replay, so the wire
+ * history carries the empty prose the round actually streamed.
  */
 export const AGENT_NO_ANSWER_TEXT = "(Das Modell hat keine Antwort formuliert.)"

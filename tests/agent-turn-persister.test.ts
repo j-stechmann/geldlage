@@ -4,7 +4,10 @@ import {
   TurnPersister,
   TOOL_RESULT_MAX_CHARS,
 } from "@/lib/agent/turn-persister"
-import { AGENT_MAX_FIELD_CHARS } from "@/lib/agent/constants"
+import {
+  AGENT_MAX_FIELD_CHARS,
+  AGENT_NO_ANSWER_TEXT,
+} from "@/lib/agent/constants"
 import { rowsToPromptHistory } from "@/lib/agent/history"
 import { windowHistory } from "@/lib/agent/window"
 import { appendMessage, createThread, listMessages } from "@/lib/agent/store"
@@ -149,5 +152,35 @@ describe("TurnPersister tool results", () => {
     // the marker survived truncateField — not re-cut with a bare "…"
     expect(toolMsg!.content.endsWith(" …[Ergebnis gekürzt]")).toBe(true)
     expect(toolMsg!.content.length).toBeLessThanOrEqual(AGENT_MAX_FIELD_CHARS)
+  })
+})
+
+describe("TurnPersister reasoning-only turn ends", () => {
+  it("persists the display placeholder but replays it as empty content (regression)", () => {
+    // Regression: a callless final round streaming only a thinking trace
+    // persists the AGENT_NO_ANSWER_TEXT body (empty bubble otherwise),
+    // but the placeholder is UI copy — rowsToPromptHistory must strip
+    // it, or every later prompt quotes it as the model's own answer.
+    appendMessage(threadId, { userId: uid, role: "user", content: "Und?" })
+    const p = new TurnPersister(threadId)
+    p.onLoopEvent({
+      type: "round",
+      content: "",
+      reasoning: "Nur ein Gedanke.",
+      calls: [],
+      retry: false,
+    })
+
+    const rows = listMessages(threadId)
+    const assistant = rows.find((r) => r.role === "assistant")!
+    // the stored row keeps the placeholder: the message list renders it
+    expect(assistant.content).toBe(AGENT_NO_ANSWER_TEXT)
+    expect(assistant.reasoning).toBe("Nur ein Gedanke.")
+
+    // the wire history carries the empty prose the round streamed
+    expect(rowsToPromptHistory(rows)).toEqual([
+      { role: "user", content: "Und?" },
+      { role: "assistant", content: "" },
+    ])
   })
 })
