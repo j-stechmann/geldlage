@@ -3,6 +3,7 @@ import type { Db } from "@/lib/db"
 import { accounts, categories, transactions } from "@/lib/db/schema"
 import {
   agentTools,
+  periodEndDate,
   periodStartDate,
   toolByName,
   toolsForRequest,
@@ -88,6 +89,21 @@ function firstOfLastMonth(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`
 }
 
+/** Last day of the current month, ISO (vorgemerkt rows are post-dated). */
+function lastDayOfThisMonth(): string {
+  const now = new Date()
+  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+  return `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, "0")}-${String(last.getDate()).padStart(2, "0")}`
+}
+
+/** First day of the next month, ISO (next month's business stays out). */
+function firstOfNextMonth(): string {
+  const d = new Date()
+  d.setDate(1)
+  d.setMonth(d.getMonth() + 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`
+}
+
 beforeEach(() => {
   ;({ db, userId: uid1 } = setupTestDb())
   uid2 = seedUser(db, "user-2")
@@ -160,6 +176,34 @@ describe("periodStartDate", () => {
   it("handles the leap-day path", () => {
     expect(periodStartDate("last_month", new Date(2024, 2, 31))).toBe(
       "2024-02-01"
+    )
+  })
+})
+
+describe("periodEndDate", () => {
+  it("runs this_month through the month's end (post-dated rows count)", () => {
+    // Regression: the window used to end "tomorrow", silently dropping
+    // vorgemerkte rows with future booking dates inside the month.
+    expect(periodEndDate("this_month", new Date(2026, 9, 16))).toBe(
+      "2026-11-01"
+    )
+  })
+
+  it("runs last_90_days through the current month's end too", () => {
+    expect(periodEndDate("last_90_days", new Date(2026, 9, 16))).toBe(
+      "2026-11-01"
+    )
+  })
+
+  it("closes last_month at the 1st of the current month", () => {
+    expect(periodEndDate("last_month", new Date(2026, 9, 16))).toBe(
+      "2026-10-01"
+    )
+  })
+
+  it("rolls the year over December", () => {
+    expect(periodEndDate("this_month", new Date(2026, 11, 24))).toBe(
+      "2027-01-01"
     )
   })
 })
@@ -477,6 +521,35 @@ describe("get_category_totals", () => {
     expect(r.status).toBe("both")
     expect(r.totalsCents.outflow).toBe(-41000)
     expect(withCount.categories[0].count).toBe(2)
+  })
+
+  it("counts post-dated vorgemerkt rows within the month, excludes next month's", async () => {
+    const tool = toolByName("get_category_totals")!
+    // Bank CSVs reserve upcoming debits as "Nicht gebucht" with a
+    // FUTURE booking date: a row dated later this month must count
+    // for this_month + Nicht gebucht (regression: the old window ended
+    // "tomorrow" and dropped it). A row already dated next month is
+    // that month's business and must stay out.
+    seedTx({
+      userId: uid1,
+      categoryId: cat1,
+      amountCents: -6000,
+      bookingDate: lastDayOfThisMonth(),
+      status: "Nicht gebucht",
+    })
+    seedTx({
+      userId: uid1,
+      categoryId: cat1,
+      amountCents: -99999,
+      bookingDate: firstOfNextMonth(),
+      status: "Nicht gebucht",
+    })
+
+    const r = (await tool.execute(
+      { period: "this_month", status: "Nicht gebucht" },
+      { uid: uid1 }
+    )) as { totalsCents: { outflow: number } }
+    expect(r.totalsCents.outflow).toBe(-6000)
   })
 
   it("accepts every documented status value", async () => {

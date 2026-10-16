@@ -41,32 +41,23 @@ export function AgentDock() {
 
   if (!open) return null
 
-  if (!isDesktop) {
-    return (
-      <div className="fixed inset-0 z-50 flex flex-col border-l bg-background shadow-lg md:hidden">
-        <div className="flex items-center justify-between border-b px-3 py-2">
-          <span className="text-sm font-semibold">KI-Chat</span>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Chat schließen"
-            onClick={() => setPanelState({ open: false })}
-          >
-            <X className="size-4" />
-          </Button>
-        </div>
-        <AgentChat />
-      </div>
-    )
-  }
-
+  // ONE root element for both breakpoints: swapping <div> ↔ <aside> at
+  // the md boundary would unmount the whole subtree (React reconciles
+  // by element type), aborting an in-flight turn via useAgentTurn's
+  // unmount cleanup — a resize across 768px mid-stream would silently
+  // kill the answer. Only classes and the width style differ, so
+  // AgentChat and its streaming state survive the crossing.
   return (
     <aside
       data-slot="agent-dock"
-      style={{ width }}
-      className="sticky top-14 flex h-[calc(100svh-3.5rem)] flex-none flex-col border-l bg-background"
+      style={isDesktop ? { width } : undefined}
+      className={
+        isDesktop
+          ? "sticky top-14 flex h-[calc(100svh-3.5rem)] flex-none flex-col border-l bg-background"
+          : "fixed inset-0 z-50 flex flex-col border-l bg-background shadow-lg"
+      }
     >
-      <ResizeHandle />
+      {isDesktop && <ResizeHandle />}
       <div className="flex items-center justify-between border-b px-3 py-2">
         <span className="text-sm font-semibold">KI-Chat</span>
         <Button

@@ -38,7 +38,8 @@ const CHARS_PER_TOKEN = 4
  *   OpenAI protocol trio (assistant tool_calls message + per-call tool
  *   messages) extends the messages, and the next round sees the results.
  * - the final allowed round calls WITHOUT the tools field (tools strip
- *   forces a final answer); any tool calls it still emits are ignored.
+ *   forces a final answer); any tool calls it still emits are ignored
+ *   and left out of its round event (no orphan transcript rows).
  * - an empty answer on a tools-allowed round gets exactly one tools-free
  *   retry, then the turn ends regardless — a silent exit beats a hang.
  *   The degenerate round announces itself `retry`-flagged on its round
@@ -140,12 +141,18 @@ export async function* runAgentTurn(params: {
     // the persister turns it into one row, so the stored transcript
     // replays as the same per-round protocol messages the wire history
     // below builds. Retry-flagged rounds are the exception — skipped by
-    // the persister because they never reached the wire history.
+    // the persister because they never reached the wire history. Tool
+    // calls on a tools-free round are never executed, so they must not
+    // enter the record either: the persister would write them into the
+    // row's tool_calls JSON with no paired tool rows (a replay-degraded
+    // orphan the message list renders as nothing).
     yield {
       type: "round",
       content: roundContent,
       reasoning: roundReasoning,
-      calls: calls.map((c) => ({ id: c.id, name: c.name, args: c.args })),
+      calls: noTools
+        ? []
+        : calls.map((c) => ({ id: c.id, name: c.name, args: c.args })),
       retry,
     }
 

@@ -536,6 +536,47 @@ describe("runAgentTurn", () => {
     expect(events[events.length - 1].type).toBe("done")
   })
 
+  it("drops tool calls emitted on a tools-free round (no orphan transcript)", async () => {
+    await startServer()
+    // The empty-answer retry round runs tools-free, but the scripted
+    // model still emits a call: it is never executed, and its round
+    // event must carry calls: [] — otherwise the persister writes an
+    // assistant row with tool_calls JSON that has no paired tool rows
+    // (replay-degraded, rendered as nothing).
+    scripted = [
+      { content: [] },
+      {
+        toolCalls: [
+          {
+            index: 0,
+            id: "call_x",
+            name: "get_category_totals",
+            arguments: '{"period":"this_month"}',
+          },
+        ],
+        content: [],
+      },
+    ]
+    const events = await collect([{ role: "user", content: "q" }])
+
+    expect(requests).toHaveLength(2)
+    expect((requests[1] as { tools?: unknown }).tools).toBeUndefined()
+    const rounds = roundsOf(events)
+    expect(rounds).toHaveLength(2)
+    expect(rounds[1]).toEqual({
+      type: "round",
+      content: "",
+      reasoning: null,
+      calls: [],
+      retry: false,
+    })
+    // never executed: no tool_call/tool_result events fired
+    expect(
+      events.some((e) => e.type === "tool_call" || e.type === "tool_result")
+    ).toBe(false)
+    expect(events[events.length - 1].type).toBe("done")
+  })
+
   it("runs the tool with the requesting uid (isolation through the loop)", async () => {
     await startServer()
     const uid = seedUser(db, "iso-user")

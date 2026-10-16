@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { screen, waitFor, act } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { createElement } from "react"
+import { toast } from "sonner"
 import { AgentChat } from "@/components/agent/agent-chat"
 import {
   renderWithQuery,
@@ -587,6 +588,48 @@ describe("<AgentChat>", () => {
         screen.queryByText("Meine ausgelöschte Frage")
       ).not.toBeInTheDocument()
     )
+  }, 15_000)
+
+  it("surfaces a deleted-thread 404 as its own message, not 'service unreachable'", async () => {
+    // The thread routes' 404 carries {error: "not_found"} with no
+    // message field: the owner deleted the thread mid-session while a
+    // member typed. The generic "Chat-Dienst nicht erreichbar" fallback
+    // would mislead — the 404 must map to a deleted-thread toast.
+    const state = {
+      messages: [],
+      chatReject: { status: 404, body: { error: "not_found" } },
+      threads: [
+        {
+          id: "t1",
+          title: "Haushaltsfragen",
+          role: "owner",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    }
+    stubChatFlow(state)
+    const errorSpy = vi.spyOn(toast, "error")
+    try {
+      renderWithQuery(createElement(AgentChat))
+      await waitFor(() =>
+        expect(screen.getByText("Haushaltsfragen")).toBeInTheDocument()
+      )
+      const input = screen.getByPlaceholderText("Nachricht…")
+      await userEvent.type(input, "An den gelöschten Chat?")
+      await userEvent.click(screen.getByRole("button", { name: "Senden" }))
+      await waitFor(() =>
+        expect(errorSpy).toHaveBeenCalledWith(
+          "Dieser Chat existiert nicht mehr."
+        )
+      )
+      expect(errorSpy).not.toHaveBeenCalledWith(
+        "Der Chat-Dienst ist nicht erreichbar."
+      )
+      // pre-persist reject: the composer keeps the draft for a retry
+      await waitFor(() => expect(input).toHaveValue("An den gelöschten Chat?"))
+    } finally {
+      errorSpy.mockRestore()
+    }
   }, 15_000)
 
   it("shows the invited join panel after selecting the invite, join POSTs", async () => {

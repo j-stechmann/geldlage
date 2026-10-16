@@ -79,4 +79,46 @@ describe("agent dock resize handle", () => {
     fireEvent.keyDown(handle, { key: "a" })
     expect(storage.getItem("geldlage.agent.width")).toBe("360")
   })
+
+  it("keeps the same root element across the md breakpoint (no remount)", () => {
+    // Regression: the dock used to swap <div> ↔ <aside> at 768px, which
+    // unmounted AgentChat mid-turn and aborted the in-flight request
+    // through useAgentTurn's unmount cleanup. matchMedia with a live
+    // `matches` getter + a fireable change listener simulates the
+    // crossing; the root <aside> must keep its DOM identity and only
+    // switch classes/width in place.
+    let desktop = true
+    let changeListener: (() => void) | null = null
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn().mockImplementation(() => ({
+        get matches() {
+          return desktop
+        },
+        media: "(min-width: 768px)",
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: (_: string, cb: () => void) => {
+          changeListener = cb
+        },
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }))
+    )
+    renderWithQuery(createElement(AgentDock))
+    const aside = screen.getByRole("complementary")
+    expect(aside).toHaveClass("sticky")
+    expect(aside).toHaveStyle({ width: "360px" })
+
+    desktop = false
+    act(() => changeListener?.())
+
+    // same DOM node — React reconciled the branch in place
+    expect(screen.getByRole("complementary")).toBe(aside)
+    expect(aside).toHaveClass("fixed")
+    // the desktop width style is gone; the resize handle unmounted
+    expect(aside).not.toHaveStyle({ width: "360px" })
+    expect(screen.queryByRole("separator")).not.toBeInTheDocument()
+  })
 })

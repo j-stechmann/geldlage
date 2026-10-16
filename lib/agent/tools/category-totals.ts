@@ -73,17 +73,23 @@ export function periodStartDate(
 }
 
 /**
- * Exclusive upper bound for bounded periods (ISO): last_month must not
- * sweep in this month's rows (a `gte` start alone would), this_month and
- * the rolling 90-day window end "now".
+ * Exclusive upper bound for bounded periods (ISO). last_month must not
+ * sweep in this month's rows (a `gte` start alone would) and stays
+ * closed at the 1st. this_month and last_90_days run through the END
+ * of the current month instead of "now": vorgemerkte ("Nicht gebucht")
+ * rows carry post-dated booking dates (bank processing lag), so a
+ * window ending today would silently drop them — "Was ist diesen
+ * Monat noch vorgemerkt?" would undercount. Rows dated next month are
+ * that month's business and stay excluded.
  */
 export function periodEndDate(period: CategoryTotalsPeriod, now: Date): string {
   if (period === "last_month") {
     return isoDay(now.getFullYear(), now.getMonth(), 1)
   }
-  // this_month / last_90_days run open-ended to the current day
-  const future = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
-  return isoDay(future.getFullYear(), future.getMonth(), future.getDate())
+  // this_month / last_90_days: 1st of the next month (exclusive);
+  // Date(y, m+1, 1) rolls the year over December on its own.
+  const next = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+  return isoDay(next.getFullYear(), next.getMonth(), 1)
 }
 
 function isoDay(y: number, m: number, d: number): string {

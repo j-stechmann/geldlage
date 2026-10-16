@@ -122,7 +122,17 @@ export function useAgentTurn() {
           const body = (await res.json().catch(() => null)) as {
             message?: string
           } | null
-          toast.error(body?.message ?? "Der Chat-Dienst ist nicht erreichbar.")
+          // A 404 is the thread routes' {error: "not_found"}: the thread
+          // was deleted (or access revoked) mid-session — its body has
+          // no message field, and the generic fallback would misleadingly
+          // claim the service is down. The finally-refetch below aligns
+          // the view with the gone thread.
+          toast.error(
+            body?.message ??
+              (res.status === 404
+                ? "Dieser Chat existiert nicht mehr."
+                : "Der Chat-Dienst ist nicht erreichbar.")
+          )
           return false
         }
         // Accepted: everything from here on (mid-stream connection loss,
