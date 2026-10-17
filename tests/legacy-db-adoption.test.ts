@@ -136,7 +136,7 @@ describe("legacy dkb.db adoption (rebrand file rename)", () => {
       db = getDb()
       expect(
         db.all(`SELECT name FROM sqlite_master WHERE type = 'table'`)
-      ).toHaveLength(7)
+      ).toHaveLength(10) // 7 app tables + 3 agent chat tables (ADR-0033)
     })
 
     expect(fs.existsSync(dbPath)).toBe(true)

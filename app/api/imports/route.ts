@@ -11,6 +11,7 @@ import {
   requireSession,
   unauthorized,
 } from "@/lib/auth/guard"
+import { findUserById } from "@/lib/auth/users"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -20,6 +21,12 @@ const MAX_UPLOAD_BYTES = 25 * 1024 * 1024 // 25 MB
 export async function POST(request: NextRequest) {
   const session = await requireSession(request)
   if (!session) return unauthorized()
+  // The session JWT is stateless — a uid can dangle (DB wiped by the
+  // multi-user fresh-start migration, ADR-0032) while the cookie still
+  // verifies. Without this check the import job dies on the
+  // import_batches→users FK and polls 404 forever with zero trace. A 401
+  // sends apiFetch through a fresh OIDC round-trip, which re-provisions.
+  if (!findUserById(session.uid)) return unauthorized()
   const csrf = assertSameOrigin(request)
   if (csrf) return csrf
   try {
