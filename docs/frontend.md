@@ -1,6 +1,6 @@
 # Frontend
 
-_Last reviewed against v1.14.1 (transactions tab with URL-synced filters; agent panel optimistic-bubble alignment)._
+_Last reviewed against v1.15.0 (agent dock: app-wide LLM panel with tool loop, optimistic-bubble alignment, full-bleed layout)._
 
 Every page is a **client component**: the entire UI is a live dashboard
 driven by filters, polling, and toasts, with no server-rendered data
