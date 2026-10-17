@@ -78,6 +78,70 @@ function createPreColorFileDb(filePath: string) {
   sqlite.close()
 }
 
+// DDL of the previous release: chat_messages without the transcript-
+// replay columns (pre-amendment persister output).
+const OLD_CHAT_MESSAGES_DDL = `
+  CREATE TABLE chat_messages (
+    id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL REFERENCES chat_threads(id) ON DELETE CASCADE,
+    user_id INTEGER REFERENCES users(id),
+    role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'tool')),
+    content TEXT NOT NULL,
+    reasoning TEXT,
+    tool_name TEXT,
+    tool_args TEXT,
+    created_at TEXT NOT NULL,
+    thread_seq INTEGER NOT NULL DEFAULT 0
+  )
+`
+
+function createPreTranscriptFileDb(filePath: string) {
+  const sqlite = new Database(filePath)
+  sqlite.pragma("journal_mode = WAL")
+  sqlite.exec(`
+    CREATE TABLE users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      issuer TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )
+  `)
+  sqlite.exec(
+    `CREATE UNIQUE INDEX users_issuer_subject_unique ON users (issuer, subject)`
+  )
+  sqlite.exec(`
+    CREATE TABLE chat_threads (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      title TEXT NOT NULL DEFAULT 'Neuer Chat',
+      seq INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `)
+  sqlite.exec(OLD_CHAT_MESSAGES_DDL)
+  sqlite.exec(`
+    INSERT INTO users (issuer, subject, name, email, created_at)
+    VALUES ('https://x', 's1', 'n', 'e', '2024-01-01T00:00:00.000Z')
+  `)
+  sqlite.exec(`
+    INSERT INTO chat_threads (id, user_id, title, seq, created_at, updated_at)
+    VALUES ('t1', 1, 'Neuer Chat', 2, '2024-01-01T00:00:00.000Z', '2024-01-01T00:00:00.000Z')
+  `)
+  // one user row + one legacy tool row (no pairing id) to survive
+  sqlite.exec(`
+    INSERT INTO chat_messages (id, thread_id, user_id, role, content, created_at, thread_seq)
+    VALUES ('m1', 't1', 1, 'user', 'alt', '2024-01-01T00:00:00.000Z', 1)
+  `)
+  sqlite.exec(`
+    INSERT INTO chat_messages (id, thread_id, user_id, role, content, tool_name, tool_args, created_at, thread_seq)
+    VALUES ('m2', 't1', NULL, 'tool', '{}', 'get_category_totals', '{}', '2024-01-01T00:00:00.000Z', 2)
+  `)
+  sqlite.close()
+}
+
 function withFileDbPath(filePath: string, fn: () => void) {
   const original = process.env.DATABASE_PATH
   process.env.DATABASE_PATH = filePath
@@ -202,6 +266,39 @@ describe("file DB migration: color column backfill", () => {
           .run()
       ).toThrow(/UNIQUE/)
     })
+  })
+})
+
+describe("file DB migration: transcript replay columns", () => {
+  it("adds tool_calls/tool_call_id idempotently; legacy rows stay NULL", () => {
+    tmpDir = makeTmpDir("geldlage-transcript-migration-")
+    const dbPath = path.join(tmpDir, "geldlage.db")
+    createPreTranscriptFileDb(dbPath)
+
+    withFileDbPath(dbPath, () => {
+      // first getDb migrates, the second re-runs migrateSchema idempotently
+      expect(() => {
+        db = getDb()
+        db = getDb()
+      }).not.toThrow()
+      const rows = db!.select().from(schema.chatMessages).all()
+      expect(rows).toHaveLength(2)
+      // no backfill: legacy rows keep NULL on both new columns
+      expect(
+        rows.every((r) => r.toolCalls === null && r.toolCallId === null)
+      ).toBe(true)
+    })
+
+    const raw = rawConnection()
+    try {
+      const cols = (
+        raw.pragma(`table_info(chat_messages)`) as { name: string }[]
+      ).map((c) => c.name)
+      expect(cols).toContain("tool_calls")
+      expect(cols).toContain("tool_call_id")
+    } finally {
+      raw.close()
+    }
   })
 })
 

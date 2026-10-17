@@ -7,6 +7,7 @@ import * as schema from "./schema"
 import { users as usersTable } from "./schema"
 import { getConfig } from "@/lib/config"
 import { pickCategoryColor } from "@/lib/category-colors"
+import { DEFAULT_THREAD_TITLE } from "@/lib/agent/constants"
 
 export type Db = ReturnType<typeof createDb>
 /** Transaction callback parameter type (for helpers receiving `tx`). */
@@ -245,6 +246,57 @@ export function createSchemaSqlite(db: Db) {
   db.run(
     `CREATE INDEX IF NOT EXISTS transactions_payee_idx ON transactions (payee)`
   )
+  // ── agent chat (ADR-0033): threads + invites/members + messages. The
+  // role CHECK is runtime-enforced here; the drizzle check() defs in
+  // schema.ts must stay in sync with it.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS chat_threads (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      title TEXT NOT NULL DEFAULT '${DEFAULT_THREAD_TITLE}',
+      seq INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `)
+  db.run(
+    `CREATE INDEX IF NOT EXISTS chat_threads_user_updated_idx ON chat_threads (user_id, updated_at)`
+  )
+  db.run(`
+    CREATE TABLE IF NOT EXISTS chat_thread_members (
+      thread_id TEXT NOT NULL REFERENCES chat_threads(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      state TEXT NOT NULL DEFAULT 'invited',
+      created_at TEXT NOT NULL
+    )
+  `)
+  db.run(
+    `CREATE UNIQUE INDEX IF NOT EXISTS chat_thread_members_pk ON chat_thread_members (thread_id, user_id)`
+  )
+  db.run(
+    `CREATE INDEX IF NOT EXISTS chat_thread_members_user_idx ON chat_thread_members (user_id, state)`
+  )
+  db.run(`
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id TEXT PRIMARY KEY,
+      thread_id TEXT NOT NULL REFERENCES chat_threads(id) ON DELETE CASCADE,
+      user_id INTEGER REFERENCES users(id),
+      role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'tool')),
+      content TEXT NOT NULL,
+      reasoning TEXT,
+      tool_name TEXT,
+      tool_args TEXT,
+      tool_calls TEXT,
+      tool_call_id TEXT,
+      created_at TEXT NOT NULL,
+      thread_seq INTEGER NOT NULL DEFAULT 0
+    )
+  `)
+  db.run(
+    `CREATE INDEX IF NOT EXISTS chat_messages_thread_sort_idx ON chat_messages (thread_id, thread_seq, id)`
+  )
+  // Runtime role enforcement for the hand-written DDL; the drizzle check()
+  // defs in schema.ts must stay in sync with it.
 }
 
 /** Ensure schema exists on the default (file) database. */
@@ -584,4 +636,77 @@ export function migrateSchema(db: Db) {
   db.run(
     `CREATE INDEX IF NOT EXISTS transactions_payee_idx ON transactions (payee)`
   )
+  // ── agent chat (ADR-0033): threads + invites/members + messages. The
+  // role CHECK is runtime-enforced here; the drizzle check() defs in
+  // schema.ts must stay in sync with it.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS chat_threads (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      title TEXT NOT NULL DEFAULT '${DEFAULT_THREAD_TITLE}',
+      seq INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `)
+  db.run(
+    `CREATE INDEX IF NOT EXISTS chat_threads_user_updated_idx ON chat_threads (user_id, updated_at)`
+  )
+  db.run(`
+    CREATE TABLE IF NOT EXISTS chat_thread_members (
+      thread_id TEXT NOT NULL REFERENCES chat_threads(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      state TEXT NOT NULL DEFAULT 'invited',
+      created_at TEXT NOT NULL
+    )
+  `)
+  db.run(
+    `CREATE UNIQUE INDEX IF NOT EXISTS chat_thread_members_pk ON chat_thread_members (thread_id, user_id)`
+  )
+  db.run(
+    `CREATE INDEX IF NOT EXISTS chat_thread_members_user_idx ON chat_thread_members (user_id, state)`
+  )
+  db.run(`
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id TEXT PRIMARY KEY,
+      thread_id TEXT NOT NULL REFERENCES chat_threads(id) ON DELETE CASCADE,
+      user_id INTEGER REFERENCES users(id),
+      role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'tool')),
+      content TEXT NOT NULL,
+      reasoning TEXT,
+      tool_name TEXT,
+      tool_args TEXT,
+      tool_calls TEXT,
+      tool_call_id TEXT,
+      created_at TEXT NOT NULL,
+      thread_seq INTEGER NOT NULL DEFAULT 0
+    )
+  `)
+  db.run(
+    `CREATE INDEX IF NOT EXISTS chat_messages_thread_sort_idx ON chat_messages (thread_id, thread_seq, id)`
+  )
+  // ── agent transcript replay (ADR-0033 amendment): assistant rows carry
+  // their round's tool_calls in OpenAI wire JSON, tool rows the pairing
+  // tool_call_id — the stored transcript doubles as replayable prompt
+  // history. The ALTERs run BELOW the CREATE TABLE chat_messages above
+  // (unlike the column upgrades further up, whose tables predate this
+  // function): a DB that predates the chat tables gets the table from
+  // the CREATE — already carrying both columns, turning the guarded
+  // ALTERs into no-ops — while a pre-amendment chat_messages is
+  // upgraded here. NULL on legacy rows: those replay as plain
+  // user/assistant text and their tool rows stay display-only (no
+  // backfill).
+  if (!cols("chat_messages").includes("tool_calls")) {
+    db.run(`ALTER TABLE chat_messages ADD COLUMN tool_calls TEXT`)
+  }
+  if (!cols("chat_messages").includes("tool_call_id")) {
+    db.run(`ALTER TABLE chat_messages ADD COLUMN tool_call_id TEXT`)
+  }
+  // An earlier iteration carried a (user_id, created_at) index on
+  // chat_messages; no query ever filtered by user_id (message access is
+  // thread-scoped, gated in app code), so it is dropped — healing
+  // databases that still have it, at no per-message write cost anymore.
+  db.run(`DROP INDEX IF EXISTS chat_messages_user_created_idx`)
+  // Runtime role enforcement for the hand-written DDL; the drizzle check()
+  // defs in schema.ts must stay in sync with it.
 }

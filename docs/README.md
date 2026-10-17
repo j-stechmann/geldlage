@@ -92,15 +92,16 @@ here. Guides cross-link to the ADRs they implement.
 
 ### Labeling & LLM
 
-| ADR                                                    | Decision                                                                        |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------- |
-| [0009](adr/adr-0009-worker-reliability-protocol.md)    | Worker reliability protocol (claim-time attempts, health gate, drain detection) |
-| [0012](adr/adr-0012-local-llama-server.md)             | Local llama.cpp llama-server via OpenAI-compatible API                          |
-| [0013](adr/adr-0013-no-fallback-labels.md)             | No fallback labels — explicit `failed` state                                    |
-| [0014](adr/adr-0014-claim-time-attempt-increment.md)   | Attempt increment at claim time + attempts-snapshot guards                      |
-| [0015](adr/adr-0015-health-gate.md)                    | Health gate before labeling ticks                                               |
-| [0016](adr/adr-0016-grammar-constrained-decoding.md)   | Grammar-constrained decoding, context budget guard, retry taxonomy              |
-| [0017](adr/adr-0017-marker-neutralization-symmetry.md) | Marker-neutralization symmetry between prompt and stored labels                 |
+| ADR                                                    | Decision                                                                              |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| [0009](adr/adr-0009-worker-reliability-protocol.md)    | Worker reliability protocol (claim-time attempts, health gate, drain detection)       |
+| [0012](adr/adr-0012-local-llama-server.md)             | Local llama.cpp llama-server via OpenAI-compatible API                                |
+| [0013](adr/adr-0013-no-fallback-labels.md)             | No fallback labels — explicit `failed` state                                          |
+| [0014](adr/adr-0014-claim-time-attempt-increment.md)   | Attempt increment at claim time + attempts-snapshot guards                            |
+| [0015](adr/adr-0015-health-gate.md)                    | Health gate before labeling ticks                                                     |
+| [0016](adr/adr-0016-grammar-constrained-decoding.md)   | Grammar-constrained decoding, context budget guard, retry taxonomy                    |
+| [0017](adr/adr-0017-marker-neutralization-symmetry.md) | Marker-neutralization symmetry between prompt and stored labels                       |
+| [0033](adr/adr-0033-agent-panel-tool-loop.md)          | Agent chat panel: native tool loop over the shared llama-server, invite-based threads |
 
 ### API & frontend
 
