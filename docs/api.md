@@ -1,6 +1,6 @@
 # API reference
 
-_Last reviewed against v2.1 (+ agent AI titling refactor and the `user` SSE frame, ADR-0033). Descriptive reference — verify against `app/api/`. All 25 route files export `runtime = "nodejs"` and `dynamic = "force-dynamic"` (no request caching, ever), and use the Next 16 `params: Promise<…>` convention._
+_Last reviewed against v1.15.0 (agent chat SSE + threads routes, `GET /api/users` directory, ADR-0033). Descriptive reference — verify against `app/api/`. All 25 route files export `runtime = "nodejs"` and `dynamic = "force-dynamic"` (no request caching, ever), and use the Next 16 `params: Promise<…>` convention._
 
 Validation is **hand-rolled per handler** with typed narrowing and typed
 error responses; zod is reserved for environment config

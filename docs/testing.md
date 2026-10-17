@@ -1,6 +1,6 @@
 # Testing
 
-_Last reviewed against v1.14.1 (streaming SSE client tests: frame reassembly, UTF-8 across chunk boundaries, mid-stream timeout classification; agent panel ADR-0033)._
+_Last reviewed against v1.15.0 (agent panel: mock llama-server loop tests, threads access matrix, SSE writer frame classification, tool wire format)._
 
 The suite is **entirely in-process** — no Next dev server, no HTTP listener,
 no supertest. It runs with `bunx vitest run` (config: [vitest.config.ts](../vitest.config.ts),

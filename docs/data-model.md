@@ -1,6 +1,6 @@
 # Data model
 
-_Last reviewed against v1.11.0 (rebrand: `dkb.db` → `geldlage.db` adoption, legacy issuer rewrite)._
+_Last reviewed against v1.15.0 (chat threads tables — `chat_threads` / `chat_thread_members` / `chat_messages` — ADR-0033)._
 
 The persistence layer is **SQLite via better-sqlite3, accessed synchronously
 through drizzle-orm** (used only as a type-safe query builder — no drizzle-kit

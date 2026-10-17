@@ -1,5 +1,52 @@
 # Changelog
 
+## v1.15.0
+
+### Added
+
+- **App-wide LLM agent panel** (ADR-0033): a right-side chat dock toggled
+  from the header — docked and resizable (280–720 px) on desktop, a
+  full-screen overlay on mobile, with open state and width persisted in
+  `localStorage`. It reuses the same llama-server as the labeler but
+  through the **native OpenAI tools API**: streaming chat
+  (`temperature 0.3`, reasoning-aware `reasoning_budget_tokens`) with a
+  German system prompt. The tool loop runs at most
+  `AGENT_MAX_TURNS` (5) rounds, ends on a tools-free final round, and
+  turns tool errors into JSON results the model can react to.
+- **Extensible tool registry**
+  ([lib/agent/tools.ts](../lib/agent/tools.ts)): one entry per tool; the
+  first is the read-only `get_category_totals` (per-period per-category
+  sums, integer cents, always scoped to the **speaker's** uid — also in
+  shared threads).
+- **Multi-user chat threads in SQLite** (`chat_threads` /
+  `chat_thread_members` / `chat_messages`: per-thread seq ordering, role
+  CHECK, FK cascade) with **invite-based sharing** via the new
+  `GET /api/users` directory — roles `owner | member | invited`, preview
+  after join, owner rename/uninvite/delete (cascades), member leave,
+  invited decline; foreign/unknown threads always 404 (no existence
+  leak).
+- **SSE chat endpoint** (`user` / `delta` / `reasoning` / `round` /
+  `tool_call` / `tool_result` / `done` / `error` frames): the route
+  persists the user message, tool rows, and assistant
+  content/reasoning per event; `reasoning_content` is shown as a
+  collapsible "Denkprozess" but never replayed into loop history, and
+  the `error` frame distinguishes a mid-turn thread deletion from
+  infrastructure failures. Keepalive ping frames cover silent LLM
+  waits, and the stored chat doubles as a replayable per-round
+  transcript: the history window reads the last 128 rows, fits them to
+  the `LLM_CTX`-derived char budget, and anchors at the oldest user
+  message inside the budget so the prompt never starts mid-tool-protocol.
+
+### Changed
+
+- **Layout is full-bleed by design**: composing the dock dropped the
+  centered `max-w-7xl` cap — header and `<main>` render full-width, dock
+  open or closed ([app/layout.tsx](../app/layout.tsx)).
+- **Shared SSE plumbing extracted to
+  [lib/llm/sse.ts](../lib/llm/sse.ts)** (CRLF frame separators
+  preserved and regression-tested); the label path is behaviorally
+  unchanged.
+
 ## v1.14.1
 
 ### Fixed
