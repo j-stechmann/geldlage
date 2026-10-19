@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { ToolChip } from "@/components/agent/tool-chip"
 import { AssistantBubble } from "@/components/agent/assistant-bubble"
+import { Markdown } from "@/components/agent/markdown"
 import type { TurnStreams } from "@/components/agent/use-agent-turn"
 import type {
   StoredMessage,
@@ -254,8 +255,8 @@ function MessageRow(props: {
 
 function UserBubble(props: { content: string }) {
   return (
-    <div className="rounded-xl rounded-br-sm bg-primary px-3 py-1.5 text-sm whitespace-pre-wrap text-primary-foreground">
-      {props.content}
+    <div className="rounded-xl rounded-br-sm bg-primary px-3 py-1.5 text-sm text-primary-foreground">
+      <Markdown text={props.content} />
     </div>
   )
 }

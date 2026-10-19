@@ -145,3 +145,76 @@
     color: color-mix(in oklab, var(--category-color) 70%, white);
   }
 }
+
+/* Highlight.js token colors for the agent chat markdown code blocks
+   (components/agent/markdown.tsx, rehype-highlight): hue groups as
+   variables so the dark block below lifts only the lightness — no
+   vendored theme that would clash with the oklch palette. */
+:root {
+  --hl-keyword: oklch(0.53 0.16 293);
+  --hl-string: oklch(0.5 0.14 150);
+  --hl-number: oklch(0.62 0.13 70);
+  --hl-title: oklch(0.55 0.12 250);
+  --hl-attr: oklch(0.55 0.15 20);
+}
+.dark {
+  --hl-keyword: oklch(0.76 0.13 293);
+  --hl-string: oklch(0.76 0.13 150);
+  --hl-number: oklch(0.8 0.11 70);
+  --hl-title: oklch(0.75 0.11 250);
+  --hl-attr: oklch(0.78 0.12 20);
+}
+.hljs-comment,
+.hljs-quote,
+.hljs-meta {
+  color: var(--muted-foreground);
+  font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-doctag,
+.hljs-literal,
+.hljs-formula {
+  color: var(--hl-keyword);
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-addition {
+  color: var(--hl-string);
+}
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link {
+  color: var(--hl-number);
+}
+.hljs-title,
+.hljs-title.function_,
+.hljs-title.class_,
+.hljs-function,
+.hljs-type,
+.hljs-built_in,
+.hljs-section,
+.hljs-name,
+.hljs-tag {
+  color: var(--hl-title);
+}
+.hljs-attr,
+.hljs-attribute,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-property,
+.hljs-params {
+  color: var(--hl-attr);
+}
+.hljs-deletion {
+  color: var(--destructive);
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 700;
+}

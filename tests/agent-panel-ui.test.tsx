@@ -300,6 +300,109 @@ describe("<AgentChat>", () => {
     expect(calls.filter((c) => c.path === "/api/users")).toHaveLength(0)
   })
 
+  it("renders markdown in assistant and user text, keeps raw HTML inert", async () => {
+    stubChatFlow({
+      messages: [
+        // assistant: GFM bold + list + fenced block with a language
+        // (highlighted via rehype-highlight) + a fence without a language
+        // (single-line: must render as bare block code, not the inline
+        // chip) + a heading (bubble-sized, no browser-default 2em) +
+        // raw HTML that must never become an element but stays visible
+        // as inert escaped text (inline and block-level) + a link (safe
+        // target) + an image (disallowed entirely)
+        msg(
+          "m2",
+          "assistant",
+          '**Zusammenfassung**\n\n- Posten: 12\n\n```json\n{"sum":1}\n```\n\n```\ncfg: 1\n```\n\n# Überschrift\n\n[sure](javascript:alert(1)) und <b>kein HTML</b>: https://geldlage.example/x ![px](https://tracking.example/p.png)\n\n<br>',
+          2
+        ),
+        // tool chip: JSON args stay tagged json + pretty-printed, a
+        // non-JSON result falls back to a language-less fence as raw text
+        msg("m3", "tool", "Fehler: Dienst nicht erreichbar (Timeout)", 3, {
+          toolName: "get_category_totals",
+          toolArgs: '{"period":"this_month"}',
+          toolCallId: "c1",
+        }),
+        // user: typed markdown is rendered too
+        msg("m1", "user", "Prüfe **bitte** die Kategorie `Lebensmittel`", 1),
+      ],
+      threads: [
+        {
+          id: "t1",
+          title: "Haushaltsfragen",
+          role: "owner",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    })
+    renderWithQuery(createElement(AgentChat))
+    // assistant markdown constructs real DOM
+    await waitFor(() =>
+      expect(
+        screen.getByText("Zusammenfassung").closest("strong")
+      ).not.toBeNull()
+    )
+    expect(screen.getByText("Posten: 12").closest("li")).not.toBeNull()
+    const link = screen.getByText("https://geldlage.example/x").closest("a")
+    expect(link).not.toBeNull()
+    // defaultUrlTransform neutralizes javascript: URLs; the anchor keeps
+    // the safe external-link shape regardless of the href.
+    expect(link?.getAttribute("target")).toBe("_blank")
+    expect(link?.getAttribute("rel")).toContain("noopener")
+    // raw HTML never becomes an element (react-markdown default; no
+    // rehype-raw): the markup renders as inert escaped text instead of
+    // being dropped — block-level HTML lines additionally get their own
+    // root-level paragraph wrap (remarkHtmlAsText in markdown.tsx)
+    expect(document.querySelector("b")).toBeNull()
+    expect(document.querySelector("br")).toBeNull()
+    const inlineRaw = Array.from(document.querySelectorAll("p")).find((p) =>
+      (p.textContent ?? "").includes("<b>kein HTML</b>")
+    )
+    expect(inlineRaw).toBeDefined()
+    expect(screen.getByText("<br>")?.closest("p")).not.toBeNull()
+    // fenced block: highlighted via the explicit language (hljs classes)
+    const code = document.querySelector("code.hljs")
+    expect(code?.className).toContain("language-json")
+    // language-less single-line fence: bare block code inside pre (not
+    // the inline chip styling)
+    const bare = Array.from(document.querySelectorAll("pre > code")).find((c) =>
+      (c.textContent ?? "").startsWith("cfg: 1")
+    )
+    expect(bare).toBeDefined()
+    expect(bare?.className).not.toContain("rounded-sm")
+    // headings render as real elements at bubble size (font-semibold, no
+    // browser-default 2em blow-up)
+    const heading = screen
+      .getByText("Überschrift")
+      .closest("h1") as HTMLHeadingElement
+    expect(heading).not.toBeNull()
+    expect(heading.className).toContain("font-semibold")
+    // markdown props are stripped of node (no node="[object Object]" DOM
+    // attribute); images are disallowed (chat is text, no remote fetches)
+    expect(document.querySelector("p")?.getAttribute("node")).toBeNull()
+    expect(document.querySelector("img")).toBeNull()
+    // tool chip payloads: JSON args tagged json + pretty-printed, non-JSON
+    // result falls back to a language-less fence as raw text
+    await userEvent.click(
+      screen.getByRole("button", { name: "get_category_totals" })
+    )
+    const argsBlock = Array.from(
+      document.querySelectorAll("code.language-json")
+    )
+    expect(
+      argsBlock.find((c) => c.textContent?.includes('"period"'))
+    ).toBeDefined()
+    const rawResult = Array.from(document.querySelectorAll("pre > code")).find(
+      (c) => (c.textContent ?? "").startsWith("Fehler: ")
+    )
+    expect(rawResult).toBeDefined()
+    expect(rawResult?.className).not.toContain("language-json")
+    // user bubble renders inline markdown on the primary background
+    expect(screen.getByText("bitte").closest("strong")).not.toBeNull()
+    const inline = screen.getByText("Lebensmittel").closest("code")
+    expect(inline?.className).toContain("rounded")
+  })
+
   it("keeps attribution for departed members (names via /api/users)", async () => {
     // userId 2 left the thread: their roster row is gone, but their old
     // user message survives — the user directory must fill the name.
@@ -494,6 +597,165 @@ describe("<AgentChat>", () => {
     )
     expect(screen.getAllByText(/Ergebnis: 42,11 €\./)).toHaveLength(1)
     expect(screen.getAllByText("get_category_totals").length).toBeGreaterThan(0)
+  }, 15_000)
+
+  it("keeps the cursor visible on whitespace-only streamed frames", async () => {
+    // Blank-line deltas (paragraph gaps between streamed prose) parse to
+    // zero markdown blocks, leaving the ::after cursor without a
+    // last-child anchor — the turn must fall back to the plain-text
+    // cursor <p> until real text arrives.
+    const state = {
+      messages: [{ ...seedMessages[0] }, { ...seedMessages[1] }] as Array<
+        Record<string, unknown>
+      >,
+      threads: [
+        {
+          id: "t1",
+          title: "Haushaltsfragen",
+          role: "owner",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    }
+    const enc = new TextEncoder()
+    let releaseMine!: () => void
+    const gateMine = new Promise<void>((r) => {
+      releaseMine = r
+    })
+    chatStream = () =>
+      new ReadableStream<Uint8Array>({
+        async start(controller) {
+          controller.enqueue(
+            enc.encode(
+              sseFrames([
+                { event: "user", data: { id: "m-ws" } },
+                { event: "delta", data: { text: "\n\n" } },
+              ])
+            )
+          )
+          await gateMine
+          controller.enqueue(
+            enc.encode(
+              sseFrames([{ event: "done", data: { messageId: "m-ws3" } }])
+            )
+          )
+          controller.close()
+        },
+      })
+    stubChatFlow(state)
+    renderWithQuery(createElement(AgentChat))
+    await waitFor(() =>
+      expect(screen.getByText("4211,00 €")).toBeInTheDocument()
+    )
+
+    const input = screen.getByPlaceholderText("Nachricht…")
+    await userEvent.type(input, "Los?")
+    await userEvent.click(screen.getByRole("button", { name: "Senden" }))
+
+    // whitespace-only frame: markdown renders nothing, the plain-text
+    // cursor <p> keeps the pulse visible while streaming
+    await waitFor(() =>
+      expect(document.querySelector("p > span.animate-pulse")).not.toBeNull()
+    )
+
+    // done + persisted rows: the fallback cursor retires in favor of the
+    // ::after cursor on the markdown last block; the user row echoes the
+    // `user` frame's id so the optimistic bubble retires by identity
+    const persistedRows = [
+      ...seedMessages,
+      // user row id matches the `user` frame's echo, so the optimistic
+      // bubble retires by identity
+      msg("m-ws", "user", "Los?", 3),
+      msg("m-ws3", "assistant", "Und jetzt.", 4),
+    ]
+    await act(async () => {
+      state.messages = persistedRows
+      releaseMine()
+      await Promise.resolve()
+    })
+    await waitFor(() =>
+      expect(screen.getByText(/Und jetzt\./)).toBeInTheDocument()
+    )
+    expect(document.querySelector("p > span.animate-pulse")).toBeNull()
+  }, 15_000)
+
+  it("keeps the cursor anchored on HTML-only streamed frames", async () => {
+    // A first delta that is a raw HTML block (e.g. a lone <br>) parses to
+    // bare text directly on the markdown root — without the root-level
+    // paragraph wrap it would render zero element children and the
+    // ::after cursor would lose its last-child anchor even though
+    // content.trim() !== "". The wrapped <p> (escaped <br> text) is the
+    // anchor; the markdown path must handle the frame (no plain-text
+    // fallback).
+    const state = {
+      messages: [{ ...seedMessages[0] }, { ...seedMessages[1] }] as Array<
+        Record<string, unknown>
+      >,
+      threads: [
+        {
+          id: "t1",
+          title: "Haushaltsfragen",
+          role: "owner",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    }
+    const enc = new TextEncoder()
+    let releaseMine!: () => void
+    const gateMine = new Promise<void>((r) => {
+      releaseMine = r
+    })
+    chatStream = () =>
+      new ReadableStream<Uint8Array>({
+        async start(controller) {
+          controller.enqueue(
+            enc.encode(
+              sseFrames([
+                { event: "user", data: { id: "m-html" } },
+                { event: "delta", data: { text: "<br>" } },
+              ])
+            )
+          )
+          await gateMine
+          controller.enqueue(
+            enc.encode(
+              sseFrames([{ event: "done", data: { messageId: "m-html3" } }])
+            )
+          )
+          controller.close()
+        },
+      })
+    stubChatFlow(state)
+    renderWithQuery(createElement(AgentChat))
+    await waitFor(() =>
+      expect(screen.getByText("4211,00 €")).toBeInTheDocument()
+    )
+
+    const input = screen.getByPlaceholderText("Nachricht…")
+    await userEvent.type(input, "Los!")
+    await userEvent.click(screen.getByRole("button", { name: "Senden" }))
+
+    // HTML-only frame: the escaped <br> renders inside its own wrapped
+    // <p> — the element anchor the ::after cursor attaches to
+    await waitFor(() => expect(screen.getByText("<br>")).toBeInTheDocument())
+    expect(document.querySelector("p > span.animate-pulse")).toBeNull()
+
+    // done + persisted rows: the html-only streamed p retires with the
+    // segment, the persisted answer takes over
+    const persistedRows = [
+      ...seedMessages,
+      msg("m-html", "user", "Los!", 3),
+      msg("m-html3", "assistant", "Und jetzt.", 4),
+    ]
+    await act(async () => {
+      state.messages = persistedRows
+      releaseMine()
+      await Promise.resolve()
+    })
+    await waitFor(() =>
+      expect(screen.getByText(/Und jetzt\./)).toBeInTheDocument()
+    )
+    expect(screen.queryByText("<br>")).toBeNull()
   }, 15_000)
 
   it("discards a retry-flagged round's segment (no Denkprozess-only bubble)", async () => {
