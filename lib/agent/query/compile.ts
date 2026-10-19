@@ -231,15 +231,19 @@ export function runQuery(q: ParsedQuery, uid: number): QueryResult {
       }`
     )
   }
-  if (orderItems.length > 0) {
-    parts.push(
-      sql`ORDER BY ${sql.join(
-        orderItems.map((o) =>
-          o.direction === "desc" ? sql`${o.expr} DESC` : sql`${o.expr} ASC`
-        ),
-        sql`, `
-      )}`
-    )
+  // Row queries always end with a rowid tie-break: without an explicit
+  // ORDER BY a limited subset would be arbitrary (a retry could return
+  // different rows of the same match count), and with one, rows equal on
+  // the model's keys sort stably across calls. Aggregate mode keeps
+  // model-specified order only — rowid is meaningless per group.
+  const orderTerms = orderItems.map((o) =>
+    o.direction === "desc" ? sql`${o.expr} DESC` : sql`${o.expr} ASC`
+  )
+  if (q.aggregate.length === 0) {
+    orderTerms.push(sql`${def.table}.rowid ASC`)
+  }
+  if (orderTerms.length > 0) {
+    parts.push(sql`ORDER BY ${sql.join(orderTerms, sql`, `)}`)
   }
   // +1 row: detects "more matched than returned" without a second query
   parts.push(sql`LIMIT ${q.limit + 1}`)

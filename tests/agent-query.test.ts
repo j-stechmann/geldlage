@@ -400,6 +400,30 @@ describe("parseQuery validation", () => {
     ).toEqual([{ column: "payee", direction: "asc" }])
   })
 
+  it("rejects contains/like on integer columns", () => {
+    // LIKE against an integer coerces to text and matches nothing — fail at
+    // parse time so the model redirects to eq/gt/lt/in
+    expect(() =>
+      parseQuery({
+        table: "transactions",
+        where: [{ column: "amount_cents", op: "contains", value: "5" }],
+      })
+    ).toThrow(/'contains' needs a text column/)
+    expect(() =>
+      parseQuery({
+        table: "transactions",
+        where: [{ column: "label_attempts", op: "like", value: "1%" }],
+      })
+    ).toThrow(/'like' needs a text column/)
+    // text columns stay valid for both
+    expect(() =>
+      parseQuery({
+        table: "transactions",
+        where: [{ column: "payee", op: "contains", value: "A" }],
+      })
+    ).not.toThrow()
+  })
+
   it("clamps the limit, defaults to 20, resolves aggregate aliases", () => {
     expect(parseQuery({ table: "transactions", limit: 500 }).limit).toBe(100)
     expect(parseQuery({ table: "transactions" }).limit).toBe(20)
@@ -731,6 +755,34 @@ describe("query_data — row queries", () => {
     expect(r.rowCount).toBe(100)
     expect(r.limited).toBe(true)
     expect(r.totalMatching).toBe(120)
+  })
+
+  it("limits return a stable subset (rowid tie-break)", async () => {
+    for (let i = 0; i < 30; i++) {
+      seedTx({ userId: uid1, amountCents: -i - 1, bookingDate: "2026-01-01" })
+    }
+    // no orderBy: rows come in insertion order, so a limited subset is the
+    // same on every call instead of an arbitrary cut
+    const a = await run({
+      table: "transactions",
+      select: ["amount_cents"],
+      limit: 5,
+    })
+    const b = await run({
+      table: "transactions",
+      select: ["amount_cents"],
+      limit: 5,
+    })
+    expect(a.rows).toEqual(b.rows)
+    expect(a.rows.map((r) => r.amount_cents)).toEqual([-1, -2, -3, -4, -5])
+    // rows equal on the ordered key sort stably (insertion order) too
+    const tie = await run({
+      table: "transactions",
+      select: ["amount_cents"],
+      orderBy: [{ column: "booking_date" }],
+      limit: 3,
+    })
+    expect(tie.rows.map((r) => r.amount_cents)).toEqual([-1, -2, -3])
   })
 
   it("truncates long string cells", async () => {

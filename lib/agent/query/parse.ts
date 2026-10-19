@@ -212,6 +212,16 @@ function parseCondition(
     fail(`${field}[${index}].op must be one of: ${QUERY_OPS.join(", ")}`)
   }
   const kind = columnKind(def, column)
+  // contains/like compile to LIKE text matching — on an integer column the
+  // comparison would coerce to text and effectively match nothing. Fail at
+  // parse time so the model redirects to eq/gt/lt/in instead of guessing.
+  if (op === "like" || op === "contains") {
+    if (kind === "integer") {
+      fail(
+        `op '${op}' needs a text column ('${column}' is integer — compare with eq/gt/lt/in)`
+      )
+    }
+  }
   const value = checkValue(op as QueryOp, kind, raw.value)
   return { column, op: op as QueryOp, value }
 }

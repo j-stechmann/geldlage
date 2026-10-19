@@ -49,12 +49,16 @@ The DSL has no escape hatches by construction:
 
 ops: `eq ne gt gte lt lte contains like in isNull notNull`. `contains` is a
 literal substring match (the compiler escapes `% _ \` so model wildcards
-cannot leak through); `like` takes model-supplied wildcards. `where` is an
+cannot leak through); `like` takes model-supplied wildcards; both are
+text-column ops (integer columns compare with `eq/gt/lt/in` — a LIKE against
+an integer would coerce to text and match nothing). `where` is an
 AND list, `whereAny` an OR group AND-ed with `where`. Aggregates
 (`sum count avg min max`) with `groupBy` produce grouped rows; without
 `groupBy` a single grand-total row. `having` filters aggregate aliases only.
 Joins reference whitelisted FK edges by singular alias (`category.name`),
-with the join inferred from any dotted reference.
+with the join inferred from any dotted reference. Row queries carry an
+implicit `rowid` tie-break, so a limited result is stable across calls
+(insertion order without `orderBy`, stable ordering of equal keys with one).
 
 ### Enforcement — mechanism, layered
 
