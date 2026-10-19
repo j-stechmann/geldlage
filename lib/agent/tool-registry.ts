@@ -19,6 +19,9 @@ import { query_data } from "@/lib/agent/tools/query-data"
  */
 export const agentTools: AgentTool[] = [get_category_totals, query_data]
 
+/** The agent tools; a union so a typo in a name is a compile error. */
+export type AgentToolName = "get_category_totals" | "query_data"
+
 export function toolByName(name: string): AgentTool | undefined {
   return agentTools.find((t) => t.name === name)
 }

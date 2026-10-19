@@ -112,9 +112,6 @@ export interface CategoryTotalsResult {
   totalsCents: { inflow: number; outflow: number }
 }
 
-/** The agent tools; a union so a typo in a name is a compile error. */
-export type AgentToolName = "get_category_totals" | "query_data"
-
 export const get_category_totals: AgentTool = {
   name: "get_category_totals",
   description:

@@ -9,13 +9,13 @@ export {
   agentTools,
   toolByName,
   toolsForRequest,
+  type AgentToolName,
 } from "@/lib/agent/tool-registry"
 
 export {
   get_category_totals,
   periodStartDate,
   periodEndDate,
-  type AgentToolName,
   type CategoryTotalsPeriod,
   type CategoryTotalsStatus,
   type CategoryTotalsResult,

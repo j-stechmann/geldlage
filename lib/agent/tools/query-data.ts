@@ -60,7 +60,7 @@ export const query_data: AgentTool = {
         type: "array",
         items: { type: "string" },
         description:
-          "Spalten (Basisname oder alias.spalte). Standard: alle Spalten der Tabelle.",
+          "Spalten (Basisname oder alias.spalte). Zeilenabfragen immer explizit setzen — ohne select kommen alle Spalten zurück und breite Ergebnisse werden gekürzt.",
       },
       where: {
         type: "array",

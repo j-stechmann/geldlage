@@ -947,6 +947,11 @@ describe("queryDataPromptDoc", () => {
     expect(doc).toContain("category.name")
     expect(doc).toContain("booking_month")
     expect(doc).not.toContain("user_id")
+    // guidance locks: row queries must prefer explicit select (select-all
+    // results get hard-cut by truncateToolResult), and a NULL aggregate
+    // (avg/min/max over an empty match set) fails every having comparison
+    expect(doc).toContain("explizitem select")
+    expect(doc).toContain("NULL-Aggregat")
     // every op spelled in the doc must be one the parser actually accepts
     // (the generated examples must not teach an op like ">=" that fails)
     const ops = [...doc.matchAll(/"op":"([a-zA-Z]+)"/g)]
