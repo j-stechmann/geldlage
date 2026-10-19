@@ -20,3 +20,5 @@ export {
   type CategoryTotalsStatus,
   type CategoryTotalsResult,
 } from "@/lib/agent/tools/category-totals"
+
+export { query_data } from "@/lib/agent/tools/query-data"

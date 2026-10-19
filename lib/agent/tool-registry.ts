@@ -1,5 +1,6 @@
 import type { AgentTool } from "@/lib/agent/types"
 import { get_category_totals } from "@/lib/agent/tools/category-totals"
+import { query_data } from "@/lib/agent/tools/query-data"
 
 /**
  * OpenAI wire-format translation for the agent tool registry (ADR-0033):
@@ -16,7 +17,7 @@ import { get_category_totals } from "@/lib/agent/tools/category-totals"
  * automatically extends toolsForRequest() and the system prompt's tool
  * list.
  */
-export const agentTools: AgentTool[] = [get_category_totals]
+export const agentTools: AgentTool[] = [get_category_totals, query_data]
 
 export function toolByName(name: string): AgentTool | undefined {
   return agentTools.find((t) => t.name === name)

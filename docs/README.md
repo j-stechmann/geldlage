@@ -102,6 +102,7 @@ here. Guides cross-link to the ADRs they implement.
 | [0016](adr/adr-0016-grammar-constrained-decoding.md)   | Grammar-constrained decoding, context budget guard, retry taxonomy                    |
 | [0017](adr/adr-0017-marker-neutralization-symmetry.md) | Marker-neutralization symmetry between prompt and stored labels                       |
 | [0033](adr/adr-0033-agent-panel-tool-loop.md)          | Agent chat panel: native tool loop over the shared llama-server, invite-based threads |
+| [0034](adr/adr-0034-agent-read-query-dsl.md)           | Read-only JSON query DSL for the agent (`query_data`) on a readonly SQLite connection |
 
 ### API & frontend
 
