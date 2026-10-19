@@ -12,10 +12,9 @@ import { getDb, type Db } from "@/lib/db"
  * writes (SQLite file-level enforcement, `PRAGMA query_only` on top).
  *
  * WAL mode keeps this safe at runtime: readers never block the main
- * (write) singleton. The main handle is created first at boot (the app's
- * write path), so WAL/-shm exist and SQLite can complete recovery before
- * a read-only consumer ever opens — a cold read-only open of a hot WAL
- * would refuse otherwise.
+ * (write) singleton. getReadOnlyDb() materializes the main handle BEFORE
+ * opening the readonly consumer (structural ordering, not an assumption
+ * about app flow), so WAL recovery has completed and -wal/-shm exist.
  */
 
 /**
@@ -37,28 +36,51 @@ export function createReadOnlyDb(dbPath: string): Db {
 
 const globalRef = globalThis as unknown as {
   __geldlageReadOnlyDb?: Db
+  /** test-only: a real readonly connection injected by setReadOnlyTestDb */
+  __geldlageReadOnlyTestDb?: Db
 }
 
 /**
- * The connection query_data reads through. Under vitest this is the
- * injected in-memory test DB (createTestDb/setTestDb seam — a file-based
- * readonly reopen cannot work against :memory:); production gets the
- * dedicated readonly file handle.
+ * The connection query_data reads through. Under vitest a *real* readonly
+ * connection can be injected via setReadOnlyTestDb() (the query tests use
+ * a file-backed test DB + createReadOnlyDb so the whole suite runs through
+ * a genuinely write-refusing connection — a compiler regression that
+ * emits a mutating statement fails tests). Without an injection, vitest
+ * falls back to the in-memory test DB (a file-based readonly reopen cannot
+ * work against :memory:); production gets the dedicated readonly file
+ * handle.
  */
 export function getReadOnlyDb(): Db {
   if (process.env.VITEST) {
-    return getDb()
+    return globalRef.__geldlageReadOnlyTestDb ?? getDb()
   }
   if (!globalRef.__geldlageReadOnlyDb) {
     const dbPath = getConfig().DATABASE_PATH
-    // :memory: (tooling/dev edge) has no file to reopen — fall back to the
-    // main singleton rather than fail; the whitelist/compiler still guard it.
-    // The fallback is cached for the process lifetime, so a later switch to
-    // a file DATABASE_PATH would not re-derive a readonly handle — dev-only
-    // edge, acceptable for a tooling configuration.
-    globalRef.__geldlageReadOnlyDb = dbPath.includes(":memory:")
-      ? getDb()
-      : createReadOnlyDb(dbPath)
+    if (dbPath.includes(":memory:")) {
+      // :memory: (tooling/dev edge) has no file to reopen — fall back to
+      // the main singleton rather than fail; the whitelist/compiler still
+      // guard it. The fallback is cached for the process lifetime, so a
+      // later switch to a file DATABASE_PATH would not re-derive a
+      // readonly handle — dev-only edge, acceptable for a tooling
+      // configuration.
+      globalRef.__geldlageReadOnlyDb = getDb()
+    } else {
+      // getDb() FIRST, structurally (not by prior app flow): the write
+      // singleton creates the file, sets WAL and completes recovery, so
+      // the readonly open below never hits a cold WAL without -shm/-wal.
+      // getDb() is memoized; this is a no-op when it already booted.
+      getDb()
+      globalRef.__geldlageReadOnlyDb = createReadOnlyDb(dbPath)
+    }
   }
   return globalRef.__geldlageReadOnlyDb
+}
+
+/**
+ * For tests: inject a real readonly connection (createReadOnlyDb over a
+ * file-backed test DB). Mirrors lib/db's setTestDb seam so getReadOnlyDb()
+ * can be pointed at an actual write-refusing handle under vitest.
+ */
+export function setReadOnlyTestDb(db: Db | undefined): void {
+  globalRef.__geldlageReadOnlyTestDb = db
 }

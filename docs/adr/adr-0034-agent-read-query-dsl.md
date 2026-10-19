@@ -83,7 +83,9 @@ implicit `rowid` tie-break, so a limited result is stable across calls
    reads through a SECOND better-sqlite3 handle opened
    `readonly: true` + `PRAGMA query_only` (WAL permits the concurrent
    reader). Even a future compiler bug cannot write — the connection
-   itself refuses. Under vitest the test-db seam replaces it.
+   itself refuses. getReadOnlyDb() materializes the write singleton first
+   (structural ordering via getDb(), not an assumption about app flow),
+   so WAL recovery has completed before the readonly open.
 5. **No string-to-SQL path.** Identifiers render exclusively from catalog
    constants (drizzle `sql` templates); model values interpolate as bound
    parameters only. Value types are checked against the catalog kind
@@ -151,9 +153,12 @@ without any expression language in the DSL.
 - `totalMatching` is unreported for grouped queries that hit the limit —
   "how many groups match" would need a subquery for a number the model
   rarely needs; `limited: true` still signals the cut.
-- The read-only handle assumes the main write singleton booted first
-  (hot-WAL recovery) — true in every runtime path; the vitest seam
-  sidesteps it for tests.
+- The read-only handle's ordering is structural: getReadOnlyDb() calls
+  getDb() before createReadOnlyDb(), so the write singleton has created
+  the file, set WAL and completed recovery — no reliance on app boot flow.
+  The query tests inject a real readonly connection (setReadOnlyTestDb
+  over a file-backed test DB), so the suite itself runs through the
+  write-refusing path.
 
 ## References
 
@@ -161,6 +166,7 @@ without any expression language in the DSL.
   prompt-doc.ts; lib/agent/tools/query-data.ts
 - tests/agent-query.test.ts — catalog integrity, uid isolation (incl. the
   cross-user-FK join case), aggregates/joins/having/derived columns,
-  wildcard escaping, limit clamping, readonly write refusal
+  wildcard escaping, limit clamping, readonly write refusal — the query
+  suite runs through an injected real readonly connection
 - [ADR-0033] tool loop and registry · [ADR-0032] per-user data
 - [ADR-0004] WAL singleton read-side semantics · [ADR-0002] integer cents

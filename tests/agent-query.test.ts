@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -6,22 +6,27 @@ import Database from "better-sqlite3"
 import { drizzle } from "drizzle-orm/better-sqlite3"
 import { getTableColumns } from "drizzle-orm"
 import type { Db } from "@/lib/db"
-import { createSchemaSqlite } from "@/lib/db"
+import { createSchemaSqlite, setTestDb } from "@/lib/db"
 import * as schema from "@/lib/db/schema"
 import { accounts, categories, transactions } from "@/lib/db/schema"
 import { parseQuery, QUERY_OPS } from "@/lib/agent/query/parse"
 import type { QueryResult } from "@/lib/agent/query/compile"
-import { createReadOnlyDb } from "@/lib/agent/query/readonly-db"
+import {
+  createReadOnlyDb,
+  getReadOnlyDb,
+  setReadOnlyTestDb,
+} from "@/lib/agent/query/readonly-db"
 import { queryDataPromptDoc } from "@/lib/agent/query/prompt-doc"
 import { queryTables } from "@/lib/agent/query/catalog"
 import { query_data } from "@/lib/agent/tools/query-data"
-import { seedUser, setupTestDb } from "./helpers"
+import { seedUser } from "./helpers"
 
 let db: Db
 let uid1: number
 let uid2: number
 let cat1: number
 let cat2: number
+let testDir: string | undefined
 
 const accountIds = new Map<number, number>()
 function accountIdFor(userId: number): number {
@@ -82,7 +87,22 @@ async function failArgs(args: unknown, uid = uid1): Promise<string> {
 }
 
 beforeEach(() => {
-  ;({ db, userId: uid1 } = setupTestDb())
+  // File-backed write handle + an INJECTED REAL readonly connection: every
+  // query in this suite reads through a connection that refuses writes at
+  // the SQLite level, so a compiler regression emitting a mutating
+  // statement fails here instead of passing against a writable test DB.
+  // Write handle first (creates the file and -wal/-shm), readonly open
+  // after — same structural order getReadOnlyDb() enforces in production.
+  testDir = mkdtempSync(path.join(tmpdir(), "geldlage-query-"))
+  const file = path.join(testDir, "query-test.db")
+  const writeSqlite = new Database(file)
+  writeSqlite.pragma("journal_mode = WAL") // mirrors createDb()'s prod setup
+  writeSqlite.pragma("foreign_keys = ON")
+  db = drizzle(writeSqlite, { schema })
+  createSchemaSqlite(db)
+  setTestDb(db)
+  setReadOnlyTestDb(createReadOnlyDb(file))
+  uid1 = seedUser(db, "user-1")
   uid2 = seedUser(db, "user-2")
   accountIds.clear()
   cat1 = db
@@ -100,6 +120,15 @@ beforeEach(() => {
     .values({ userId: uid1, name: "Reisen", nameKey: "reisen", language: "de" })
     .returning()
     .get().id
+})
+
+afterEach(() => {
+  setReadOnlyTestDb(undefined)
+  setTestDb(undefined as unknown as Db)
+  if (testDir) {
+    rmSync(testDir, { recursive: true, force: true })
+    testDir = undefined
+  }
 })
 
 describe("query catalog integrity", () => {
@@ -1046,5 +1075,17 @@ describe("readonly connection refuses writes", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  it("the suite's read path is the injected readonly connection (writes refused)", () => {
+    // getReadOnlyDb() under vitest must hand runQuery the injected
+    // write-refusing handle — not the writable test DB — so a future
+    // compiler bug that emits a mutating statement fails this suite.
+    expect(() =>
+      getReadOnlyDb()
+        .insert(accounts)
+        .values({ userId: uid1, iban: "DE00RO", name: "X" })
+        .run()
+    ).toThrow()
   })
 })
