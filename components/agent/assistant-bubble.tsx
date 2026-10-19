@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { ToolChip } from "@/components/agent/tool-chip"
+import { Markdown } from "@/components/agent/markdown"
 import type { ToolEvent } from "@/components/agent/types"
 
 /**
@@ -11,7 +12,29 @@ import type { ToolEvent } from "@/components/agent/types"
  * and the streaming bubble were two near-identical components drifting
  * apart; now streaming only toggles defaults (thinking open, cursor) —
  * markup lives once.
+ *
+ * Content and Denkprozess render through the shared markdown renderer.
+ * The streaming cursor is a CSS ::after on the markdown root's last block
+ * child (STREAMING_CURSOR): it stays inline with the live text exactly
+ * where the old `<p>` cursor sat, without the renderer needing to know
+ * about it.
  */
+
+/**
+ * Pulsing bar via ::after on the last markdown block (p, pre, …): inline
+ * at the end of the live text; the arbitrary variant needs an explicit
+ * content in Tailwind v4.
+ */
+const STREAMING_CURSOR = [
+  "[&>*:last-child]:after:content-['']",
+  "[&>*:last-child]:after:ml-0.5",
+  "[&>*:last-child]:after:inline-block",
+  "[&>*:last-child]:after:h-3.5",
+  "[&>*:last-child]:after:w-1.5",
+  "[&>*:last-child]:after:animate-pulse",
+  "[&>*:last-child]:after:bg-foreground/70",
+  "[&>*:last-child]:after:align-middle",
+].join(" ")
 
 interface AssistantBubbleProps {
   content: string
@@ -43,9 +66,9 @@ export function AssistantBubble(props: AssistantBubbleProps) {
             </button>
           )}
           {props.reasoning && showThinking && (
-            <p className="mb-1.5 border-l-2 pl-2 text-xs whitespace-pre-wrap text-muted-foreground italic">
-              {props.reasoning}
-            </p>
+            <div className="mb-1.5 border-l-2 pl-2 text-xs text-muted-foreground italic">
+              <Markdown text={props.reasoning} />
+            </div>
           )}
           {(props.tools ?? []).map((t, i) => (
             <ToolChip
@@ -55,12 +78,19 @@ export function AssistantBubble(props: AssistantBubbleProps) {
               result={t.kind === "tool_result" ? t.payload : ""}
             />
           ))}
-          <p className="whitespace-pre-wrap">
-            {props.content}
-            {props.streaming && (
+          {/* Whitespace-only streamed frames parse to zero markdown
+              blocks, leaving the ::after cursor without a last-child
+              anchor — those frames fall back to the plain-text cursor. */}
+          {props.content.trim() === "" && props.streaming ? (
+            <p className="whitespace-pre-wrap">
               <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-foreground/70 align-middle" />
-            )}
-          </p>
+            </p>
+          ) : (
+            <Markdown
+              text={props.content}
+              className={props.streaming ? STREAMING_CURSOR : undefined}
+            />
+          )}
         </div>
       </div>
     </div>
