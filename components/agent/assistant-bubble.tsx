@@ -78,7 +78,10 @@ export function AssistantBubble(props: AssistantBubbleProps) {
               result={t.kind === "tool_result" ? t.payload : ""}
             />
           ))}
-          {props.content === "" && props.streaming ? (
+          {/* Whitespace-only streamed frames parse to zero markdown
+              blocks, leaving the ::after cursor without a last-child
+              anchor — those frames fall back to the plain-text cursor. */}
+          {props.content.trim() === "" && props.streaming ? (
             <p className="whitespace-pre-wrap">
               <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-foreground/70 align-middle" />
             </p>

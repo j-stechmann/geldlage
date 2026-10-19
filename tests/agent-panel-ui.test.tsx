@@ -589,6 +589,86 @@ describe("<AgentChat>", () => {
     expect(screen.getAllByText("get_category_totals").length).toBeGreaterThan(0)
   }, 15_000)
 
+  it("keeps the cursor visible on whitespace-only streamed frames", async () => {
+    // Blank-line deltas (paragraph gaps between streamed prose) parse to
+    // zero markdown blocks, leaving the ::after cursor without a
+    // last-child anchor — the turn must fall back to the plain-text
+    // cursor <p> until real text arrives.
+    const state = {
+      messages: [{ ...seedMessages[0] }, { ...seedMessages[1] }] as Array<
+        Record<string, unknown>
+      >,
+      threads: [
+        {
+          id: "t1",
+          title: "Haushaltsfragen",
+          role: "owner",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    }
+    const enc = new TextEncoder()
+    let releaseMine!: () => void
+    const gateMine = new Promise<void>((r) => {
+      releaseMine = r
+    })
+    chatStream = () =>
+      new ReadableStream<Uint8Array>({
+        async start(controller) {
+          controller.enqueue(
+            enc.encode(
+              sseFrames([
+                { event: "user", data: { id: "m-ws" } },
+                { event: "delta", data: { text: "\n\n" } },
+              ])
+            )
+          )
+          await gateMine
+          controller.enqueue(
+            enc.encode(
+              sseFrames([{ event: "done", data: { messageId: "m-ws3" } }])
+            )
+          )
+          controller.close()
+        },
+      })
+    stubChatFlow(state)
+    renderWithQuery(createElement(AgentChat))
+    await waitFor(() =>
+      expect(screen.getByText("4211,00 €")).toBeInTheDocument()
+    )
+
+    const input = screen.getByPlaceholderText("Nachricht…")
+    await userEvent.type(input, "Los?")
+    await userEvent.click(screen.getByRole("button", { name: "Senden" }))
+
+    // whitespace-only frame: markdown renders nothing, the plain-text
+    // cursor <p> keeps the pulse visible while streaming
+    await waitFor(() =>
+      expect(document.querySelector("p > span.animate-pulse")).not.toBeNull()
+    )
+
+    // done + persisted rows: the fallback cursor retires in favor of the
+    // ::after cursor on the markdown last block; the user row echoes the
+    // `user` frame's id so the optimistic bubble retires by identity
+    const persistedRows = [
+      ...seedMessages,
+      // user row id matches the `user` frame's echo, so the optimistic
+      // bubble retires by identity
+      msg("m-ws", "user", "Los?", 3),
+      msg("m-ws3", "assistant", "Und jetzt.", 4),
+    ]
+    await act(async () => {
+      state.messages = persistedRows
+      releaseMine()
+      await Promise.resolve()
+    })
+    await waitFor(() =>
+      expect(screen.getByText(/Und jetzt\./)).toBeInTheDocument()
+    )
+    expect(document.querySelector("p > span.animate-pulse")).toBeNull()
+  }, 15_000)
+
   it("discards a retry-flagged round's segment (no Denkprozess-only bubble)", async () => {
     // The degenerate empty answer: the model streams ONLY a thinking
     // trace, the server retries tools-free. The retry-flagged round
