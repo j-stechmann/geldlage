@@ -134,13 +134,20 @@ without any expression language in the DSL.
   two values in the row object), aggregate aliases colliding with a
   groupBy output key, and — in aggregate mode — `orderBy` refs outside
   `groupBy` (SQLite would silently order groups by an arbitrary row
-  value). Aggregate queries report the groupBy keys + aliases, ignoring
-  `select` (parse-time validation requires select ⊆ groupBy when
-  present).
-  All structural mismatches (select ⊆ groupBy, orderBy refs in aggregate
-  mode, having on aliases) are rejected at parse time; remaining
+  value) as well as any `select` (aggregate output is the groupBy keys
+  plus aliases; the compiler never reads select there, so accepting it
+  as a "valid subset" would validate a restriction the result never
+  applies). Aggregate queries report the groupBy keys + aliases.
+  All structural mismatches (select with aggregate, orderBy refs in
+  aggregate mode, having on aliases) are rejected at parse time; remaining
   SQLite-level errors surface as `{"error": …}` — self-correctable within
   the AGENT_MAX_TURNS budget.
+- Whitelist lookups use `Object.hasOwn` — prototype-inherited names
+  (`toString`, `constructor`, `__proto__`, …) would otherwise pass the
+  truthiness checks (their expressions are `undefined`, so they still
+  crash harmlessly in the compiler, but with a raw SQLite error the
+  model cannot self-correct from instead of the actionable
+  "unknown column/table/join alias" message).
 - `totalMatching` is unreported for grouped queries that hit the limit —
   "how many groups match" would need a subquery for a number the model
   rarely needs; `limited: true` still signals the cut.

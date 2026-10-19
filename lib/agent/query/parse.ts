@@ -102,7 +102,7 @@ function checkRef(def: QueryTableDef, table: string, ref: unknown): string {
   }
   const dot = ref.indexOf(".")
   if (dot === -1) {
-    if (!def.columns[ref]) {
+    if (!Object.hasOwn(def.columns, ref)) {
       fail(
         `unknown column '${ref}' in table '${table}' (columns: ${Object.keys(def.columns).join(", ")})`
       )
@@ -111,16 +111,19 @@ function checkRef(def: QueryTableDef, table: string, ref: unknown): string {
   }
   const alias = ref.slice(0, dot)
   const name = ref.slice(dot + 1)
-  const join = def.joins[alias]
-  if (!join) {
+  // Object.hasOwn: see the table check in parseQuery — inherited names
+  // must fail closed here, not pass as truthy prototype members.
+  if (!Object.hasOwn(def.joins, alias)) {
     const avail = Object.keys(def.joins)
     fail(
       `unknown join alias '${alias}' in '${ref}' (available: ${avail.join(", ") || "none"})`
     )
   }
-  const targetDef = queryTables[join.target]
-  if (!targetDef.columns[name]) {
-    fail(`unknown column '${name}' in joined table '${join.target}' ('${ref}')`)
+  const targetDef = queryTables[def.joins[alias].target]
+  if (!Object.hasOwn(targetDef.columns, name)) {
+    fail(
+      `unknown column '${name}' in joined table '${def.joins[alias].target}' ('${ref}')`
+    )
   }
   return ref
 }
@@ -280,7 +283,11 @@ export function parseQuery(raw: unknown): ParsedQuery {
   )
 
   const table = raw.table
-  if (typeof table !== "string" || !queryTables[table]) {
+  // Object.hasOwn keeps Object.prototype members ("toString", "__proto__"
+  // etc.) out of the whitelist — a plain `queryTables[table]` truthiness
+  // check accepts inherited functions and fails later with a raw
+  // non-actionable SQLite error instead of "unknown table".
+  if (typeof table !== "string" || !Object.hasOwn(queryTables, table)) {
     fail(
       `unknown table ${JSON.stringify(table)} (available: ${Object.keys(queryTables).join(", ")})`
     )
@@ -427,22 +434,15 @@ export function parseQuery(raw: unknown): ParsedQuery {
       )
     }
   }
-  // SQLite would silently pick arbitrary row values for non-grouped
-  // output columns — enforce the subset instead
-  // so the model gets a clear error rather than a subtly wrong number.
-  if (aggregate.length > 0) {
-    if (groupBy.length === 0 && select) {
-      fail("select cannot be combined with aggregate without groupBy")
-    }
-    if (groupBy.length > 0 && select) {
-      for (const ref of select) {
-        if (!groupBy.includes(ref)) {
-          fail(
-            `selected column '${ref}' must appear in groupBy when aggregating`
-          )
-        }
-      }
-    }
+  // Aggregate queries output the groupBy columns plus the aggregate
+  // aliases — the compiler never reads select in aggregate mode, so
+  // accepting it would validate a restriction the result never applies.
+  // Reject it up front: the model gets one clear, actionable message for
+  // both shapes instead of a half-respected subset.
+  if (aggregate.length > 0 && select) {
+    fail(
+      "select cannot be combined with aggregate — the result already contains the groupBy columns plus the aggregate aliases"
+    )
   }
 
   // ── having (aggregate aliases only) ───────────────────────────────────

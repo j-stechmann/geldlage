@@ -218,30 +218,25 @@ describe("parseQuery validation", () => {
     ).toThrow(/must be an aggregate alias/)
   })
 
-  it("rejects aggregate+select without matching groupBy", () => {
+  it("rejects select in aggregate mode (output is groupBy columns + aliases)", () => {
+    // the compiler never reads select in aggregate mode — the result
+    // always contains every groupBy column plus the aliases, so a "valid
+    // subset" select would be accepted but silently ignored
     expect(() =>
       parseQuery({
         table: "transactions",
         aggregate: [{ fn: "sum", column: "amount_cents" }],
         select: ["payee"],
       })
-    ).toThrow(/without groupBy/)
+    ).toThrow(/select cannot be combined with aggregate/)
     expect(() =>
-      parseQuery({
-        table: "transactions",
-        aggregate: [{ fn: "sum", column: "amount_cents" }],
-        groupBy: ["booking_month"],
-        select: ["payee"],
-      })
-    ).toThrow(/must appear in groupBy/)
-    expect(
       parseQuery({
         table: "transactions",
         aggregate: [{ fn: "sum", column: "amount_cents" }],
         groupBy: ["booking_month"],
         select: ["booking_month"],
       })
-    ).toMatchObject({ groupBy: ["booking_month"] })
+    ).toThrow(/select cannot be combined with aggregate/)
   })
 
   it("rejects groupBy without aggregate", () => {
@@ -436,6 +431,39 @@ describe("parseQuery validation", () => {
       parseQuery({ table: "transactions", aggregate: [{ fn: "count" }] })
         .aggregate[0].alias
     ).toBe("count")
+  })
+
+  it("rejects prototype-inherited identifier names (own-property whitelist)", () => {
+    // Object.prototype members are truthy on plain-object lookups — they
+    // must fail closed with an actionable message instead of passing the
+    // whitelist and dying in the compiler with a raw SQLite error
+    for (const ref of [
+      "toString",
+      "__proto__",
+      "constructor",
+      "valueOf",
+      "hasOwnProperty",
+    ]) {
+      expect(() => parseQuery({ table: ref })).toThrow(/unknown table/)
+      expect(() =>
+        parseQuery({ table: "transactions", select: [ref] })
+      ).toThrow(/unknown column/)
+      expect(() =>
+        parseQuery({
+          table: "transactions",
+          where: [{ column: ref, op: "eq", value: "x" }],
+        })
+      ).toThrow(/unknown column/)
+      expect(() =>
+        parseQuery({
+          table: "transactions",
+          aggregate: [{ fn: "min", column: ref }],
+        })
+      ).toThrow(/unknown column/)
+      expect(() =>
+        parseQuery({ table: "transactions", select: [`${ref}.id`] })
+      ).toThrow(/unknown join alias/)
+    }
   })
 })
 
