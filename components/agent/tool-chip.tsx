@@ -3,11 +3,17 @@
 import { useState } from "react"
 import { Wrench } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Markdown } from "@/components/agent/markdown"
 
 /**
  * Tool round chip (ADR-0033): name + expandable JSON args/result. Shared
  * by persisted message rows and the in-flight streaming bubble — exactly
  * one place that renders tool activity.
+ *
+ * Payloads render through the shared markdown renderer as fenced blocks
+ * (json language → highlight.js): the fence preserves the formatted
+ * whitespace the plain `<pre>` showed, and fence length adapts so a
+ * payload containing backticks can never terminate the fence early.
  */
 
 export function ToolChip(props: {
@@ -29,14 +35,25 @@ export function ToolChip(props: {
       </Button>
       {open && (
         <div className="mt-1 max-h-40 overflow-auto rounded-md border bg-background p-2">
-          {props.args && <pre className="text-xs">{props.args}</pre>}
+          {props.args && <Markdown text={asCodeBlock("json", props.args)} />}
           {props.result && (
-            <pre className="text-xs">{formatToolResult(props.result)}</pre>
+            <Markdown
+              text={asCodeBlock("json", formatToolResult(props.result))}
+            />
           )}
         </div>
       )}
     </div>
   )
+}
+
+/** Wraps text in a markdown fence longer than any backtick run in it. */
+function asCodeBlock(lang: string, raw: string): string {
+  const runs = raw.match(/`+/g)
+  const fence = "`".repeat(
+    Math.max(3, ...(runs ?? []).map((r) => r.length + 1))
+  )
+  return `${fence}${lang}\n${raw}\n${fence}`
 }
 
 /** Pretty-prints the JSON tool result; falls back to raw text. */

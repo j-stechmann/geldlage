@@ -300,6 +300,55 @@ describe("<AgentChat>", () => {
     expect(calls.filter((c) => c.path === "/api/users")).toHaveLength(0)
   })
 
+  it("renders markdown in assistant and user text, keeps raw HTML inert", async () => {
+    stubChatFlow({
+      messages: [
+        // assistant: GFM bold + list + fenced block with a language
+        // (highlighted via rehype-highlight) + raw HTML that must never
+        // become DOM + a link (safe target)
+        msg(
+          "m2",
+          "assistant",
+          '**Zusammenfassung**\n\n- Posten: 12\n\n```json\n{"sum":1}\n```\n\n[sure](javascript:alert(1)) und <b>kein HTML</b>: https://geldlage.example/x',
+          2
+        ),
+        // user: typed markdown is rendered too
+        msg("m1", "user", "Prüfe **bitte** die Kategorie `Lebensmittel`", 1),
+      ],
+      threads: [
+        {
+          id: "t1",
+          title: "Haushaltsfragen",
+          role: "owner",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    })
+    renderWithQuery(createElement(AgentChat))
+    // assistant markdown constructs real DOM
+    await waitFor(() =>
+      expect(
+        screen.getByText("Zusammenfassung").closest("strong")
+      ).not.toBeNull()
+    )
+    expect(screen.getByText("Posten: 12").closest("li")).not.toBeNull()
+    const link = screen.getByText("https://geldlage.example/x").closest("a")
+    expect(link).not.toBeNull()
+    // defaultUrlTransform neutralizes javascript: URLs; the anchor keeps
+    // the safe external-link shape regardless of the href.
+    expect(link?.getAttribute("target")).toBe("_blank")
+    expect(link?.getAttribute("rel")).toContain("noopener")
+    // raw HTML never becomes DOM (react-markdown default; no rehype-raw)
+    expect(document.querySelector("b")).toBeNull()
+    // fenced block: highlighted via the explicit language (hljs classes)
+    const code = document.querySelector("code.hljs")
+    expect(code?.className).toContain("language-json")
+    // user bubble renders inline markdown on the primary background
+    expect(screen.getByText("bitte").closest("strong")).not.toBeNull()
+    const inline = screen.getByText("Lebensmittel").closest("code")
+    expect(inline?.className).toContain("rounded")
+  })
+
   it("keeps attribution for departed members (names via /api/users)", async () => {
     // userId 2 left the thread: their roster row is gone, but their old
     // user message survives — the user directory must fill the name.

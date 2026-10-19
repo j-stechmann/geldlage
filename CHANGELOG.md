@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Markdown rendering in the agent chat**: every message text — assistant
+  answers (persisted and streamed), the "Denkprozess" trace, user bubbles,
+  and tool chip payloads — renders through a shared markdown renderer
+  ([components/agent/markdown.tsx](components/agent/markdown.tsx)). GFM
+  tables/task lists/strikethrough via `remark-gfm`, typed hard line
+  breaks preserved via `remark-breaks`, and fenced code blocks highlight
+  when the fence declares a language (`rehype-highlight`, no
+  auto-detection so streamed prose is never mis-colored) with token
+  colors built on the app's own oklch palette (light and dark). Raw HTML
+  stays inert (react-markdown default, no `rehype-raw`), links open in a
+  new tab with `noopener`, and `javascript:` URLs are neutralized by the
+  default URL transform. Single newlines render as line breaks so typed
+  message formatting keeps the look it had as plain text.
+
 ## v1.15.0
 
 ### Added
