@@ -13,10 +13,12 @@
   when the fence declares a language (`rehype-highlight`, no
   auto-detection so streamed prose is never mis-colored) with token
   colors built on the app's own oklch palette (light and dark). Raw HTML
-  stays inert (react-markdown default, no `rehype-raw`), links open in a
-  new tab with `noopener`, and `javascript:` URLs are neutralized by the
-  default URL transform. Single newlines render as line breaks so typed
-  message formatting keeps the look it had as plain text.
+  stays inert (react-markdown default, no `rehype-raw`), images are
+  disallowed entirely (chat is text formatting, not media —
+  model-generated `![](...)` never fetches a remote host), links open in
+  a new tab with `noopener`, and `javascript:` URLs are neutralized by
+  the default URL transform. Single newlines render as line breaks so
+  typed message formatting keeps the look it had as plain text.
 
 ## v1.15.0
 

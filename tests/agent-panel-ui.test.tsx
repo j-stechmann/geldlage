@@ -304,12 +304,14 @@ describe("<AgentChat>", () => {
     stubChatFlow({
       messages: [
         // assistant: GFM bold + list + fenced block with a language
-        // (highlighted via rehype-highlight) + raw HTML that must never
-        // become DOM + a link (safe target)
+        // (highlighted via rehype-highlight) + a fence without a language
+        // (single-line: must render as bare block code, not the inline
+        // chip) + raw HTML that must never become DOM + a link (safe
+        // target) + an image (disallowed entirely)
         msg(
           "m2",
           "assistant",
-          '**Zusammenfassung**\n\n- Posten: 12\n\n```json\n{"sum":1}\n```\n\n[sure](javascript:alert(1)) und <b>kein HTML</b>: https://geldlage.example/x',
+          '**Zusammenfassung**\n\n- Posten: 12\n\n```json\n{"sum":1}\n```\n\n```\ncfg: 1\n```\n\n[sure](javascript:alert(1)) und <b>kein HTML</b>: https://geldlage.example/x ![px](https://tracking.example/p.png)',
           2
         ),
         // user: typed markdown is rendered too
@@ -343,6 +345,17 @@ describe("<AgentChat>", () => {
     // fenced block: highlighted via the explicit language (hljs classes)
     const code = document.querySelector("code.hljs")
     expect(code?.className).toContain("language-json")
+    // language-less single-line fence: bare block code inside pre (not
+    // the inline chip styling)
+    const bare = Array.from(document.querySelectorAll("pre > code")).find((c) =>
+      (c.textContent ?? "").startsWith("cfg: 1")
+    )
+    expect(bare).toBeDefined()
+    expect(bare?.className).not.toContain("rounded-sm")
+    // markdown props are stripped of node (no node="[object Object]" DOM
+    // attribute); images are disallowed (chat is text, no remote fetches)
+    expect(document.querySelector("p")?.getAttribute("node")).toBeNull()
+    expect(document.querySelector("img")).toBeNull()
     // user bubble renders inline markdown on the primary background
     expect(screen.getByText("bitte").closest("strong")).not.toBeNull()
     const inline = screen.getByText("Lebensmittel").closest("code")
