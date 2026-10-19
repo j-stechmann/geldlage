@@ -13,7 +13,10 @@
   when the fence declares a language (`rehype-highlight`, no
   auto-detection so streamed prose is never mis-colored) with token
   colors built on the app's own oklch palette (light and dark). Raw HTML
-  stays inert (react-markdown default, no `rehype-raw`), images are
+  renders as inert escaped text (react-markdown default, no
+  `rehype-raw` — the markup never becomes a DOM element), with
+  block-level HTML lines wrapped in their own paragraph so an HTML-only
+  streamed frame keeps the cursor's last-child anchor; images are
   disallowed entirely (chat is text formatting, not media —
   model-generated `![](...)` never fetches a remote host), links open in
   a new tab with `noopener`, and `javascript:` URLs are neutralized by

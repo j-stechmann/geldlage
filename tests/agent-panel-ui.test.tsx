@@ -307,12 +307,13 @@ describe("<AgentChat>", () => {
         // (highlighted via rehype-highlight) + a fence without a language
         // (single-line: must render as bare block code, not the inline
         // chip) + a heading (bubble-sized, no browser-default 2em) +
-        // raw HTML that must never become DOM + a link (safe target) +
-        // an image (disallowed entirely)
+        // raw HTML that must never become an element but stays visible
+        // as inert escaped text (inline and block-level) + a link (safe
+        // target) + an image (disallowed entirely)
         msg(
           "m2",
           "assistant",
-          '**Zusammenfassung**\n\n- Posten: 12\n\n```json\n{"sum":1}\n```\n\n```\ncfg: 1\n```\n\n# Überschrift\n\n[sure](javascript:alert(1)) und <b>kein HTML</b>: https://geldlage.example/x ![px](https://tracking.example/p.png)',
+          '**Zusammenfassung**\n\n- Posten: 12\n\n```json\n{"sum":1}\n```\n\n```\ncfg: 1\n```\n\n# Überschrift\n\n[sure](javascript:alert(1)) und <b>kein HTML</b>: https://geldlage.example/x ![px](https://tracking.example/p.png)\n\n<br>',
           2
         ),
         // tool chip: JSON args stay tagged json + pretty-printed, a
@@ -348,8 +349,17 @@ describe("<AgentChat>", () => {
     // the safe external-link shape regardless of the href.
     expect(link?.getAttribute("target")).toBe("_blank")
     expect(link?.getAttribute("rel")).toContain("noopener")
-    // raw HTML never becomes DOM (react-markdown default; no rehype-raw)
+    // raw HTML never becomes an element (react-markdown default; no
+    // rehype-raw): the markup renders as inert escaped text instead of
+    // being dropped — block-level HTML lines additionally get their own
+    // root-level paragraph wrap (remarkHtmlAsText in markdown.tsx)
     expect(document.querySelector("b")).toBeNull()
+    expect(document.querySelector("br")).toBeNull()
+    const inlineRaw = Array.from(document.querySelectorAll("p")).find((p) =>
+      (p.textContent ?? "").includes("<b>kein HTML</b>")
+    )
+    expect(inlineRaw).toBeDefined()
+    expect(screen.getByText("<br>")?.closest("p")).not.toBeNull()
     // fenced block: highlighted via the explicit language (hljs classes)
     const code = document.querySelector("code.hljs")
     expect(code?.className).toContain("language-json")
@@ -667,6 +677,85 @@ describe("<AgentChat>", () => {
       expect(screen.getByText(/Und jetzt\./)).toBeInTheDocument()
     )
     expect(document.querySelector("p > span.animate-pulse")).toBeNull()
+  }, 15_000)
+
+  it("keeps the cursor anchored on HTML-only streamed frames", async () => {
+    // A first delta that is a raw HTML block (e.g. a lone <br>) parses to
+    // bare text directly on the markdown root — without the root-level
+    // paragraph wrap it would render zero element children and the
+    // ::after cursor would lose its last-child anchor even though
+    // content.trim() !== "". The wrapped <p> (escaped <br> text) is the
+    // anchor; the markdown path must handle the frame (no plain-text
+    // fallback).
+    const state = {
+      messages: [{ ...seedMessages[0] }, { ...seedMessages[1] }] as Array<
+        Record<string, unknown>
+      >,
+      threads: [
+        {
+          id: "t1",
+          title: "Haushaltsfragen",
+          role: "owner",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    }
+    const enc = new TextEncoder()
+    let releaseMine!: () => void
+    const gateMine = new Promise<void>((r) => {
+      releaseMine = r
+    })
+    chatStream = () =>
+      new ReadableStream<Uint8Array>({
+        async start(controller) {
+          controller.enqueue(
+            enc.encode(
+              sseFrames([
+                { event: "user", data: { id: "m-html" } },
+                { event: "delta", data: { text: "<br>" } },
+              ])
+            )
+          )
+          await gateMine
+          controller.enqueue(
+            enc.encode(
+              sseFrames([{ event: "done", data: { messageId: "m-html3" } }])
+            )
+          )
+          controller.close()
+        },
+      })
+    stubChatFlow(state)
+    renderWithQuery(createElement(AgentChat))
+    await waitFor(() =>
+      expect(screen.getByText("4211,00 €")).toBeInTheDocument()
+    )
+
+    const input = screen.getByPlaceholderText("Nachricht…")
+    await userEvent.type(input, "Los!")
+    await userEvent.click(screen.getByRole("button", { name: "Senden" }))
+
+    // HTML-only frame: the escaped <br> renders inside its own wrapped
+    // <p> — the element anchor the ::after cursor attaches to
+    await waitFor(() => expect(screen.getByText("<br>")).toBeInTheDocument())
+    expect(document.querySelector("p > span.animate-pulse")).toBeNull()
+
+    // done + persisted rows: the html-only streamed p retires with the
+    // segment, the persisted answer takes over
+    const persistedRows = [
+      ...seedMessages,
+      msg("m-html", "user", "Los!", 3),
+      msg("m-html3", "assistant", "Und jetzt.", 4),
+    ]
+    await act(async () => {
+      state.messages = persistedRows
+      releaseMine()
+      await Promise.resolve()
+    })
+    await waitFor(() =>
+      expect(screen.getByText(/Und jetzt\./)).toBeInTheDocument()
+    )
+    expect(screen.queryByText("<br>")).toBeNull()
   }, 15_000)
 
   it("discards a retry-flagged round's segment (no Denkprozess-only bubble)", async () => {

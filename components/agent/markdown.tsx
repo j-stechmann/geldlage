@@ -5,6 +5,8 @@ import ReactMarkdown, { type Components, type ExtraProps } from "react-markdown"
 import remarkGfm from "remark-gfm"
 import remarkBreaks from "remark-breaks"
 import rehypeHighlight from "rehype-highlight"
+import type { Root } from "mdast"
+import type { Plugin } from "unified"
 
 /**
  * Shared markdown renderer for every chat text (ADR-0033): persisted and
@@ -14,8 +16,11 @@ import rehypeHighlight from "rehype-highlight"
  * Styling avoids theme-dependent tokens (bg-muted vs. bg-primary bubbles)
  * by building on `foreground`-opacity and `currentColor`: the same map
  * works on both bubble variants without a variant prop. Raw HTML is
- * ignored by react-markdown's default (safe: no rehype-raw, no sanitizer),
- * and images are disallowed entirely: chat is text formatting, not media,
+ * rendered as inert escaped text (react-markdown v10 default — no
+ * `rehype-raw`, no sanitizer; the markup never reaches the DOM as an
+ * element, `components` overrides stay in charge) — block-level HTML
+ * lines additionally get a paragraph wrapper (see the plugin below).
+ * Images are disallowed entirely: chat is text formatting, not media,
  * so model-generated `![](...)` never triggers a remote fetch.
  *
  * remark-breaks preserves the single-newline line breaks the plain-text
@@ -60,6 +65,27 @@ function Code(props: JSX.IntrinsicElements["code"] & ElementProps) {
       }
     />
   )
+}
+
+/**
+ * react-markdown turns each raw `html` node into inert escaped text, but
+ * a block-level HTML line (a lone `<br>`, a comment, a closing tag on its
+ * own line) lands as bare text directly on the root: no `<p>` wrapper, no
+ * block margins — and, worst, no element child for the streaming cursor's
+ * `last-child` anchor (an HTML-only streamed frame like a first delta of
+ * `<br>` would blink the cursor away). Wrap every root-level `html` node
+ * in a paragraph of its escaped text.
+ */
+const remarkHtmlAsText: Plugin<[], Root> = () => (tree) => {
+  for (let i = 0; i < tree.children.length; i++) {
+    const child = tree.children[i]
+    if (child.type === "html") {
+      tree.children[i] = {
+        type: "paragraph",
+        children: [{ type: "text", value: child.value }],
+      }
+    }
+  }
 }
 
 const components: Components = {
@@ -169,7 +195,7 @@ export const Markdown = memo(function Markdown({
       }
     >
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkBreaks]}
+        remarkPlugins={[remarkGfm, remarkBreaks, remarkHtmlAsText]}
         rehypePlugins={[[rehypeHighlight, { detect: false }]]}
         disallowedElements={["img"]}
         components={{ ...components, code: Code }}
