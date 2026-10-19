@@ -306,14 +306,22 @@ describe("<AgentChat>", () => {
         // assistant: GFM bold + list + fenced block with a language
         // (highlighted via rehype-highlight) + a fence without a language
         // (single-line: must render as bare block code, not the inline
-        // chip) + raw HTML that must never become DOM + a link (safe
-        // target) + an image (disallowed entirely)
+        // chip) + a heading (bubble-sized, no browser-default 2em) +
+        // raw HTML that must never become DOM + a link (safe target) +
+        // an image (disallowed entirely)
         msg(
           "m2",
           "assistant",
-          '**Zusammenfassung**\n\n- Posten: 12\n\n```json\n{"sum":1}\n```\n\n```\ncfg: 1\n```\n\n[sure](javascript:alert(1)) und <b>kein HTML</b>: https://geldlage.example/x ![px](https://tracking.example/p.png)',
+          '**Zusammenfassung**\n\n- Posten: 12\n\n```json\n{"sum":1}\n```\n\n```\ncfg: 1\n```\n\n# Überschrift\n\n[sure](javascript:alert(1)) und <b>kein HTML</b>: https://geldlage.example/x ![px](https://tracking.example/p.png)',
           2
         ),
+        // tool chip: JSON args stay tagged json + pretty-printed, a
+        // non-JSON result falls back to a language-less fence as raw text
+        msg("m3", "tool", "Fehler: Dienst nicht erreichbar (Timeout)", 3, {
+          toolName: "get_category_totals",
+          toolArgs: '{"period":"this_month"}',
+          toolCallId: "c1",
+        }),
         // user: typed markdown is rendered too
         msg("m1", "user", "Prüfe **bitte** die Kategorie `Lebensmittel`", 1),
       ],
@@ -352,10 +360,33 @@ describe("<AgentChat>", () => {
     )
     expect(bare).toBeDefined()
     expect(bare?.className).not.toContain("rounded-sm")
+    // headings render as real elements at bubble size (font-semibold, no
+    // browser-default 2em blow-up)
+    const heading = screen
+      .getByText("Überschrift")
+      .closest("h1") as HTMLHeadingElement
+    expect(heading).not.toBeNull()
+    expect(heading.className).toContain("font-semibold")
     // markdown props are stripped of node (no node="[object Object]" DOM
     // attribute); images are disallowed (chat is text, no remote fetches)
     expect(document.querySelector("p")?.getAttribute("node")).toBeNull()
     expect(document.querySelector("img")).toBeNull()
+    // tool chip payloads: JSON args tagged json + pretty-printed, non-JSON
+    // result falls back to a language-less fence as raw text
+    await userEvent.click(
+      screen.getByRole("button", { name: "get_category_totals" })
+    )
+    const argsBlock = Array.from(
+      document.querySelectorAll("code.language-json")
+    )
+    expect(
+      argsBlock.find((c) => c.textContent?.includes('"period"'))
+    ).toBeDefined()
+    const rawResult = Array.from(document.querySelectorAll("pre > code")).find(
+      (c) => (c.textContent ?? "").startsWith("Fehler: ")
+    )
+    expect(rawResult).toBeDefined()
+    expect(rawResult?.className).not.toContain("language-json")
     // user bubble renders inline markdown on the primary background
     expect(screen.getByText("bitte").closest("strong")).not.toBeNull()
     const inline = screen.getByText("Lebensmittel").closest("code")

@@ -66,6 +66,47 @@ const components: Components = {
   p: (props) => (
     <p {...nodeless(props)} className="my-1.5 first:mt-0 last:mb-0" />
   ),
+  /**
+   * Headings stay bubble-sized: no browser-default 2em blow-ups inside the
+   * text-sm/text-xs bubbles. em-based so they scale with the parent size
+   * (text-sm bubbles, text-xs Denkprozess); h3–h6 collapse to body weight.
+   */
+  h1: (props) => (
+    <h1
+      {...nodeless(props)}
+      className="my-1.5 text-[1.15em] font-semibold first:mt-0 last:mb-0"
+    />
+  ),
+  h2: (props) => (
+    <h2
+      {...nodeless(props)}
+      className="my-1.5 text-[1.05em] font-semibold first:mt-0 last:mb-0"
+    />
+  ),
+  h3: (props) => (
+    <h3
+      {...nodeless(props)}
+      className="my-1.5 font-semibold first:mt-0 last:mb-0"
+    />
+  ),
+  h4: (props) => (
+    <h4
+      {...nodeless(props)}
+      className="my-1.5 font-semibold first:mt-0 last:mb-0"
+    />
+  ),
+  h5: (props) => (
+    <h5
+      {...nodeless(props)}
+      className="my-1.5 font-semibold first:mt-0 last:mb-0"
+    />
+  ),
+  h6: (props) => (
+    <h6
+      {...nodeless(props)}
+      className="my-1.5 font-semibold first:mt-0 last:mb-0"
+    />
+  ),
   ul: (props) => (
     <ul
       {...nodeless(props)}

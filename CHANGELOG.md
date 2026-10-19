@@ -17,7 +17,8 @@
   disallowed entirely (chat is text formatting, not media —
   model-generated `![](...)` never fetches a remote host), links open in
   a new tab with `noopener`, and `javascript:` URLs are neutralized by
-  the default URL transform. Single newlines render as line breaks so
+  the default URL transform. Headings stay clamped to bubble size (no
+  browser-default 2em blow-up). Single newlines render as line breaks so
   typed message formatting keeps the look it had as plain text.
 
 ## v1.15.0
