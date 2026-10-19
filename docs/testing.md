@@ -1,6 +1,6 @@
 # Testing
 
-_Last reviewed against v1.15.0 (agent panel: mock llama-server loop tests, threads access matrix, SSE writer frame classification, tool wire format, AgentChat markdown rendering)._
+_Last reviewed against v1.16.0 (agent panel: mock llama-server loop tests, threads access matrix, SSE writer frame classification, tool wire format, AgentChat markdown rendering)._
 
 The suite is **entirely in-process** — no Next dev server, no HTTP listener,
 no supertest. It runs with `bunx vitest run` (config: [vitest.config.ts](../vitest.config.ts),
