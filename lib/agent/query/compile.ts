@@ -268,7 +268,8 @@ export function runQuery(q: ParsedQuery, uid: number): QueryResult {
     for (const [key, value] of Object.entries(row)) {
       out[key] =
         typeof value === "string" && value.length > QUERY_MAX_CELL_CHARS
-          ? value.slice(0, QUERY_MAX_CELL_CHARS) + "…"
+          ? // slice leaves room for the ellipsis: the cap is exact, not +1
+            value.slice(0, QUERY_MAX_CELL_CHARS - 1) + "…"
           : value
     }
     return out

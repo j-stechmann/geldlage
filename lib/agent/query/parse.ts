@@ -302,7 +302,8 @@ export function parseQuery(raw: unknown): ParsedQuery {
 
   // ── aggregates (aliases needed by groupBy/having/orderBy checks) ─────
   const aggregate: QueryAggregate[] = []
-  const aliases = new Set<string>()
+  /** alias → value kind (a text alias is sortable, but not havable) */
+  const aliasKinds = new Map<string, "text" | "integer">()
   if (raw.aggregate !== undefined) {
     if (!Array.isArray(raw.aggregate)) fail("aggregate must be an array")
     if (raw.aggregate.length > MAX_AGGREGATES) {
@@ -318,9 +319,29 @@ export function parseQuery(raw: unknown): ParsedQuery {
       ) {
         fail(`aggregate.fn must be one of: ${QUERY_AGGREGATE_FNS.join(", ")}`)
       }
+      const aggFn = fn as QueryAggregateFn
       let column: string | undefined
       if (item.column !== undefined) {
         column = checkRef(def, table, item.column)
+      } else if (aggFn !== "count") {
+        // the compiler builds sum/avg/min/max strictly from a resolved
+        // column — only count(*) has a columnless form
+        fail(
+          `aggregate.fn '${aggFn}' requires a column (only 'count' may omit it)`
+        )
+      }
+      // sum/avg on a text column silently yields garbage (SQLite coerces
+      // non-numeric text to 0) instead of an error — restrict them to
+      // integer columns, matching the filter-value type checks. min/max
+      // stay valid on text (lexicographic min/max).
+      if (
+        column !== undefined &&
+        (aggFn === "sum" || aggFn === "avg") &&
+        columnKind(def, column) !== "integer"
+      ) {
+        fail(
+          `aggregate.fn '${aggFn}' needs an integer column ('${column}' is text — min/max work on text)`
+        )
       }
       if (item.alias !== undefined) {
         if (typeof item.alias !== "string" || !ALIAS_RE.test(item.alias)) {
@@ -331,14 +352,26 @@ export function parseQuery(raw: unknown): ParsedQuery {
       }
       const alias: string =
         item.alias === undefined
-          ? aggregateAlias(fn as QueryAggregateFn, column)
+          ? aggregateAlias(aggFn, column)
           : (item.alias as string)
-      if (aliases.has(alias)) {
+      if (aliasKinds.has(alias)) {
         fail(`duplicate aggregate alias '${alias}'`)
       }
-      aliases.add(alias)
+      // min/max inherit the column kind (count/sum/avg are always numeric).
+      // A text alias is valid in orderBy (lexicographic) but not having —
+      // SQLite compares any text greater than any number, so a having op
+      // on a text alias would silently filter everything one way.
+      let aliasKind: "text" | "integer" = "integer"
+      if (
+        (aggFn === "min" || aggFn === "max") &&
+        column !== undefined &&
+        columnKind(def, column) === "text"
+      ) {
+        aliasKind = "text"
+      }
+      aliasKinds.set(alias, aliasKind)
       aggregate.push({
-        fn: fn as QueryAggregateFn,
+        fn: aggFn,
         column,
         alias,
       })
@@ -377,7 +410,7 @@ export function parseQuery(raw: unknown): ParsedQuery {
   // Output keys of groupBy refs (outputKey: base ref → itself, joined
   // "alias.col" → "alias_col") must not collide with aggregate aliases —
   // the SELECT would emit the same label twice.
-  for (const alias of aliases) {
+  for (const alias of aliasKinds.keys()) {
     if (groupBy.some((ref) => outputKey(ref) === alias)) {
       fail(
         `aggregate alias '${alias}' collides with a groupBy column name — choose a different alias`
@@ -417,9 +450,17 @@ export function parseQuery(raw: unknown): ParsedQuery {
       if (!isPlainObject(item)) fail(`having[${i}] must be an object`)
       checkKeys(item, ["column", "op", "value"], `having[${i}]`)
       const column = item.column
-      if (typeof column !== "string" || !aliases.has(column)) {
+      if (typeof column !== "string" || !aliasKinds.has(column)) {
         fail(
-          `having[${i}].column must be an aggregate alias (available: ${[...aliases].join(", ")})`
+          `having[${i}].column must be an aggregate alias (available: ${[...aliasKinds.keys()].join(", ")})`
+        )
+      }
+      if (aliasKinds.get(column) === "text") {
+        // SQLite orders any text greater than any number: a having op on
+        // a text alias (min/max of a text column) would silently match or
+        // reject every group — numeric comparisons only, fail here.
+        fail(
+          `having[${i}].column '${column}' is a text aggregate — having supports numeric comparisons only`
         )
       }
       const op = item.op
@@ -453,7 +494,7 @@ export function parseQuery(raw: unknown): ParsedQuery {
         fail(`orderBy[${i}].direction must be 'asc' or 'desc'`)
       }
       // alias refs are valid in aggregate queries; plain refs validated
-      const isAlias = aliases.has(column)
+      const isAlias = aliasKinds.has(column)
       if (!isAlias) {
         // a bare ref that looks like an alias but isn't must fail loudly
         checkRef(def, table, column)

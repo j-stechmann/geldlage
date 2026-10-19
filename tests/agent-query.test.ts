@@ -252,6 +252,73 @@ describe("parseQuery validation", () => {
     ).toThrow(/groupBy requires at least one aggregate/)
   })
 
+  it("rejects sum/avg on text columns and aggregates missing their column", () => {
+    // SUM/AVG silently coerce non-numeric text to 0 — fail loudly instead
+    expect(() =>
+      parseQuery({
+        table: "transactions",
+        aggregate: [{ fn: "sum", column: "payee" }],
+      })
+    ).toThrow(/'sum' needs an integer column/)
+    expect(() =>
+      parseQuery({
+        table: "transactions",
+        aggregate: [{ fn: "avg", column: "category.name" }],
+      })
+    ).toThrow(/'avg' needs an integer column/)
+    // min/max stay valid on text (lexicographic min/max)
+    expect(() =>
+      parseQuery({
+        table: "transactions",
+        aggregate: [{ fn: "min", column: "payee" }],
+      })
+    ).not.toThrow()
+    // only count(*) is columnless — the compiler relies on a resolved
+    // column for sum/avg/min/max
+    expect(() =>
+      parseQuery({ table: "transactions", aggregate: [{ fn: "sum" }] })
+    ).toThrow(/'sum' requires a column/)
+    expect(() =>
+      parseQuery({ table: "transactions", aggregate: [{ fn: "max" }] })
+    ).toThrow(/'max' requires a column/)
+  })
+
+  it("rejects having on a text aggregate alias, keeps numeric aliases havable", () => {
+    // min/max of a text column: SQLite compares any text greater than any
+    // number, so a having op would silently match/reject every group
+    expect(() =>
+      parseQuery({
+        table: "transactions",
+        aggregate: [{ fn: "min", column: "payee", alias: "m" }],
+        having: [{ column: "m", op: "lt", value: 5 }],
+      })
+    ).toThrow(/'m' is a text aggregate/)
+    // the default text alias is caught too
+    expect(() =>
+      parseQuery({
+        table: "transactions",
+        aggregate: [{ fn: "max", column: "payee" }],
+        having: [{ column: "max_payee", op: "ne", value: 0 }],
+      })
+    ).toThrow(/'max_payee' is a text aggregate/)
+    // min/max on integer columns stay havable
+    expect(() =>
+      parseQuery({
+        table: "transactions",
+        aggregate: [{ fn: "max", column: "amount_cents", alias: "hi" }],
+        having: [{ column: "hi", op: "gte", value: 0 }],
+      })
+    ).not.toThrow()
+    // a text alias stays orderable
+    expect(() =>
+      parseQuery({
+        table: "transactions",
+        aggregate: [{ fn: "min", column: "payee", alias: "m" }],
+        orderBy: [{ column: "m", direction: "desc" }],
+      })
+    ).not.toThrow()
+  })
+
   it("rejects an aggregate alias colliding with a groupBy output key", () => {
     // a joined group key compiles to "alias_col" — a duplicate label would
     // silently swallow one of the two values in the row object
@@ -677,7 +744,7 @@ describe("query_data — row queries", () => {
       table: "transactions",
       select: ["purpose"],
     })
-    expect((r.rows[0].purpose as string).length).toBe(201)
+    expect((r.rows[0].purpose as string).length).toBe(200)
     expect((r.rows[0].purpose as string).endsWith("…")).toBe(true)
   })
 })
@@ -772,6 +839,26 @@ describe("query_data — aggregates", () => {
       aggregate: [{ fn: "sum", column: "amount_cents", alias: "s" }],
     })
     expect(r.rows).toEqual([{ s: 0 }])
+  })
+
+  it("min/max work on text columns (lexicographic)", async () => {
+    seedTx({
+      userId: uid1,
+      amountCents: -1,
+      bookingDate: "2026-01-01",
+      payee: "B",
+    })
+    seedTx({
+      userId: uid1,
+      amountCents: -2,
+      bookingDate: "2026-01-02",
+      payee: "A",
+    })
+    const r = await run({
+      table: "transactions",
+      aggregate: [{ fn: "min", column: "payee" }],
+    })
+    expect(r.rows).toEqual([{ min_payee: "A" }])
   })
 
   it("groups and filters by derived columns", async () => {

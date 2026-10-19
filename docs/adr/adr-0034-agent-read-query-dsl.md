@@ -82,7 +82,12 @@ with the join inferred from any dotted reference.
    constants (drizzle `sql` templates); model values interpolate as bound
    parameters only. Value types are checked against the catalog kind
    (integer columns demand integers, text demands strings) so model
-   mistakes produce readable errors instead of SQL failures.
+   mistakes produce readable errors instead of SQL failures. Aggregate
+   functions are kind-checked the same way: sum/avg demand integer columns
+   (min/max stay valid on text), and only count may omit its column.
+   `having` accepts numeric aliases only — min/max on a text column yield
+   a text alias that is orderable (lexicographic) but not filterable,
+   because SQLite compares any text greater than any number.
 6. **Budgets.** `limit` is clamped to `QUERY_MAX_ROWS` (100; default 20);
    long string cells are capped at `QUERY_MAX_CELL_CHARS` so one `purpose`
    blob cannot eat the tool-result budget; the result then passes through

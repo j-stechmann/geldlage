@@ -53,6 +53,9 @@ export function getReadOnlyDb(): Db {
     const dbPath = getConfig().DATABASE_PATH
     // :memory: (tooling/dev edge) has no file to reopen — fall back to the
     // main singleton rather than fail; the whitelist/compiler still guard it.
+    // The fallback is cached for the process lifetime, so a later switch to
+    // a file DATABASE_PATH would not re-derive a readonly handle — dev-only
+    // edge, acceptable for a tooling configuration.
     globalRef.__geldlageReadOnlyDb = dbPath.includes(":memory:")
       ? getDb()
       : createReadOnlyDb(dbPath)
