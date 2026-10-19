@@ -997,10 +997,15 @@ describe("queryDataPromptDoc", () => {
     expect(doc).toContain("booking_month")
     expect(doc).not.toContain("user_id")
     // guidance locks: row queries must prefer explicit select (select-all
-    // results get hard-cut by truncateToolResult), and a NULL aggregate
-    // (avg/min/max over an empty match set) fails every having comparison
+    // results get hard-cut by truncateToolResult), a NULL aggregate
+    // (avg/min/max over an empty match set) fails every having comparison,
+    // the insertion-order guarantee is row-queries only (grouped results
+    // without orderBy have undefined order), and avg can yield fractional
+    // cents though the amounts are integer cents
     expect(doc).toContain("explizitem select")
     expect(doc).toContain("NULL-Aggregat")
+    expect(doc).toContain("keine definierte Reihenfolge")
+    expect(doc).toContain("Nachkommastellen")
     // contains/like semantics the model must know to interpret results
     expect(doc).toContain("Groß-/Kleinschreibung")
     // every op spelled in the doc must be one the parser actually accepts
