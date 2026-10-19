@@ -50,7 +50,9 @@ The DSL has no escape hatches by construction:
 ops: `eq ne gt gte lt lte contains like in isNull notNull`. `contains` is a
 literal substring match (the compiler escapes `% _ \` so model wildcards
 cannot leak through); `like` takes model-supplied wildcards; both are
-text-column ops (integer columns compare with `eq/gt/lt/in` — a LIKE against
+text-column ops and ASCII-case-insensitive (SQLite `LIKE` semantics —
+`"aldi"` matches "Aldi"; umlauts stay case-sensitive). Integer columns
+compare with `eq/gt/lt/in` (a LIKE against
 an integer would coerce to text and match nothing). `where` is an
 AND list, `whereAny` an OR group AND-ed with `where`. Aggregates
 (`sum count avg min max`) with `groupBy` produce grouped rows; without

@@ -675,6 +675,27 @@ describe("query_data — row queries", () => {
     expect(under.rows).toEqual([{ payee: "a_b" }])
   })
 
+  it("contains and like match ASCII case-insensitively (SQLite LIKE)", async () => {
+    seedTx({
+      userId: uid1,
+      amountCents: -1,
+      bookingDate: "2026-01-01",
+      payee: "Aldi Süd",
+    })
+    const contains = await run({
+      table: "transactions",
+      select: ["payee"],
+      where: [{ column: "payee", op: "contains", value: "aLdI" }],
+    })
+    expect(contains.rows).toEqual([{ payee: "Aldi Süd" }])
+    const like = await run({
+      table: "transactions",
+      select: ["payee"],
+      where: [{ column: "payee", op: "like", value: "aLdi%" }],
+    })
+    expect(like.rows).toEqual([{ payee: "Aldi Süd" }])
+  })
+
   it("like supports model-supplied wildcards, in filters on lists", async () => {
     seedTx({
       userId: uid1,
@@ -952,6 +973,8 @@ describe("queryDataPromptDoc", () => {
     // (avg/min/max over an empty match set) fails every having comparison
     expect(doc).toContain("explizitem select")
     expect(doc).toContain("NULL-Aggregat")
+    // contains/like semantics the model must know to interpret results
+    expect(doc).toContain("Groß-/Kleinschreibung")
     // every op spelled in the doc must be one the parser actually accepts
     // (the generated examples must not teach an op like ">=" that fails)
     const ops = [...doc.matchAll(/"op":"([a-zA-Z]+)"/g)]

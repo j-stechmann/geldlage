@@ -44,8 +44,10 @@ const conditionSchema = {
   additionalProperties: false,
 }
 
-export const query_data: AgentTool = {
-  name: "query_data",
+// `as const` on name keeps the literal type so tool-registry's
+// AgentToolName union derives from the registry (see get_category_totals).
+export const query_data = {
+  name: "query_data" as const,
   description:
     "Liest Finanzdaten des Sitzungsbenutzers über eine JSON-Abfrage (nur Lesen, keine Änderungen). Frei wählbar: Tabelle, Spalten (select), Filter (where/whereAny), Aggregation (aggregate + groupBy + having), Sortierung (orderBy), limit (max 100). Spalten- und Join-Liste steht im System-Prompt; Joined Spalten als „alias.spalte“ (z. B. category.name). Beträge in Cent (Integer, negativ = Ausgabe). Bei Fehlermeldung die Abfrage korrigieren und erneut aufrufen.",
   parameters: {
@@ -134,4 +136,4 @@ export const query_data: AgentTool = {
     const query = parseQuery(args)
     return runQuery(query, ctx.uid)
   },
-}
+} satisfies AgentTool

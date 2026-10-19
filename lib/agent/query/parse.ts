@@ -510,7 +510,12 @@ export function parseQuery(raw: unknown): ParsedQuery {
         checkRef(def, table, column)
         // SQLite would silently pick an arbitrary row value for a bare
         // ORDER BY column not in GROUP BY — same reasoning as the select
-        // ⊆ groupBy rule above, fail loudly instead.
+        // ⊆ groupBy rule above, fail loudly instead. The match stays a
+        // literal string compare on purpose: differently-spelled
+        // equivalents (category_id vs category.id) are NOT the same
+        // expression here — the user-scoped LEFT JOIN nulls a dangling FK
+        // ref — so "equivalent" refs must be spelled the same way to be
+        // accepted.
         if (aggregate.length > 0 && !groupBy.includes(column)) {
           fail(
             `orderBy column '${column}' must appear in groupBy when aggregating`

@@ -17,10 +17,18 @@ import { query_data } from "@/lib/agent/tools/query-data"
  * automatically extends toolsForRequest() and the system prompt's tool
  * list.
  */
-export const agentTools: AgentTool[] = [get_category_totals, query_data]
+export const agentTools = [
+  get_category_totals,
+  query_data,
+] as const satisfies AgentTool[]
 
-/** The agent tools; a union so a typo in a name is a compile error. */
-export type AgentToolName = "get_category_totals" | "query_data"
+/**
+ * The agent tools' name union, derived from the registry instead of
+ * restated: a name typo in the registry shows up as a missing member here
+ * (compile error at any use site), and a renamed tool cannot drift from
+ * the type.
+ */
+export type AgentToolName = (typeof agentTools)[number]["name"]
 
 export function toolByName(name: string): AgentTool | undefined {
   return agentTools.find((t) => t.name === name)

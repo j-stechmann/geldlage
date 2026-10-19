@@ -20,7 +20,7 @@
   `aggregate` (sum/count/avg/min/max)/`groupBy`/`having` (on aliases)/
   `orderBy`/`limit` (clamped to 100, default 20) with ops
   `eq ne gt gte lt lte contains like in isNull notNull` (`contains` escapes
-  LIKE wildcards); joins (`category.name`, `account.name`, `batch.*`,
+  LIKE wildcards; both are ASCII-case-insensitive); joins (`category.name`, `account.name`, `batch.*`,
   `label.*`) are inferred from dotted refs to whitelisted FK edges;
   derived columns `booking_month`/`booking_year` make per-month/year
   answers expression-free. Results report `limited` + `totalMatching` when

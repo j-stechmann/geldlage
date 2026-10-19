@@ -14,7 +14,7 @@ export function queryDataPromptDoc(): string {
     "query_data: freie Nur-Lese-Abfragen per JSON (kein SQL, keine eigenen Felder). Felder: table (Pflicht), select (Spaltenliste), where (UND-Filter), whereAny (ODER-Gruppe), aggregate, groupBy, having (auf Aliase), orderBy, limit."
   )
   lines.push(
-    'Filterform: {"column": Spalte, "op": eq|ne|gt|gte|lt|lte|contains|like|in|isNull|notNull, "value"}. contains = enthält (keine Wildcards nötig); like erwartet eigene % Wildcards; beide nur auf Text-Spalten; in erwartet ein Array. Vergleichs-ops treffen NULL nicht — fehlende Werte mit isNull/notNull prüfen.'
+    'Filterform: {"column": Spalte, "op": eq|ne|gt|gte|lt|lte|contains|like|in|isNull|notNull, "value"}. contains = enthält (keine Wildcards nötig); like erwartet eigene % Wildcards; beide nur auf Text-Spalten, Groß-/Kleinschreibung egal (ASCII); in erwartet ein Array. Vergleichs-ops treffen NULL nicht — fehlende Werte mit isNull/notNull prüfen.'
   )
   lines.push(
     `Regeln: Geldbeträge in Cent. Zeilenabfragen immer mit explizitem select — ohne select kommen alle Spalten der Tabelle zurück und breite Ergebnisse werden hart gekürzt („Ergebnis gekürzt"). Mit Aggregat enthält das Ergebnis die groupBy-Spalten + Aliase (select dort nicht nötig). having nur auf numerische Aliase (Text-min/max nur sortierbar); ein NULL-Aggregat (avg/min/max ohne Treffer) fällt durch jeden having-Vergleich. limit max ${QUERY_MAX_ROWS} (Standard ${QUERY_DEFAULT_LIMIT}); bei Ergebnis "limited" die Abfrage weiter einschränken. Ohne orderBy kommen Zeilen in Erfassungsreihenfolge (stabil über Aufrufe). Joined Spalten als "alias.spalte".`
