@@ -37,7 +37,9 @@ The DSL has no escape hatches by construction:
   "select": ["booking_date", "payee", "amount_cents", "category.name"],
   "where": [{ "column": "booking_date", "op": "gte", "value": "2026-01-01" }],
   "whereAny": [{ "column": "status", "op": "eq", "value": "Gebucht" }],
-  "aggregate": [{ "fn": "sum", "column": "amount_cents", "alias": "summe_cents" }],
+  "aggregate": [
+    { "fn": "sum", "column": "amount_cents", "alias": "summe_cents" }
+  ],
   "groupBy": ["booking_month"],
   "having": [{ "column": "summe_cents", "op": "lt", "value": -50000 }],
   "orderBy": [{ "column": "summe_cents", "direction": "asc" }],
@@ -115,14 +117,19 @@ without any expression language in the DSL.
   views. `query_data` complements it rather than replacing it.
 - Structural rejections at parse time: `groupBy` without any `aggregate`
   (bare-column grouping is undefined in SQLite and a limit cut could not
-  report a meaningful group count), duplicate select output keys, and
-  aggregate aliases colliding with a groupBy output key — a repeated
-  label would silently merge two selected columns into one row-object
-  key. Aggregate queries report the groupBy keys + aliases, ignoring
+  report a meaningful group count), duplicate select **and groupBy**
+  output keys (refs like `account_id` next to `account.id` compile to
+  the same label — a repeated label would silently swallow one of the
+  two values in the row object), aggregate aliases colliding with a
+  groupBy output key, and — in aggregate mode — `orderBy` refs outside
+  `groupBy` (SQLite would silently order groups by an arbitrary row
+  value). Aggregate queries report the groupBy keys + aliases, ignoring
   `select` (parse-time validation requires select ⊆ groupBy when
   present).
-- SQLite-level errors (e.g. an ORDER BY column not in GROUP BY) surface as
-  `{"error": …}` — self-correctable within the AGENT_MAX_TURNS budget.
+  All structural mismatches (select ⊆ groupBy, orderBy refs in aggregate
+  mode, having on aliases) are rejected at parse time; remaining
+  SQLite-level errors surface as `{"error": …}` — self-correctable within
+  the AGENT_MAX_TURNS budget.
 - `totalMatching` is unreported for grouped queries that hit the limit —
   "how many groups match" would need a subquery for a number the model
   rarely needs; `limited: true` still signals the cut.

@@ -356,8 +356,13 @@ export function parseQuery(raw: unknown): ParsedQuery {
     const seen = new Set<string>()
     for (const ref of raw.groupBy) {
       checkRef(def, table, ref)
-      if (seen.has(ref)) fail(`duplicate groupBy column '${ref}'`)
-      seen.add(ref)
+      // dedupe on the compiled output key (base ref → itself, joined
+      // "alias.col" → "alias_col"): two distinct refs can resolve to the
+      // same SELECT label, which would collapse two GROUP BY expressions
+      // into one lost row-object column (e.g. account_id + account.id).
+      const key = outputKey(ref)
+      if (seen.has(key)) fail(`duplicate groupBy output column '${key}'`)
+      seen.add(key)
       groupBy.push(ref)
     }
   }
@@ -452,6 +457,14 @@ export function parseQuery(raw: unknown): ParsedQuery {
       if (!isAlias) {
         // a bare ref that looks like an alias but isn't must fail loudly
         checkRef(def, table, column)
+        // SQLite would silently pick an arbitrary row value for a bare
+        // ORDER BY column not in GROUP BY — same reasoning as the select
+        // ⊆ groupBy rule above, fail loudly instead.
+        if (aggregate.length > 0 && !groupBy.includes(column)) {
+          fail(
+            `orderBy column '${column}' must appear in groupBy when aggregating`
+          )
+        }
       }
       orderBy.push({ column, direction })
     })

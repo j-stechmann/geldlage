@@ -9,7 +9,7 @@ import type { Db } from "@/lib/db"
 import { createSchemaSqlite } from "@/lib/db"
 import * as schema from "@/lib/db/schema"
 import { accounts, categories, transactions } from "@/lib/db/schema"
-import { parseQuery } from "@/lib/agent/query/parse"
+import { parseQuery, QUERY_OPS } from "@/lib/agent/query/parse"
 import type { QueryResult } from "@/lib/agent/query/compile"
 import { createReadOnlyDb } from "@/lib/agent/query/readonly-db"
 import { queryDataPromptDoc } from "@/lib/agent/query/prompt-doc"
@@ -283,6 +283,54 @@ describe("parseQuery validation", () => {
     expect(() =>
       parseQuery({ table: "transactions", select: ["payee", "payee"] })
     ).toThrow(/duplicate output column 'payee'/)
+  })
+
+  it("rejects duplicate groupBy output keys", () => {
+    // FK ref + joined ref resolve to the same SELECT label — the row
+    // object would swallow one GROUP BY expression's value, and groups
+    // split when the scoped join nulls (e.g. a foreign account_id)
+    expect(() =>
+      parseQuery({
+        table: "transactions",
+        aggregate: [{ fn: "count", column: "payee" }],
+        groupBy: ["account_id", "account.id"],
+      })
+    ).toThrow(/duplicate groupBy output column 'account_id'/)
+    // literal duplicate refs fail too, consistent with select
+    expect(() =>
+      parseQuery({
+        table: "transactions",
+        aggregate: [{ fn: "count", column: "payee" }],
+        groupBy: ["payee", "payee"],
+      })
+    ).toThrow(/duplicate groupBy output column 'payee'/)
+  })
+
+  it("rejects an aggregate-mode orderBy ref outside groupBy", () => {
+    // SQLite would silently pick an arbitrary row value per group
+    expect(() =>
+      parseQuery({
+        table: "transactions",
+        aggregate: [{ fn: "sum", column: "amount_cents" }],
+        groupBy: ["booking_month"],
+        orderBy: [{ column: "payee" }],
+      })
+    ).toThrow(/orderBy column 'payee' must appear in groupBy when aggregating/)
+    // aliases and groupBy refs stay allowed
+    const byGroup = parseQuery({
+      table: "transactions",
+      aggregate: [{ fn: "sum", column: "amount_cents", alias: "s" }],
+      groupBy: ["booking_month"],
+      orderBy: [{ column: "booking_month" }],
+    })
+    expect(byGroup.orderBy).toEqual([
+      { column: "booking_month", direction: "asc" },
+    ])
+    // row queries are unaffected
+    expect(
+      parseQuery({ table: "transactions", orderBy: [{ column: "payee" }] })
+        .orderBy
+    ).toEqual([{ column: "payee", direction: "asc" }])
   })
 
   it("clamps the limit, defaults to 20, resolves aggregate aliases", () => {
@@ -760,6 +808,13 @@ describe("queryDataPromptDoc", () => {
     expect(doc).toContain("category.name")
     expect(doc).toContain("booking_month")
     expect(doc).not.toContain("user_id")
+    // every op spelled in the doc must be one the parser actually accepts
+    // (the generated examples must not teach an op like ">=" that fails)
+    const ops = [...doc.matchAll(/"op":"([a-zA-Z]+)"/g)]
+    expect(ops.length).toBeGreaterThan(0)
+    for (const match of ops) {
+      expect(QUERY_OPS).toContain(match[1])
+    }
   })
 })
 

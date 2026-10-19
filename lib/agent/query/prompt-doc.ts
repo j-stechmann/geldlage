@@ -31,7 +31,7 @@ export function queryDataPromptDoc(): string {
     )
   }
   lines.push(
-    'Beispiel "Ausgaben pro Monat 2026": {"table":"transactions","aggregate":[{"fn":"sum","column":"amount_cents","alias":"summe_cents"}],"groupBy":["booking_month"],"where":[{"column":"booking_date","op":">=","value":"2026-01-01"}],"orderBy":[{"column":"booking_month"}]}'
+    'Beispiel "Ausgaben pro Monat 2026": {"table":"transactions","aggregate":[{"fn":"sum","column":"amount_cents","alias":"summe_cents"}],"groupBy":["booking_month"],"where":[{"column":"booking_date","op":"gte","value":"2026-01-01"}],"orderBy":[{"column":"booking_month"}]}'
   )
   lines.push(
     'Beispiel "letzte 10 Buchungen von X mit Kategorie": {"table":"transactions","select":["booking_date","payee","amount_cents","category.name"],"where":[{"column":"payer","op":"contains","value":"X"}],"orderBy":[{"column":"booking_date","direction":"desc"}],"limit":10}'
