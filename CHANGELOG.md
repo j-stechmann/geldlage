@@ -10,9 +10,10 @@
   its content's intrinsic width and the page overflowed with a horizontal
   scrollbar instead of reflowing — resizing the window looked frozen. `<main>`
   now carries `min-w-0` and is a Tailwind `@container`: the page grids (KPI
-  row, dashboard charts, transaction detail list) moved from viewport
-  breakpoints (`sm:`/`lg:`) to container queries (`@min-[640px]:` /
-  `@min-[1024px]:`) — same intent, but these measure `<main>`'s content
+  row, dashboard charts, transaction detail list, imports page) moved from
+  viewport breakpoints (`sm:`/`lg:`) to container queries
+  (`@min-[640px]:`/`@min-[1024px]:`) — same intent, but these measure
+  `<main>`'s content
   box and thus fire ~2rem (px-4) later than the old viewport thresholds —
   so content reflows against the width
   actually left of the dock. The dock itself is additionally capped at
