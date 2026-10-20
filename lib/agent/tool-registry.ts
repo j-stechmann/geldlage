@@ -1,5 +1,6 @@
 import type { AgentTool } from "@/lib/agent/types"
 import { get_category_totals } from "@/lib/agent/tools/category-totals"
+import { query_data } from "@/lib/agent/tools/query-data"
 
 /**
  * OpenAI wire-format translation for the agent tool registry (ADR-0033):
@@ -16,7 +17,18 @@ import { get_category_totals } from "@/lib/agent/tools/category-totals"
  * automatically extends toolsForRequest() and the system prompt's tool
  * list.
  */
-export const agentTools: AgentTool[] = [get_category_totals]
+export const agentTools = [
+  get_category_totals,
+  query_data,
+] as const satisfies AgentTool[]
+
+/**
+ * The agent tools' name union, derived from the registry instead of
+ * restated: a name typo in the registry shows up as a missing member here
+ * (compile error at any use site), and a renamed tool cannot drift from
+ * the type.
+ */
+export type AgentToolName = (typeof agentTools)[number]["name"]
 
 export function toolByName(name: string): AgentTool | undefined {
   return agentTools.find((t) => t.name === name)

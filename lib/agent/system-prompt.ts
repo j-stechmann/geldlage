@@ -1,4 +1,5 @@
 import { languageDisplay } from "@/lib/llm/prompt"
+import { queryDataPromptDoc } from "@/lib/agent/query/prompt-doc"
 
 /**
  * System prompt for the agent chat (ADR-0033). Persona, hard facts
@@ -32,6 +33,12 @@ export function agentSystemPrompt(
   if (toolNames.length > 0) {
     s += "\nVerfügbare Tools: "
     s += toolNames.join(", ") + ".\n"
+  }
+  // query_data reference: generated from the query catalog so the prompt
+  // can never describe a table/column/op the interpreter rejects. Only
+  // embedded when the tool is actually advertised (registry-driven).
+  if (toolNames.includes("query_data")) {
+    s += "\n" + queryDataPromptDoc() + "\n"
   }
   return s
 }

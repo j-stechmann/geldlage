@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased
+
+## v1.17.0
+
+### Added
+
+- **query_data — read-only query DSL for the agent**: the agent can now ask
+  arbitrary read-only questions about the user's financial data through a
+  flat JSON query tool instead of only the one preset
+  (`get_category_totals`). Freedom and safety are separated by design: the
+  model freely picks table/column/filter/aggregation combinations, while a
+  whitelist catalog (tables, columns, join edges, value kinds) is the only
+  source of identifiers — the compiled statement is one SELECT whose
+  identifiers render from catalog constants and whose values are bound
+  parameters; `user_id = <session uid>` is forced into the WHERE and into
+  every join's ON clause and `user_id` is not an addressable column.
+  Reads run through a second better-sqlite3 connection opened
+  `readonly: true` (+ `PRAGMA query_only`), so even a compiler bug cannot
+  write. DSL: `table`/`select`/`where` (AND)/`whereAny` (OR group)/
+  `aggregate` (sum/count/avg/min/max)/`groupBy`/`having` (on aliases)/
+  `orderBy`/`limit` (clamped to 100, default 20) with ops
+  `eq ne gt gte lt lte contains like in isNull notNull` (`contains` escapes
+  LIKE wildcards; both are ASCII-case-insensitive); joins (`category.name`, `account.name`, `batch.*`,
+  `label.*`) are inferred from dotted refs to whitelisted FK edges;
+  derived columns `booking_month`/`booking_year` make per-month/year
+  answers expression-free. Results report `limited` + `totalMatching` when
+  cut, long cells capped at 200 chars, and all failures surface as
+  `{"error": …}` prompts for self-correction. The system prompt gains a
+  schema/DSL reference block generated from the same catalog (only when
+  the tool is advertised). lib/agent/query/*, lib/agent/tools/query-data.ts;
+  ADR-0034.
+
 ## v1.16.0
 
 ### Added

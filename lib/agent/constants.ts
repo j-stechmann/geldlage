@@ -43,3 +43,13 @@ export const INVITE_MAX_USER_IDS = 100
  * history carries the empty prose the round actually streamed.
  */
 export const AGENT_NO_ANSWER_TEXT = "(Das Modell hat keine Antwort formuliert.)"
+
+/**
+ * query_data caps (ADR-0034). The DSL clamps instead of trusting model
+ * input: a row limit is applied no matter what the query asks for, and
+ * every string cell is capped so one long `purpose` blob cannot eat the
+ * tool-result budget (truncateToolResult, ~4000 chars) alone.
+ */
+export const QUERY_MAX_ROWS = 100
+export const QUERY_DEFAULT_LIMIT = 20
+export const QUERY_MAX_CELL_CHARS = 200

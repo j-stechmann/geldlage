@@ -128,7 +128,7 @@ beforeEach(() => {
 describe("toolsForRequest / toolByName", () => {
   it("maps the registry into the OpenAI wire format", () => {
     const wire = toolsForRequest()
-    expect(wire).toHaveLength(1)
+    expect(wire).toHaveLength(2)
     expect(wire[0].type).toBe("function")
     expect(wire[0].function.name).toBe("get_category_totals")
     expect(wire[0].function.description.length).toBeGreaterThan(10)
@@ -143,12 +143,19 @@ describe("toolsForRequest / toolByName", () => {
         status: { type: "string", enum: ["Gebucht", "Nicht gebucht", "both"] },
       },
     })
+    expect(wire[1].function.name).toBe("query_data")
+    expect(wire[1].function.parameters).toMatchObject({
+      type: "object",
+      required: ["table"],
+      additionalProperties: false,
+    })
   })
 
   it("resolves by name and rejects unknown tools", () => {
     expect(toolByName("get_category_totals")?.name).toBe("get_category_totals")
+    expect(toolByName("query_data")?.name).toBe("query_data")
     expect(toolByName("nope")).toBeUndefined()
-    expect(agentTools).toHaveLength(1)
+    expect(agentTools).toHaveLength(2)
   })
 })
 
