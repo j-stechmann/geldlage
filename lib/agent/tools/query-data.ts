@@ -46,6 +46,33 @@ const conditionSchema = {
 
 // `as const` on name keeps the literal type so tool-registry's
 // AgentToolName union derives from the registry (see get_category_totals).
+
+/**
+ * Having items are schema-restricted like the parser restricts them (the
+ * generic conditionSchema would advertise ops/value shapes having rejects:
+ * only the six numeric comparisons exist, and the value is always a
+ * number — isNull/notNull/contains/like/in have no HAVING meaning).
+ */
+const havingConditionSchema = {
+  type: "object",
+  properties: {
+    column: {
+      type: "string",
+      description: "Numerischer Aggregate-Alias (z. B. summe_cents)",
+    },
+    op: {
+      type: "string",
+      enum: ["eq", "ne", "gt", "gte", "lt", "lte"],
+    },
+    value: {
+      type: "number",
+      description:
+        "Vergleichszahl (Beträge in Cent, Integer; avg kann Dezimal liefern)",
+    },
+  },
+  required: ["column", "op", "value"],
+  additionalProperties: false,
+}
 export const query_data = {
   name: "query_data" as const,
   description:
@@ -108,8 +135,9 @@ export const query_data = {
       },
       having: {
         type: "array",
-        items: conditionSchema,
-        description: "Filter auf Aggregate-Aliase (nur mit aggregate)",
+        items: havingConditionSchema,
+        description:
+          "Filter auf Aggregate-Aliase (nur mit aggregate; nur numerische ops eq/ne/gt/gte/lt/lte)",
       },
       orderBy: {
         type: "array",

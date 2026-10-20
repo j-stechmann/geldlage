@@ -158,7 +158,10 @@ without any expression language in the DSL.
   the file, set WAL and completed recovery — no reliance on app boot flow.
   The query tests inject a real readonly connection (setReadOnlyTestDb
   over a file-backed test DB), so the suite itself runs through the
-  write-refusing path.
+  write-refusing path; an uninjected vitest read fails loud instead of
+  silently falling back to the writable getDb() singleton, and a
+  `:memory:` DATABASE_PATH in production throws (in-memory paths cannot
+  be reopened readonly — docs/operations.md specifies the file path).
 
 ## References
 

@@ -1035,6 +1035,11 @@ describe("queryDataPromptDoc", () => {
     expect(doc).toContain("NULL-Aggregat")
     expect(doc).toContain("keine definierte Reihenfolge")
     expect(doc).toContain("Nachkommastellen")
+    // truncated cells must be flagged so the model does not reuse a CUT
+    // value as an eq filter (would match nothing and loop)
+    expect(doc).toContain("beschnitten")
+    expect(doc).toContain("200")
+    expect(doc).toContain("contains")
     // contains/like semantics the model must know to interpret results
     expect(doc).toContain("Groß-/Kleinschreibung")
     // every op spelled in the doc must be one the parser actually accepts
@@ -1087,5 +1092,13 @@ describe("readonly connection refuses writes", () => {
         .values({ userId: uid1, iban: "DE00RO", name: "X" })
         .run()
     ).toThrow()
+  })
+
+  it("fails loud under vitest when no readonly connection is injected", () => {
+    // a silent fallback to the writable getDb() singleton would quietly
+    // void the write-refusal guarantee for a suite that forgets the seam —
+    // refuse loudly instead (the query suite re-injects in beforeEach)
+    setReadOnlyTestDb(undefined)
+    expect(() => getReadOnlyDb()).toThrow(/setReadOnlyTestDb/)
   })
 })
