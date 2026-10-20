@@ -154,18 +154,25 @@ const columnListeners = new Set<() => void>()
 /**
  * Fallback for environments where localStorage writes throw (Safari private
  * mode, quota exceeded): keeps the last attempted value so the toggle still
- * applies for the session. Note that once an override exists it shadows
- * localStorage, including cross-tab `storage` updates, which is acceptable
- * for this edge case.
+ * applies for the session. Successful writes clear it again, so localStorage
+ * becomes authoritative once more. Note that while an override exists it
+ * shadows localStorage, including cross-tab `storage` updates, which is
+ * acceptable for this edge case.
  */
 let inMemoryOverride: string | null = null
 
-function subscribeColumns(callback: () => void) {
+function subscribeColumns(callback: (event?: StorageEvent) => void) {
   columnListeners.add(callback)
-  window.addEventListener("storage", callback)
+  // only react to our own key; any other localStorage change is irrelevant
+  const onStorage = (event: StorageEvent) => {
+    if (event.storageArea === localStorage && event.key === STORAGE_KEY) {
+      callback(event)
+    }
+  }
+  window.addEventListener("storage", onStorage)
   return () => {
     columnListeners.delete(callback)
-    window.removeEventListener("storage", callback)
+    window.removeEventListener("storage", onStorage)
   }
 }
 
@@ -188,7 +195,9 @@ function notifyColumns() {
   }
 }
 
-function setColumnOverride(json: string) {
+// module-scope mutation must go through this helper so the react-hooks
+// "globals" rule doesn't flag the component for reassigning outer state
+function setColumnOverride(json: string | null) {
   inMemoryOverride = json
 }
 
@@ -496,7 +505,11 @@ function DetailField({
   hideEmpty?: boolean
   children: React.ReactNode
 }) {
-  if (hideEmpty && (children === null || children === "")) return null
+  if (
+    hideEmpty &&
+    (children === null || (typeof children === "string" && children.trim() === ""))
+  )
+    return null
   return (
     <div className={cn("space-y-1", span && "sm:col-span-2")}>
       <dt className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
@@ -547,6 +560,9 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
     if (next.length === 0) return
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+      // a previously failed write may have left an override; the persisted
+      // value is now authoritative again
+      setColumnOverride(null)
     } catch {
       // keep the change in memory so the toggle still applies when the
       // write throws (quota / blocked storage)
@@ -815,6 +831,7 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
                         <button
                           type="button"
                           aria-expanded={isExpanded}
+                          aria-controls={`tx-details-${row.id}`}
                           aria-label={
                             isExpanded
                               ? "Details ausblenden"
@@ -924,7 +941,10 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
                       )}
                     </TableRow>
                     {isExpanded && (
-                      <TableRow className="hover:bg-transparent">
+                      <TableRow
+                        className="hover:bg-transparent"
+                        id={`tx-details-${row.id}`}
+                      >
                         <TableCell
                           colSpan={visibleCount + 1}
                           className="p-0 whitespace-normal"
