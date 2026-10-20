@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **agent panel — page width responsiveness with the dock open**: the docked
+  chat was a fixed 280–720 px column next to `<main>` without `min-w-0`, so
+  once the dock took enough width the flexible column refused to shrink below
+  its content's intrinsic width and the page overflowed with a horizontal
+  scrollbar instead of reflowing — resizing the window looked frozen. `<main>`
+  now carries `min-w-0` and is a Tailwind `@container`: the page grids (KPI
+  row, dashboard charts, transaction detail list, imports page) moved from
+  viewport breakpoints (`sm:`/`lg:`) to container queries
+  (`@min-[640px]:`/`@min-[1024px]:`) — same intent, but these measure
+  `<main>`'s content
+  box and thus fire ~2rem (px-4) later than the old viewport thresholds —
+  so content reflows against the width
+  actually left of the dock. The dock itself is additionally capped at
+  `100vw − 320px` — a persisted 720 px can no longer squeeze the page to a
+  sliver on a small window (window resizes re-apply the cap with no listener
+  and leave the persisted width untouched; drag/keyboard resize clamp to
+  and commit the same limit, so the persisted width follows the user's
+  last interaction).
+
 ## v1.18.0
 
 ### Added

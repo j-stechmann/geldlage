@@ -112,8 +112,12 @@ export function CashflowChart({
   const { wrapRef, handlers } = zoom
   const visible = zoom.slice(chartData)
 
+  // @min-[1024px] (container query on <main>, same threshold as the grid
+  // in app/page.tsx): a col-span keyed off the viewport would still span 2
+  // when the dock squeezes main below 1024px on a wide window — the card
+  // would span an implicit second column instead of stacking full-width.
   return (
-    <Card className="lg:col-span-2">
+    <Card className="@min-[1024px]:col-span-2">
       <CardHeader>
         <CardTitle>Monatlicher Cashflow</CardTitle>
         <CardDescription>
@@ -387,8 +391,12 @@ export function BalanceChart({
   const { wrapRef, handlers } = zoom
   const visible = zoom.slice(chartData)
 
+  // @min-[1024px] (container query on <main>, same threshold as the grid
+  // in app/page.tsx): a col-span keyed off the viewport would still span 2
+  // when the dock squeezes main below 1024px on a wide window — the card
+  // would span an implicit second column instead of stacking full-width.
   return (
-    <Card className="lg:col-span-2">
+    <Card className="@min-[1024px]:col-span-2">
       <CardHeader>
         <CardTitle>Kontostand über Zeit</CardTitle>
         <CardDescription>

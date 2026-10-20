@@ -1,6 +1,6 @@
 # Geldlage — Documentation
 
-_Docs describe intent; code comments remain the source of truth. Guides carry a "Last reviewed against vX.Y" footer — refresh it when a PR changes what they document._
+_Docs describe intent; code comments remain the source of truth._
 
 Documentation for the Geldlage app (Next.js + SQLite + local LLM
 labeller): how it is built, why it is built that way, and how to run and
@@ -142,6 +142,4 @@ here. Guides cross-link to the ADRs they implement.
 
 - A PR that changes behavior must update the guide/ADR it crosses — in the
   same PR ([CONTRIBUTING.md](../CONTRIBUTING.md), "Documentation").
-- Refresh the `Last reviewed against vX.Y` footer of every guide you touch;
-  the release checklist reminds you.
 - CI link-checks `docs/**` on every push (see `ci.yml`).

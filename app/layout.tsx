@@ -31,7 +31,20 @@ export default function RootLayout({
               composing the agent dock as the right column of the content
               row dropped the old centered mx-auto max-w-7xl cap. Header
               and page content render full-width on every viewport, dock
-              open or closed; do not re-add a width cap here. */}
+              open or closed; do not re-add a width cap here. `<main>`
+              carries the two classes that keep the shell responsive while
+              the dock is open: `min-w-0` overrides the flex-item default
+              `min-width: auto` (without it main refuses to shrink below
+              its content's intrinsic width and the page overflows with a
+              horizontal scrollbar instead of reflowing), and `@container`
+              turns main into the query container the page grids key off —
+              their breakpoints track the width actually left of the dock,
+              not the viewport. Caveat: `@container` implies layout
+              containment, so `<main>` becomes the containing block for
+              `position: fixed` descendants — anything fixed must be
+              portaled to body (dialogs/selects already are; overlays like
+              the drag scrim and the import pill live in Providers, outside
+              main). */}
           <div className="flex min-h-svh flex-col">
             <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
               <div className="flex h-14 w-full items-center justify-between gap-4 px-4">
@@ -52,7 +65,7 @@ export default function RootLayout({
               </div>
             </header>
             <div className="flex w-full flex-1 items-stretch">
-              <main className="w-full max-w-full flex-1 px-4 py-6">
+              <main className="@container w-full max-w-full min-w-0 flex-1 px-4 py-6">
                 {children}
               </main>
               <AgentDock />
