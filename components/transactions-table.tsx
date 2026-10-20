@@ -34,6 +34,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import {
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ArrowUpDown,
@@ -142,11 +143,45 @@ const DEFAULT_VISIBLE = COLUMNS.filter((c) => c.defaultOn).map((c) => c.key)
 
 const STORAGE_KEY = "geldlage.table.columns"
 
-function loadVisible(): ColumnKey[] {
+/**
+ * Column visibility is persisted in localStorage and exposed as an external
+ * store via useSyncExternalStore. This keeps the SSR and hydration renders on
+ * DEFAULT_VISIBLE (getServerSnapshot) while the browser picks up the persisted
+ * config right after hydration — no hydration mismatch, no setState in effect.
+ */
+const columnListeners = new Set<() => void>()
+
+function subscribeColumns(callback: () => void) {
+  columnListeners.add(callback)
+  window.addEventListener("storage", callback)
+  return () => {
+    columnListeners.delete(callback)
+    window.removeEventListener("storage", callback)
+  }
+}
+
+function getColumnSnapshot(): string {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return DEFAULT_VISIBLE
-    const parsed = JSON.parse(raw) as ColumnKey[]
+    return localStorage.getItem(STORAGE_KEY) ?? ""
+  } catch {
+    return ""
+  }
+}
+
+function getServerColumnSnapshot(): string {
+  return ""
+}
+
+function notifyColumns() {
+  for (const listener of columnListeners) {
+    listener()
+  }
+}
+
+function parseVisible(json: string): ColumnKey[] {
+  if (!json) return DEFAULT_VISIBLE
+  try {
+    const parsed = JSON.parse(json) as ColumnKey[]
     const valid = parsed.filter((k) => COLUMNS.some((c) => c.key === k))
     return valid.length > 0 ? valid : DEFAULT_VISIBLE
   } catch {
@@ -434,6 +469,37 @@ const DEFAULT_SORTABLE: SortKey[] = [
   "amountCents",
 ]
 
+function DetailField({
+  label,
+  mono,
+  span,
+  hideEmpty,
+  children,
+}: {
+  label: string
+  mono?: boolean
+  span?: boolean
+  hideEmpty?: boolean
+  children: React.ReactNode
+}) {
+  if (hideEmpty && (children === null || children === "")) return null
+  return (
+    <div className={cn("space-y-1", span && "sm:col-span-2")}>
+      <dt className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        {label}
+      </dt>
+      <dd
+        className={cn(
+          "text-sm break-words whitespace-pre-wrap",
+          mono && "font-mono text-xs"
+        )}
+      >
+        {children || "—"}
+      </dd>
+    </div>
+  )
+}
+
 export function TransactionsTable({ filters }: { filters: TableFilters }) {
   const [page, setPage] = React.useState(1)
   const [sort, setSort] = React.useState<{ key: SortKey; desc: boolean }>({
@@ -441,10 +507,19 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
     desc: true,
   })
   const [assignTarget, setAssignTarget] = React.useState<TxRow | null>(null)
-  const [visible, setVisible] = React.useState<ColumnKey[] | null>(() =>
-    typeof window === "undefined" ? null : loadVisible()
+  const [expandedId, setExpandedId] = React.useState<string | null>(null)
+  // initialize with defaults on the server *and* during hydration; the
+  // persisted column config is read from localStorage via the external store
+  // right after hydration (see subscribeColumns / parseVisible above)
+  const visibleJson = React.useSyncExternalStore(
+    subscribeColumns,
+    getColumnSnapshot,
+    getServerColumnSnapshot
   )
-  const effectiveVisible = visible ?? DEFAULT_VISIBLE
+  const effectiveVisible = React.useMemo(
+    () => parseVisible(visibleJson),
+    [visibleJson]
+  )
 
   const toggleColumn = (key: ColumnKey) => {
     const prev = effectiveVisible
@@ -456,9 +531,9 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
           ),
         ]
     if (next.length === 0) return
-    setVisible(next)
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+      notifyColumns()
     } catch {
       // ignore persistence failures
     }
@@ -482,6 +557,19 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
   if (lastFilterKey !== filterKey) {
     setLastFilterKey(filterKey)
     setPage(1)
+  }
+
+  // collapse the detail row when the listing context changes
+  const expandContext = React.useMemo(
+    () => [page, sort.key, sort.desc, filterKey].join("|"),
+    [page, sort, filterKey]
+  )
+  const [lastExpandContext, setLastExpandContext] = React.useState(
+    expandContext
+  )
+  if (lastExpandContext !== expandContext) {
+    setLastExpandContext(expandContext)
+    setExpandedId(null)
   }
 
   const { data, isLoading, isFetching, isError, refetch } =
@@ -585,6 +673,9 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-8">
+                <span className="sr-only">Details einblenden</span>
+              </TableHead>
               {show("bookingDate") && (
                 <TableHead>
                   <SortHeader
@@ -650,7 +741,7 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
             {isLoading && rows.length === 0 ? (
               Array.from({ length: 8 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: visibleCount }).map((_, j) => (
+                  {Array.from({ length: visibleCount + 1 }).map((_, j) => (
                     <TableCell key={j}>
                       <Skeleton className="h-5 w-full" />
                     </TableCell>
@@ -659,7 +750,7 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
               ))
             ) : isError ? (
               <TableRow>
-                <TableCell colSpan={visibleCount} className="h-32">
+                <TableCell colSpan={visibleCount + 1} className="h-32">
                   <ErrorState
                     onRetry={() => void refetch()}
                     className="justify-center border-none bg-transparent"
@@ -669,7 +760,7 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
             ) : rows.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={visibleCount}
+                  colSpan={visibleCount + 1}
                   className="h-32 text-center text-muted-foreground"
                 >
                   Keine Transaktionen gefunden. CSV-Datei in das Fenster ziehen,
@@ -680,100 +771,186 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
               rows.map((row) => {
                 const counterparty =
                   row.type === "Ausgang" ? row.payee : row.payer
+                const isExpanded = expandedId === row.id
+                const toggleExpanded = () =>
+                  setExpandedId(isExpanded ? null : row.id)
                 return (
-                  <TableRow key={row.id}>
-                    {show("bookingDate") && (
-                      <TableCell className="whitespace-nowrap tabular-nums">
-                        {row.bookingDate}
-                      </TableCell>
-                    )}
-                    {show("valueDate") && (
-                      <TableCell className="whitespace-nowrap tabular-nums">
-                        {row.valueDate ?? "—"}
-                      </TableCell>
-                    )}
-                    {show("status") && (
-                      <TableCell className="whitespace-nowrap">
-                        {row.status}
-                      </TableCell>
-                    )}
-                    {show("counterparty") && (
-                      <TableCell>
-                        <div className="max-w-md min-w-0">
-                          <p className="truncate font-medium">
-                            {counterparty || "—"}
-                          </p>
-                        </div>
-                      </TableCell>
-                    )}
-                    {show("purpose") && (
-                      <TableCell>
-                        <p
-                          className="max-w-md truncate text-sm text-muted-foreground"
-                          title={row.purpose ?? undefined}
-                        >
-                          {row.purpose || "—"}
-                        </p>
-                      </TableCell>
-                    )}
-                    {show("counterpartyIban") && (
-                      <TableCell className="font-mono text-xs whitespace-nowrap">
-                        {row.counterpartyIban || "—"}
-                      </TableCell>
-                    )}
-                    {show("type") && (
-                      <TableCell className="whitespace-nowrap">
-                        {row.type}
-                      </TableCell>
-                    )}
-                    {show("account") && (
-                      <TableCell className="whitespace-nowrap">
-                        {row.accountName ?? "—"}
-                      </TableCell>
-                    )}
-                    {show("category") && (
-                      <TableCell>
+                  <React.Fragment key={row.id}>
+                    <TableRow
+                      className="cursor-pointer"
+                      tabIndex={0}
+                      onClick={toggleExpanded}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault()
+                          toggleExpanded()
+                        }
+                      }}
+                    >
+                      <TableCell className="w-8">
                         <button
-                          className="inline-flex cursor-pointer items-center rounded-md transition-colors hover:bg-accent/60"
-                          onClick={() => setAssignTarget(row)}
-                          title="Kategorie zuweisen"
+                          type="button"
+                          aria-expanded={isExpanded || undefined}
+                          aria-label={
+                            isExpanded
+                              ? "Details ausblenden"
+                              : "Details einblenden"
+                          }
+                          className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            toggleExpanded()
+                          }}
                         >
-                          <CategoryCell row={row} />
+                          <ChevronDown
+                            className={`size-4 transition-transform ${isExpanded ? "" : "-rotate-90"}`}
+                          />
                         </button>
                       </TableCell>
-                    )}
-                    {show("labelStatus") && (
-                      <TableCell className="whitespace-nowrap">
-                        <LabelStatusCell status={row.labelStatus} />
-                      </TableCell>
-                    )}
-                    {show("creditorId") && (
-                      <TableCell className="font-mono text-xs whitespace-nowrap">
-                        {row.creditorId || "—"}
-                      </TableCell>
-                    )}
-                    {show("mandateRef") && (
-                      <TableCell className="max-w-40 truncate font-mono text-xs">
-                        {row.mandateRef || "—"}
-                      </TableCell>
-                    )}
-                    {show("customerRef") && (
-                      <TableCell className="max-w-40 truncate font-mono text-xs">
-                        {row.customerRef || "—"}
-                      </TableCell>
-                    )}
-                    {show("amountCents") && (
-                      <TableCell
-                        className={`text-right font-medium whitespace-nowrap tabular-nums ${
-                          row.amountCents < 0
-                            ? "text-foreground"
-                            : "text-emerald-600 dark:text-emerald-400"
-                        }`}
+                      {show("bookingDate") && (
+                        <TableCell className="whitespace-nowrap tabular-nums">
+                          {row.bookingDate}
+                        </TableCell>
+                      )}
+                      {show("valueDate") && (
+                        <TableCell className="whitespace-nowrap tabular-nums">
+                          {row.valueDate ?? "—"}
+                        </TableCell>
+                      )}
+                      {show("status") && (
+                        <TableCell className="whitespace-nowrap">
+                          {row.status}
+                        </TableCell>
+                      )}
+                      {show("counterparty") && (
+                        <TableCell>
+                          <div className="max-w-md min-w-0">
+                            <p className="truncate font-medium">
+                              {counterparty || "—"}
+                            </p>
+                          </div>
+                        </TableCell>
+                      )}
+                      {show("purpose") && (
+                        <TableCell>
+                          <p className="max-w-md truncate text-sm text-muted-foreground">
+                            {row.purpose || "—"}
+                          </p>
+                        </TableCell>
+                      )}
+                      {show("counterpartyIban") && (
+                        <TableCell className="font-mono text-xs whitespace-nowrap">
+                          {row.counterpartyIban || "—"}
+                        </TableCell>
+                      )}
+                      {show("type") && (
+                        <TableCell className="whitespace-nowrap">
+                          {row.type}
+                        </TableCell>
+                      )}
+                      {show("account") && (
+                        <TableCell className="whitespace-nowrap">
+                          {row.accountName ?? "—"}
+                        </TableCell>
+                      )}
+                      {show("category") && (
+                        <TableCell>
+                          <button
+                            className="inline-flex cursor-pointer items-center rounded-md transition-colors hover:bg-accent/60"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setAssignTarget(row)
+                            }}
+                            title="Kategorie zuweisen"
+                          >
+                            <CategoryCell row={row} />
+                          </button>
+                        </TableCell>
+                      )}
+                      {show("labelStatus") && (
+                        <TableCell className="whitespace-nowrap">
+                          <LabelStatusCell status={row.labelStatus} />
+                        </TableCell>
+                      )}
+                      {show("creditorId") && (
+                        <TableCell className="font-mono text-xs whitespace-nowrap">
+                          {row.creditorId || "—"}
+                        </TableCell>
+                      )}
+                      {show("mandateRef") && (
+                        <TableCell className="max-w-40 truncate font-mono text-xs">
+                          {row.mandateRef || "—"}
+                        </TableCell>
+                      )}
+                      {show("customerRef") && (
+                        <TableCell className="max-w-40 truncate font-mono text-xs">
+                          {row.customerRef || "—"}
+                        </TableCell>
+                      )}
+                      {show("amountCents") && (
+                        <TableCell
+                          className={`text-right font-medium whitespace-nowrap tabular-nums ${
+                            row.amountCents < 0
+                              ? "text-foreground"
+                              : "text-emerald-600 dark:text-emerald-400"
+                          }`}
+                        >
+                          {euro(row.amountCents)}
+                        </TableCell>
+                      )}
+                    </TableRow>
+                    {isExpanded && (
+                      <TableRow
+                        key={`${row.id}-detail`}
+                        className="hover:bg-transparent"
                       >
-                        {euro(row.amountCents)}
-                      </TableCell>
+                        <TableCell
+                          colSpan={visibleCount + 1}
+                          className="p-0 whitespace-normal"
+                        >
+                          <div className="mx-2 mb-2 rounded-md border border-border/50 bg-muted/40 p-4">
+                            <dl className="grid gap-x-8 gap-y-3 sm:grid-cols-2">
+                              <DetailField label="Vertragspartner" span>
+                                <span className="font-medium">
+                                  {counterparty || "—"}
+                                </span>
+                              </DetailField>
+                              <DetailField label="Verwendungszweck" span>
+                                {row.purpose}
+                              </DetailField>
+                              <DetailField label="IBAN" mono>
+                                {row.counterpartyIban}
+                              </DetailField>
+                              <DetailField label="Gläubiger-ID" mono hideEmpty>
+                                {row.creditorId}
+                              </DetailField>
+                              <DetailField
+                                label="Mandatsreferenz"
+                                mono
+                                hideEmpty
+                              >
+                                {row.mandateRef}
+                              </DetailField>
+                              <DetailField
+                                label="Kundenreferenz"
+                                mono
+                                hideEmpty
+                              >
+                                {row.customerRef}
+                              </DetailField>
+                              <DetailField label="Typ">{row.type}</DetailField>
+                              <DetailField label="Konto">
+                                {row.accountName}
+                              </DetailField>
+                              <DetailField label="Kategorie">
+                                <CategoryCell row={row} />
+                              </DetailField>
+                            </dl>
+                          </div>
+                        </TableCell>
+                      </TableRow>
                     )}
-                  </TableRow>
+                  </React.Fragment>
                 )
               })
             )}
