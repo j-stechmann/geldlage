@@ -497,6 +497,10 @@ const DEFAULT_SORTABLE: SortKey[] = [
   "amountCents",
 ]
 
+// pointer movement (px) above which a click on a row counts as a drag
+// (e.g. text selection) instead of an expand toggle
+const DRAG_THRESHOLD = 4
+
 function DetailField({
   label,
   mono,
@@ -540,6 +544,13 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
   })
   const [assignTarget, setAssignTarget] = React.useState<TxRow | null>(null)
   const [expandedId, setExpandedId] = React.useState<string | null>(null)
+  // remembers where the last press on a row started, so its click handler
+  // can tell a plain click apart from a drag that ends in text selection
+  const pointerDownRef = React.useRef<{
+    x: number
+    y: number
+    hadSelection: boolean
+  } | null>(null)
   // initialize with defaults on the server *and* during hydration; the
   // persisted column config is read from localStorage via the external store
   // right after hydration (see subscribeColumns / parseVisible above)
@@ -815,20 +826,51 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
                   <React.Fragment key={row.id}>
                     <TableRow
                       className="cursor-pointer"
+                      onPointerDown={(e) => {
+                        // record where the press started and whether a text
+                        // selection already existed inside the row — Firefox
+                        // keeps the old selection when clicking inside it, so
+                        // a plain click there must still toggle (see onClick)
+                        const selection = window.getSelection()
+                        pointerDownRef.current = {
+                          x: e.clientX,
+                          y: e.clientY,
+                          hadSelection:
+                            selection != null &&
+                            !selection.isCollapsed &&
+                            (e.currentTarget.contains(selection.anchorNode) ||
+                              e.currentTarget.contains(selection.focusNode)),
+                        }
+                      }}
                       onClick={(e) => {
                         // a double-click dispatches a second click that carries
                         // detail === 2; ignore it so a double-click (e.g. for
                         // word selection while copying) doesn't toggle twice —
                         // the first click still toggles once
                         if (e.detail > 1) return
-                        // don't toggle when the click was part of selecting
-                        // text (e.g. dragging across a truncated value);
-                        // check both ends, since drags that end inside the row
-                        // put the anchor in a different row
+                        const down = pointerDownRef.current
+                        pointerDownRef.current = null
+                        // once the pointer has moved this is a drag (e.g.
+                        // selecting text), never an expand toggle
+                        if (
+                          down &&
+                          Math.hypot(e.clientX - down.x, e.clientY - down.y) >
+                            DRAG_THRESHOLD
+                        ) {
+                          return
+                        }
+                        // a sub-threshold drag can still end with a fresh
+                        // text selection; check both ends, since drags that
+                        // end inside the row put the anchor in a different
+                        // row. A click that lands inside a pre-existing
+                        // selection (down.hadSelection) without moving was a
+                        // plain click and still toggles, even though Firefox
+                        // keeps that selection alive.
                         const selection = window.getSelection()
                         if (
                           selection &&
                           !selection.isCollapsed &&
+                          !down?.hadSelection &&
                           (e.currentTarget.contains(selection.anchorNode) ||
                             e.currentTarget.contains(selection.focusNode))
                         ) {
@@ -852,6 +894,11 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
                           className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
                           onClick={(e) => {
                             e.stopPropagation()
+                            // ignore the second click of a double-click so a
+                            // rapid double-click toggles once, matching the
+                            // row behavior; keyboard activation (detail 0)
+                            // is unaffected
+                            if (e.detail > 1) return
                             toggleExpanded()
                           }}
                         >
