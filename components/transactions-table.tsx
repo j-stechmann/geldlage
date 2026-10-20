@@ -796,12 +796,15 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
                       className="cursor-pointer"
                       onClick={(e) => {
                         // don't toggle when the click was part of selecting
-                        // text (e.g. double-clicking to copy a truncated value)
+                        // text (e.g. double-clicking to copy a truncated value);
+                        // check both ends, since drags that end inside the row
+                        // put the anchor in a different row
                         const selection = window.getSelection()
                         if (
                           selection &&
                           !selection.isCollapsed &&
-                          e.currentTarget.contains(selection.anchorNode)
+                          (e.currentTarget.contains(selection.anchorNode) ||
+                            e.currentTarget.contains(selection.focusNode))
                         ) {
                           return
                         }
