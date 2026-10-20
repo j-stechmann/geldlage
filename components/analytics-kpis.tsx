@@ -10,7 +10,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { formatCentsAsGerman } from "@/lib/money"
+import { euro } from "@/lib/money"
 import { apiFetch } from "@/lib/api-fetch"
 
 export interface AnalyticsResponse {
@@ -67,11 +67,6 @@ export function useAnalytics(params: string) {
     },
     placeholderData: (prev) => prev,
   })
-}
-
-export function euro(cents: number | null | undefined): string {
-  if (cents === null || cents === undefined) return "—"
-  return formatCentsAsGerman(cents) + " €"
 }
 
 function KpiCard({

@@ -1,6 +1,33 @@
 # Changelog
 
-## Unreleased
+## v1.18.0
+
+### Added
+
+- **transactions — expandable detail row**: every row gets a chevron toggle
+  column; clicking the row (or the focusable chevron button, with
+  `aria-expanded`) opens an inset panel below it with the full values as a
+  definition list — full Vertragspartner and Verwendungszweck
+  (`whitespace-pre-wrap` for structured multi-line SEPA purposes), mono
+  IBAN/Gläubiger-ID/Mandats-/Kundenreferenz (hidden when empty), plus
+  Typ/Konto/Kategorie. Accordion semantics (one expanded row at a time);
+  expansion resets on page/sort/filter change; text-selection drags and
+  double-clicks don't toggle the row
+  (`hooks/use-row-activation.ts`); the `Kategorie zuweisen` button no
+  longer toggles the row; the native Verwendungszweck tooltip was removed
+  (superseded by the detail row).
+
+### Fixed
+
+- **transactions — hydration mismatch on column visibility**: the persisted
+  column config was read from `localStorage` inside a lazy `useState`
+  initializer, so a changed config diverged from the SSR HTML and broke
+  hydration. Column visibility now lives in a module-level
+  `useSyncExternalStore` store (`components/table-columns.ts`) with a fixed
+  server snapshot — the browser picks up the persisted config right after
+  hydration. Cross-tab `storage` events sync columns across tabs (new), and
+  failed `localStorage` writes (Safari private mode, quota) fall back to an
+  in-memory override so the toggle keeps working.
 
 ## v1.17.0
 

@@ -5,6 +5,7 @@ import {
   formatCentsAsGerman,
   parseGermanDateToIso,
   normalizeWhitespace,
+  euro,
   ParseError,
 } from "@/lib/money"
 
@@ -140,6 +141,26 @@ describe("parseGermanDateToIso", () => {
   ]
   it.each(invalid.map((v) => [v]))("rejects %j", (input) => {
     expect(() => parseGermanDateToIso(input)).toThrow(ParseError)
+  })
+})
+
+describe("euro", () => {
+  it("formats amounts with a trailing euro sign and de-DE grouping", () => {
+    expect(euro(123456)).toBe("1.234,56 €")
+    expect(euro(0)).toBe("0,00 €")
+    expect(euro(-7)).toBe("−0,07 €")
+  })
+
+  it("negatives use U+2212 (DKB style), not the ASCII hyphen", () => {
+    const formatted = euro(-123456)
+    expect(formatted).toBe("−1.234,56 €")
+    expect(formatted.startsWith("-")).toBe(false)
+    expect(formatted.startsWith("\u2212")).toBe(true)
+  })
+
+  it("renders an em-dash placeholder for missing values", () => {
+    expect(euro(null)).toBe("—")
+    expect(euro(undefined)).toBe("—")
   })
 })
 
