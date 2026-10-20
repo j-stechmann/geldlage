@@ -163,9 +163,14 @@ let inMemoryOverride: string | null = null
 
 function subscribeColumns(callback: (event?: StorageEvent) => void) {
   columnListeners.add(callback)
-  // only react to our own key; any other localStorage change is irrelevant
   const onStorage = (event: StorageEvent) => {
-    if (event.storageArea === localStorage && event.key === STORAGE_KEY) {
+    // react to our key, or to a clear() (which emits key === null);
+    // some older Safari versions report null storageArea, so only trust
+    // it when it is present
+    if (
+      (event.storageArea === null || event.storageArea === localStorage) &&
+      (event.key === STORAGE_KEY || event.key === null)
+    ) {
       callback(event)
     }
   }
