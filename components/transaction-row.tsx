@@ -239,6 +239,7 @@ export const TransactionRow = React.memo(function TransactionRow({
       {visibleSet.has("category") && (
         <TableCell>
           <button
+            type="button"
             className="inline-flex cursor-pointer items-center rounded-md transition-colors hover:bg-accent/60"
             onClick={(e) => {
               e.stopPropagation()

@@ -11,7 +11,7 @@ import * as React from "react"
  * DEFAULT_VISIBLE, so SSR and the hydration render agree while the browser
  * picks up the persisted config right after hydration — no hydration
  * mismatch, no setState in effect. Cross-tab `storage` events are picked up
- * like before.
+ * too (new: the previous implementation read localStorage only at mount).
  */
 
 export type ColumnKey =
