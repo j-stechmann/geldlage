@@ -794,16 +794,18 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
                   <React.Fragment key={row.id}>
                     <TableRow
                       className="cursor-pointer"
-                      tabIndex={0}
-                      onClick={toggleExpanded}
-                      onKeyDown={(e) => {
-                        // ignore keys pressed on nested controls (chevron,
-                        // category button) so their own activation still works
-                        if (e.target !== e.currentTarget || e.repeat) return
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault()
-                          toggleExpanded()
+                      onClick={(e) => {
+                        // don't toggle when the click was part of selecting
+                        // text (e.g. double-clicking to copy a truncated value)
+                        const selection = window.getSelection()
+                        if (
+                          selection &&
+                          !selection.isCollapsed &&
+                          e.currentTarget.contains(selection.anchorNode)
+                        ) {
+                          return
                         }
+                        toggleExpanded()
                       }}
                     >
                       <TableCell className="w-8">
