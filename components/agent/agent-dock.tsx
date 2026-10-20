@@ -54,7 +54,14 @@ export function AgentDock() {
       style={isDesktop ? { width } : undefined}
       className={
         isDesktop
-          ? "sticky top-14 flex h-[calc(100svh-3.5rem)] flex-none flex-col border-l bg-background"
+          ? // max-w keeps the dock from outgrowing the viewport: the page
+            // always keeps MIN_PAGE_WIDTH (20rem, same constant the
+            // ResizeHandle clamps to) beside it, so a persisted 720px
+            // width can't squeeze main to Nothing on a small window. Pure
+            // CSS — it re-clamps on every window resize with no listener;
+            // the persisted value is untouched and restores when the
+            // window grows again.
+            "sticky top-14 flex h-[calc(100svh-3.5rem)] max-w-[calc(100vw-20rem)] flex-none flex-col border-l bg-background"
           : "fixed inset-0 z-50 flex flex-col border-l bg-background shadow-lg"
       }
     >
@@ -78,7 +85,8 @@ export function AgentDock() {
 /**
  * Drag-to-resize handle on the dock's left edge: pointer capture keeps the
  * drag alive outside the strip, width is clamped to [MIN_WIDTH, MAX_WIDTH]
- * and persisted by setPanelState once on pointerup — the moves in between
+ * and to the viewport (the page keeps MIN_PAGE_WIDTH beside the dock) and
+ * persisted by setPanelState once on pointerup — the moves in between
  * only preview the width in memory (a synchronous localStorage write per
  * pointermove would fire dozens of times per drag). The drag is anchored
  * at pointerdown — pointer X and dock width are frozen there and the
@@ -93,6 +101,23 @@ export function AgentDock() {
  */
 const RESIZE_KEY_STEP = 16
 
+/**
+ * The page keeps at least 20rem beside the dock. Mirrors the aside's
+ * `max-w-[calc(100vw-20rem)]` class (jsdom aside: drag/keyboard resize
+ * clamps to the same limit so the previewed width matches what renders;
+ * only meaningful on md+ where the dock is docked — the overlay below md
+ * has no resize handle).
+ */
+const MIN_PAGE_WIDTH = 320
+
+function viewportMaxWidth(): number {
+  return window.innerWidth - MIN_PAGE_WIDTH
+}
+
+function clampResizableWidth(w: number): number {
+  return Math.min(clampWidth(w), viewportMaxWidth())
+}
+
 function ResizeHandle() {
   const { width } = usePanelState()
   const drag = useRef<{
@@ -104,14 +129,18 @@ function ResizeHandle() {
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     const parent = e.currentTarget.parentElement
     if (!parent) return
-    const startWidth = parent.getBoundingClientRect().width
+    // clamp against the viewport too: a persisted 720px on a since-shrunk
+    // window would anchor the drag at a width the aside no longer renders
+    const startWidth = clampResizableWidth(parent.getBoundingClientRect().width)
     drag.current = { startX: e.clientX, startWidth, width: startWidth }
     e.currentTarget.setPointerCapture(e.pointerId)
   }
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const start = drag.current
     if (!start) return
-    start.width = clampWidth(start.startWidth + (start.startX - e.clientX))
+    start.width = clampResizableWidth(
+      start.startWidth + (start.startX - e.clientX)
+    )
     previewPanelState({ width: start.width })
   }
   // pointer capture funnels up/cancel here even outside the strip: one
@@ -125,16 +154,18 @@ function ResizeHandle() {
     // preventDefault suppresses the arrow keys' native scroll behavior
     if (e.key === "ArrowLeft") {
       e.preventDefault()
-      setPanelState({ width: clampWidth(width + RESIZE_KEY_STEP) })
+      setPanelState({ width: clampResizableWidth(width + RESIZE_KEY_STEP) })
     } else if (e.key === "ArrowRight") {
       e.preventDefault()
-      setPanelState({ width: clampWidth(width - RESIZE_KEY_STEP) })
+      setPanelState({ width: clampResizableWidth(width - RESIZE_KEY_STEP) })
     } else if (e.key === "Home") {
       e.preventDefault()
       setPanelState({ width: MIN_WIDTH })
     } else if (e.key === "End") {
       e.preventDefault()
-      setPanelState({ width: MAX_WIDTH })
+      // End = "widest allowed", which on a small window is the viewport
+      // cap, not the absolute MAX_WIDTH
+      setPanelState({ width: clampResizableWidth(MAX_WIDTH) })
     }
   }
 

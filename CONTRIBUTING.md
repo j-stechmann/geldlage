@@ -40,7 +40,6 @@ Extensive docs live in [`docs/`](docs/README.md) (guides + ADRs).
 - A PR that **changes behavior must update the guide/ADR it crosses** — in
   the same PR. Code comments remain the source of truth; docs describe
   intent.
-- Refresh the `Last reviewed against vX.Y` footer of every guide you touch.
 - New architecture-level decisions get a new ADR in `docs/adr/` (next free
   number, `docs/README.md` index entry); see the existing files for the
   format.
@@ -69,9 +68,7 @@ changes should be documented as an ADR (see [Documentation](#documentation)).
    ```
 
 2. Bump `package.json` version and write the `CHANGELOG.md` entry (move the
-   `Unreleased` section under the new `vX.Y.Z` heading). Refresh the
-   `Last reviewed against vX.Y` footers on docs touched since the last
-   release.
+   `Unreleased` section under the new `vX.Y.Z` heading).
 3. Open a PR from `release/*` into `develop`, let CI pass, merge.
 4. Fast-forward `master` to `develop` via a second PR (`release/*` → `master`)
    or locally: `git switch master && git merge --ff-only develop && git push`.

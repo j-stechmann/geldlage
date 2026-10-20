@@ -21,6 +21,21 @@ import {
   stubSetPointerCapture,
 } from "./helpers-dom"
 
+/** jsdom's fixed 1024px viewport would fight the dock's viewport cap:
+ * swap in an own innerWidth and restore jsdom's original descriptor in
+ * afterEach (its getter is an own property — deleting it would break
+ * every later test). */
+const jsdomViewport = Object.getOwnPropertyDescriptor(window, "innerWidth")
+let viewportOverride = false
+
+function setViewportWidth(width: number) {
+  viewportOverride = true
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    value: width,
+  })
+}
+
 describe("agent dock resize handle", () => {
   let storage: Storage
   beforeEach(() => {
@@ -43,6 +58,10 @@ describe("agent dock resize handle", () => {
   })
 
   afterEach(() => {
+    if (viewportOverride && jsdomViewport) {
+      viewportOverride = false
+      Object.defineProperty(window, "innerWidth", jsdomViewport)
+    }
     vi.unstubAllGlobals()
   })
 
@@ -67,12 +86,41 @@ describe("agent dock resize handle", () => {
   })
 
   it("Home/End clamp to the width bounds", () => {
+    // wide viewport (jsdom default 1024 would cap End at 100vw-20rem):
+    // on a window large enough for the absolute bounds End reaches 720
+    setViewportWidth(1920)
     renderWithQuery(createElement(AgentDock))
     const handle = screen.getByRole("separator")
     fireEvent.keyDown(handle, { key: "End" })
     expect(storage.getItem("geldlage.agent.width")).toBe("720")
     fireEvent.keyDown(handle, { key: "Home" })
     expect(storage.getItem("geldlage.agent.width")).toBe("280")
+  })
+
+  it("clamps drag and End to the viewport (page keeps 20rem beside the dock)", () => {
+    // Regression: the persisted width only knew the absolute 280–720
+    // bounds, so a 720px dock on a small window (or a drag past the
+    // window edge) squeezed the page to a sliver and the flex row
+    // overflowed horizontally. The resizable bounds now include the
+    // viewport cap viewport-320.
+    setViewportWidth(900) // cap = 900 - 320 = 580
+    stubSetPointerCapture()
+    renderWithQuery(createElement(AgentDock))
+    const aside = screen.getByRole("complementary")
+    expect(aside).toHaveClass("max-w-[calc(100vw-20rem)]")
+    aside.getBoundingClientRect = () => ({ width: 360 }) as DOMRect
+    const handle = screen.getByRole("separator")
+
+    // drag far past the window: preview clamps at the cap
+    fireEvent.pointerDown(handle, { clientX: 600, pointerId: 1 })
+    fireEvent.pointerMove(handle, { clientX: 0, pointerId: 1 })
+    expect(aside).toHaveStyle({ width: "580px" })
+    fireEvent.pointerUp(handle, { pointerId: 1 })
+    expect(storage.getItem("geldlage.agent.width")).toBe("580")
+
+    // End asks for the widest allowed: the viewport cap, not 720
+    fireEvent.keyDown(handle, { key: "End" })
+    expect(storage.getItem("geldlage.agent.width")).toBe("580")
   })
 
   it("leaves the width untouched on unrelated keys", () => {
