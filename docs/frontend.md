@@ -1,6 +1,6 @@
 # Frontend
 
-_Last reviewed against v1.17.0 (transactions: expandable detail row with full cell content; column visibility extracted into a module-level `useSyncExternalStore` store)._
+_Last reviewed against v1.18.0 (transactions: expandable detail row with full cell content; column visibility extracted into a module-level `useSyncExternalStore` store)._
 
 Every page is a **client component**: the entire UI is a live dashboard
 driven by filters, polling, and toasts, with no server-rendered data
