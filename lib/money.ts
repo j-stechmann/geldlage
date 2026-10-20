@@ -118,6 +118,19 @@ export function parseGermanAmountToCents(input: string): number {
 }
 
 /**
+ * UI display format: German amount with trailing " €", U+2212 minus for
+ * negatives (DKB style), "—" placeholder for missing values. Built on
+ * formatCentsAsGerman, so it inherits the safe-integer guard.
+ */
+export function euro(cents: number | null | undefined): string {
+  if (cents === null || cents === undefined) return "—"
+  const formatted = formatCentsAsGerman(cents)
+  return formatted.startsWith("-")
+    ? `−${formatted.slice(1)} €`
+    : `${formatted} €`
+}
+
+/**
  * Format integer cents back into a German amount string.
  * Used by tests (round-trip property) and potentially the UI.
  */

@@ -5,6 +5,7 @@ import { ChevronDown, CircleDashed, Tag } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { TableRow, TableCell } from "@/components/ui/table"
 import { resolveCategoryColor } from "@/lib/category-colors"
+import { euro } from "@/lib/money"
 import { cn } from "@/lib/utils"
 import type { ColumnKey } from "@/components/table-columns"
 import type { RowActivation } from "@/hooks/use-row-activation"
@@ -33,17 +34,6 @@ export interface TxRow {
   categoryName: string | null
   categoryColor: string | null
   labelStatus: string
-}
-
-/**
- * German monetary formatting for table cells (DKB style, U+2212 minus,
- * de-DE thousands separator, trailing €).
- */
-function euro(cents: number): string {
-  const abs = Math.abs(cents)
-  const int = Math.floor(abs / 100)
-  const frac = String(abs % 100).padStart(2, "0")
-  return `${cents < 0 ? "−" : ""}${int.toLocaleString("de-DE")},${frac} €`
 }
 
 /** Counterparty in row direction: the payee of outgoing, payer of incoming. */
@@ -186,6 +176,9 @@ export const TransactionRow = React.memo(function TransactionRow({
         <button
           type="button"
           aria-expanded={expanded}
+          // only while expanded: the detail <tr> is unmounted when
+          // collapsed, and aria-controls referencing a nonexistent element
+          // is an ARIA authoring error (aria-expanded carries the state)
           aria-controls={expanded ? detailRowId(row.id) : undefined}
           aria-label={expanded ? "Details ausblenden" : "Details einblenden"}
           className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"

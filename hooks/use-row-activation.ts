@@ -16,8 +16,9 @@ interface PointerDownState {
 export interface RowActivation {
   onPointerDown: (e: React.PointerEvent<HTMLElement>) => void
   /**
-   * consumes the pointer-down state recorded for this press; returns true
-   * if the click is a plain activation. Call at most once per click.
+   * returns true if the click event is a plain activation. Idempotent for
+   * the click that follows its own press — the press record is not
+   * consumed, so calling this twice (or from several handlers) is safe.
    */
   isPlainClick: (e: React.MouseEvent<HTMLElement>) => boolean
 }
@@ -27,10 +28,10 @@ export interface RowActivation {
  * (transactions table: clicking a row toggles its detail row, but dragging
  * a text selection across it must not).
  *
- * One hook instance per table: it owns the single pointer-down record that
- * every row shares (each press overwrites it, and the click that follows
- * always finds the record of its own press — including clicks on row
- * children, which bubble). Gate the row's action on its verdict:
+ * One hook instance per table: every row shares the single pointer-down
+ * record (each press overwrites it, and the click that follows always
+ * finds the record of its own press — including clicks on row children,
+ * which bubble). Gate the row's action on its verdict:
  *
  *   <tr onPointerDown={activation.onPointerDown}
  *       onClick={(e) => activation.isPlainClick(e) && toggle(row.id)}>
@@ -63,8 +64,16 @@ export function useRowActivation(): RowActivation {
     // ignore it so a double-click (e.g. for word selection while copying)
     // doesn't toggle twice — the first click still toggles once
     if (e.detail > 1) return false
+    // detail 0 = keyboard/AT-simulated click (element.click() and friends):
+    // no press of its own, no usable coordinates, so there is nothing to
+    // disambiguate — it is an activation. This is also what makes the
+    // unconsumed record safe: every click with detail >= 1 follows its own
+    // pointerdown, so the record a real click finds is always its own
+    // press, and repeat calls within the same click see the same record and
+    // return the same verdict.
+    if (e.detail === 0) return true
+    // the record is kept (not consumed), see above
     const down = pointerDownRef.current
-    pointerDownRef.current = null
     // once the pointer has moved this is a drag (e.g. selecting text),
     // never an activation
     if (
