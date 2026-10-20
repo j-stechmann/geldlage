@@ -151,6 +151,15 @@ const STORAGE_KEY = "geldlage.table.columns"
  */
 const columnListeners = new Set<() => void>()
 
+/**
+ * Fallback for environments where localStorage writes throw (Safari private
+ * mode, quota exceeded): keeps the last attempted value so the toggle still
+ * applies for the session. Note that once an override exists it shadows
+ * localStorage, including cross-tab `storage` updates, which is acceptable
+ * for this edge case.
+ */
+let inMemoryOverride: string | null = null
+
 function subscribeColumns(callback: () => void) {
   columnListeners.add(callback)
   window.addEventListener("storage", callback)
@@ -161,6 +170,7 @@ function subscribeColumns(callback: () => void) {
 }
 
 function getColumnSnapshot(): string {
+  if (inMemoryOverride !== null) return inMemoryOverride
   try {
     return localStorage.getItem(STORAGE_KEY) ?? ""
   } catch {
@@ -176,6 +186,10 @@ function notifyColumns() {
   for (const listener of columnListeners) {
     listener()
   }
+}
+
+function setColumnOverride(json: string) {
+  inMemoryOverride = json
 }
 
 function parseVisible(json: string): ColumnKey[] {
@@ -534,9 +548,10 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
     } catch {
-      // ignore persistence failures
+      // keep the change in memory so the toggle still applies when the
+      // write throws (quota / blocked storage)
+      setColumnOverride(JSON.stringify(next))
     } finally {
-      // always update the UI, even if the write threw (quota / blocked storage)
       notifyColumns()
     }
   }
@@ -794,7 +809,7 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
                       <TableCell className="w-8">
                         <button
                           type="button"
-                          aria-expanded={isExpanded || undefined}
+                          aria-expanded={isExpanded}
                           aria-label={
                             isExpanded
                               ? "Details ausblenden"
@@ -904,10 +919,7 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
                       )}
                     </TableRow>
                     {isExpanded && (
-                      <TableRow
-                        key={`${row.id}-detail`}
-                        className="hover:bg-transparent"
-                      >
+                      <TableRow className="hover:bg-transparent">
                         <TableCell
                           colSpan={visibleCount + 1}
                           className="p-0 whitespace-normal"
