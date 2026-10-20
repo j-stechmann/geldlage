@@ -112,11 +112,11 @@ export interface CategoryTotalsResult {
   totalsCents: { inflow: number; outflow: number }
 }
 
-/** The one tool; a union so a typo in a name is a compile error. */
-export type AgentToolName = "get_category_totals"
-
-export const get_category_totals: AgentTool = {
-  name: "get_category_totals",
+// `as const` on name keeps the literal type so tool-registry's
+// AgentToolName union derives from the registry (a tool declaration with
+// `name: string` would silently widen the derived union to string).
+export const get_category_totals = {
+  name: "get_category_totals" as const,
   description:
     "Liefert Summen (Einnahmen/Ausgaben) und Transaktionsanzahl pro Kategorie für den Sitzungsbenutzer. Wähle eine Periode: this_month, last_month oder last_90_days. Optional filter nach Buchungsstatus: Gebucht (Standard), Nicht gebucht (vorgemerkt) oder both. Nicht kategorisierte Transaktionen laufen unter „Ohne Kategorie“ auf und zählen zu den Gesamtsummen. Beträge in Cent (Integer).",
   parameters: {
@@ -230,4 +230,4 @@ export const get_category_totals: AgentTool = {
     }
     return result
   },
-}
+} satisfies AgentTool
