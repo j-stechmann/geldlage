@@ -533,9 +533,11 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
     if (next.length === 0) return
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
-      notifyColumns()
     } catch {
       // ignore persistence failures
+    } finally {
+      // always update the UI, even if the write threw (quota / blocked storage)
+      notifyColumns()
     }
   }
 
@@ -564,9 +566,8 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
     () => [page, sort.key, sort.desc, filterKey].join("|"),
     [page, sort, filterKey]
   )
-  const [lastExpandContext, setLastExpandContext] = React.useState(
-    expandContext
-  )
+  const [lastExpandContext, setLastExpandContext] =
+    React.useState(expandContext)
   if (lastExpandContext !== expandContext) {
     setLastExpandContext(expandContext)
     setExpandedId(null)
@@ -781,6 +782,9 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
                       tabIndex={0}
                       onClick={toggleExpanded}
                       onKeyDown={(e) => {
+                        // ignore keys pressed on nested controls (chevron,
+                        // category button) so their own activation still works
+                        if (e.target !== e.currentTarget || e.repeat) return
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault()
                           toggleExpanded()
