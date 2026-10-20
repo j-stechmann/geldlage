@@ -1,4 +1,8 @@
-import { QUERY_DEFAULT_LIMIT, QUERY_MAX_CELL_CHARS, QUERY_MAX_ROWS } from "@/lib/agent/constants"
+import {
+  QUERY_DEFAULT_LIMIT,
+  QUERY_MAX_CELL_CHARS,
+  QUERY_MAX_ROWS,
+} from "@/lib/agent/constants"
 import { queryTables } from "./catalog"
 
 /**

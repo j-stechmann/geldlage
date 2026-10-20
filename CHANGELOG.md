@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.17.0
+
 ### Added
 
 - **query_data — read-only query DSL for the agent**: the agent can now ask
