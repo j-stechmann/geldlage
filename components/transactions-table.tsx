@@ -816,8 +816,13 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
                     <TableRow
                       className="cursor-pointer"
                       onClick={(e) => {
+                        // a double-click dispatches a second click that carries
+                        // detail === 2; ignore it so a double-click (e.g. for
+                        // word selection while copying) doesn't toggle twice —
+                        // the first click still toggles once
+                        if (e.detail > 1) return
                         // don't toggle when the click was part of selecting
-                        // text (e.g. double-clicking to copy a truncated value);
+                        // text (e.g. dragging across a truncated value);
                         // check both ends, since drags that end inside the row
                         // put the anchor in a different row
                         const selection = window.getSelection()
@@ -836,7 +841,9 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
                         <button
                           type="button"
                           aria-expanded={isExpanded}
-                          aria-controls={`tx-details-${row.id}`}
+                          aria-controls={
+                            isExpanded ? `tx-details-${row.id}` : undefined
+                          }
                           aria-label={
                             isExpanded
                               ? "Details ausblenden"
