@@ -54,7 +54,11 @@ export default function DashboardPage() {
       >
         <KpiRow analytics={analytics} loading={showLoading} />
 
-        <div className="grid gap-4 lg:grid-cols-3">
+        {/* @min-[1024px] (container query on <main>) instead of viewport
+            lg: the charts reflow against the space left of the agent dock.
+            Container queries measure main's content box (px-4), so this
+            fires ~2rem later than the viewport 1024px threshold. */}
+        <div className="grid gap-4 @min-[1024px]:grid-cols-3">
           <CashflowChart
             data={analytics?.monthlyCashflow}
             loading={showLoading}

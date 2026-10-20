@@ -1,7 +1,5 @@
 # Data model
 
-_Last reviewed against v1.15.0 (chat threads tables — `chat_threads` / `chat_thread_members` / `chat_messages` — ADR-0033)._
-
 The persistence layer is **SQLite via better-sqlite3, accessed synchronously
 through drizzle-orm** (used only as a type-safe query builder — no drizzle-kit
 migration files exist). Schema DDL is hand-written, code-first, and idempotent

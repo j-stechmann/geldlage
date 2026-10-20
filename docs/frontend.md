@@ -1,7 +1,5 @@
 # Frontend
 
-_Last reviewed against v1.18.0 (transactions: expandable detail row with full cell content; column visibility extracted into a module-level `useSyncExternalStore` store)._
-
 Every page is a **client component**: the entire UI is a live dashboard
 driven by filters, polling, and toasts, with no server-rendered data
 ([ADR-0023](adr/adr-0023-client-components-react-query.md)). The only Server
@@ -41,6 +39,13 @@ native tool access to the user's own finance data, composed into
 next to `<main>` in the main content row, so pages and `AppNav` keep
 their own markup. Composing the dock dropped the centered `max-w-7xl`
 cap — the header row and `<main>` render full-bleed (`max-w-full`).
+`<main>` additionally carries `min-w-0` (overrides the flex-item default
+`min-width: auto`, which otherwise refuses to shrink below the content's
+intrinsic width and overflows the page with a horizontal scrollbar once
+the dock takes its space) and `@container` (the query container the page
+grids key off — see below; its layout containment makes `<main>` the
+containing block for `position: fixed` descendants, so fixed overlays must
+be portaled or live outside main).
 
 | Component / module                      | Role                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -63,8 +68,22 @@ cap — the header row and `<main>` render full-bleed (`max-w-full`).
 
 **Dock behavior**: on md+ the panel is a sticky flex column pinned under the
 header (`top-14`, `h-[calc(100svh-3.5rem)]`) whose width the user drags
-between 280 and 720 px (clamped, persisted); below md it renders as a fixed
-full-screen overlay. The chat is streamed over SSE
+between 280 and 720 px (clamped, persisted) — additionally capped at
+`100vw − 320px` (CSS `max-w-[calc(100vw-320px)]` re-clamps on every window
+resize without a listener; the same cap applies to drag/keyboard resize) so
+the page keeps at least 320px beside the dock — roughly: `100vw`/innerWidth
+include the vertical scrollbar, so the space beside the dock falls the
+scrollbar's width short of the full 320px when the cap is active. Window
+resizes never touch the persisted width (it restores when the window grows
+again); drag/keyboard resize clamp to and _commit_ the cap instead. Below md
+it renders as a fixed full-screen overlay. Page content is
+**container-responsive**, not
+viewport-responsive: `<main>` is a Tailwind `@container`, and its grids use
+`@min-[640px]:` / `@min-[1024px]:` variants (same intent as the old `sm:` /
+`lg:` viewport breakpoints — but container queries measure main's content
+box, so they fire ~2rem (px-4) later) so layouts reflow against the width
+actually left of the dock instead of crushing beside it. The chat is
+streamed over SSE
 (`delta`/`reasoning`/`tool_call`/`tool_result`/`done`/`error` frames):
 content renders incrementally into a streaming bubble, the model's thinking
 trace appears as a collapsible **Denkprozess** (open while streaming,

@@ -1,7 +1,5 @@
 # Labelling
 
-_Last reviewed against v1.14.1 (streamed completions with SSE parsing; default-on reasoning, client-side thinking-token reserve, per-request budget pin)._
-
 Transaction categorization runs as a background worker loop that claims
 pending rows in small batches, asks a local llama.cpp `llama-server` for
 labels, and persists results with crash-safe bookkeeping. Code:

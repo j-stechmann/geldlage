@@ -113,7 +113,13 @@ export function KpiRow({
       : "—"
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+    // Container-query breakpoints (@min-[…px]), not viewport ones: the
+    // grid tracks the width actually left of the agent dock (the
+    // @container on <main>), so the row re-wraps when the chat opens
+    // instead of crushing five cards beside a 720px dock. Container
+    // queries measure main's CONTENT BOX, so these fire ~2rem (px-4)
+    // later than the old sm:/lg: viewport breakpoints — by design.
+    <div className="grid gap-4 @min-[640px]:grid-cols-2 @min-[1024px]:grid-cols-5">
       <KpiCard
         title="Aktueller Kontostand"
         value={euro(k?.currentBalanceCents)}

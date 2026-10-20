@@ -1,7 +1,5 @@
 # Architecture
 
-_Last reviewed against v1.15.0. Docs describe intent; code comments remain the source of truth._
-
 Geldlage is a **single-process, local-first web application**: one Node
 process serves the Next.js UI, the REST API, a background import job, and a
 background labeling worker — all reading and writing one SQLite database, and

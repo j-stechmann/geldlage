@@ -1,5 +1,45 @@
 # Changelog
 
+## v1.18.1
+
+### Fixed
+
+- **dropdown popups — labels no longer overflow into the check mark**: the
+  transaction table's column dropdown pinned its popup to the trigger
+  button's width (`w-(--anchor-width)`), so long single-word column labels —
+  `Verwendungszweck`, `Mandatsreferenz`, `Kundenreferenz` — could neither
+  wrap nor shrink below their intrinsic width and rendered underneath the
+  absolutely-positioned check icon (`right-2`). `DropdownMenuContent`
+  (`components/ui/dropdown-menu.tsx`) now grows with its content (`w-max`),
+  floored at `max(var(--anchor-width), 8rem)` so trigger-shaped menus are
+  unchanged, and is capped at Base UI's available viewport space so very
+  long menus can't leave the screen. It also reserves the scrollbar gutter
+  (`[scrollbar-gutter:stable]`): `w-max` sizes the popup before a scrollbar
+  appears, and Firefox (unlike Chromium) then squeezes item content by the
+  scrollbar width, pushing long labels into the check icon again in tall
+  scrollable menus. Covers the same latent bug in the filter bar's category
+  dropdown. On overlay-scrollbar platforms (macOS, Firefox macOS) the
+  gutter reservation has no effect.
+
+- **agent panel — page width responsiveness with the dock open**: the docked
+  chat was a fixed 280–720 px column next to `<main>` without `min-w-0`, so
+  once the dock took enough width the flexible column refused to shrink below
+  its content's intrinsic width and the page overflowed with a horizontal
+  scrollbar instead of reflowing — resizing the window looked frozen. `<main>`
+  now carries `min-w-0` and is a Tailwind `@container`: the page grids (KPI
+  row, dashboard charts, transaction detail list, imports page) moved from
+  viewport breakpoints (`sm:`/`lg:`) to container queries
+  (`@min-[640px]:`/`@min-[1024px]:`) — same intent, but these measure
+  `<main>`'s content
+  box and thus fire ~2rem (px-4) later than the old viewport thresholds —
+  so content reflows against the width
+  actually left of the dock. The dock itself is additionally capped at
+  `100vw − 320px` — a persisted 720 px can no longer squeeze the page to a
+  sliver on a small window (window resizes re-apply the cap with no listener
+  and leave the persisted width untouched; drag/keyboard resize clamp to
+  and commit the same limit, so the persisted width follows the user's
+  last interaction).
+
 ## v1.18.0
 
 ### Added

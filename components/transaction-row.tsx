@@ -130,7 +130,7 @@ function DetailField({
   )
     return null
   return (
-    <div className={cn("space-y-1", span && "sm:col-span-2")}>
+    <div className={cn("space-y-1", span && "@min-[640px]:col-span-2")}>
       <dt className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
         {label}
       </dt>
@@ -302,7 +302,7 @@ export function TransactionDetailRow({
     <TableRow className="hover:bg-transparent" id={detailRowId(row.id)}>
       <TableCell colSpan={colSpan} className="p-0 whitespace-normal">
         <div className="mx-2 mb-2 rounded-md border border-border/50 bg-muted/40 p-4">
-          <dl className="grid gap-x-8 gap-y-3 sm:grid-cols-2">
+          <dl className="grid gap-x-8 gap-y-3 @min-[640px]:grid-cols-2">
             <DetailField label="Vertragspartner" span>
               <span className="font-medium">{counterparty || "—"}</span>
             </DetailField>

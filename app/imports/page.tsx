@@ -328,7 +328,10 @@ export default function ImportsPage() {
           CSV-Exporte importieren und Verlauf einsehen.
         </p>
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
+      {/* @min-[1024px] (container query on <main>) instead of viewport
+          lg: this page reflows against the space left of the agent dock,
+          like the dashboard grids (see app/page.tsx). */}
+      <div className="grid gap-4 @min-[1024px]:grid-cols-2">
         <ImportDropzone />
         <ActiveImportCard />
       </div>
