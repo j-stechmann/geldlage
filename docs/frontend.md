@@ -1,6 +1,6 @@
 # Frontend
 
-_Last reviewed against v1.16.0 (agent dock: app-wide LLM panel with tool loop, optimistic-bubble alignment, markdown rendering in all chat text, full-bleed layout)._
+_Last reviewed against v1.17.0 (transactions: expandable detail row with full cell content; column visibility extracted into a module-level `useSyncExternalStore` store)._
 
 Every page is a **client component**: the entire UI is a live dashboard
 driven by filters, polling, and toasts, with no server-rendered data
@@ -152,12 +152,42 @@ so content filters (q/type/category/labelStatus/**status**) are ignored
 The full transaction table: **all schema fields as columns** (Buchung,
 Wertstellung, Status, Vertragspartner, Verwendungszweck, IBAN, Typ, Konto,
 Kategorie, Label-Status, Gläubiger-ID, Mandatsreferenz, Kundenreferenz,
-Betrag) with a persisted column-visibility toggle (Spalten dropdown,
-`localStorage`). Hand-rolled on shadcn `Table` primitives with server-side
-everything: pagination (fixed 25 rows), sorting (booking date, value date,
-status, payee, amount), and filtering all happen in SQL; the client only
+Betrag) with a persisted column-visibility toggle (Spalten dropdown).
+Hand-rolled on shadcn `Table` primitives with server-side everything:
+pagination (fixed 25 rows), sorting (booking date, value date, status,
+payee, amount), and filtering all happen in SQL; the client only
 serializes state into the query string
 ([ADR-0026](adr/adr-0026-server-side-table.md)).
+
+**Expandable detail row**: every row gets a narrow chevron column; clicking
+the row (or the focusable chevron button) expands an inset panel below it
+with the row's values as a definition list — full Vertragspartner and
+Verwendungszweck (`whitespace-pre-wrap`, so structured multi-line SEPA
+purposes read exactly as intended), IBAN, Gläubiger-ID and
+Mandats-/Kundenreferenz (hidden when empty), plus Typ/Konto/Kategorie.
+Accordion semantics (one expanded row at a time); the expansion resets on
+page/sort/filter change (same value-based reset pattern as `page`). Rows
+are deliberately **not** focusable — keyboard users toggle via the chevron
+button (`Enter`/`Space`, `aria-expanded` + `aria-controls`). Row activation
+is disambiguated from text-selection drags and double-clicks by
+[hooks/use-row-activation.ts](../hooks/use-row-activation.ts) (one hook
+instance feeds every row); the `Kategorie zuweisen` button stops
+propagation so it never toggles the row.
+
+**Column visibility store**
+([components/table-columns.ts](../components/table-columns.ts)): a
+module-level `useSyncExternalStore` store like
+[components/agent/panel-state.ts](../components/agent/panel-state.ts) — SSR
+and the hydration render deliver `DEFAULT_VISIBLE` (fixed server snapshot)
+while the browser picks up the persisted config right after hydration (no
+hydration mismatch, no `setState` in effect); cross-tab `storage` events
+are picked up, and when a write throws (Safari private mode, quota) an
+in-memory override keeps the toggle working for the session. The table
+files split by concern: `components/transactions-table.tsx` is the slim
+orchestrator (state, query, toolbar, pagination),
+`components/transaction-row.tsx` renders the row pair (main row + detail
+row with `TxRow` as single DTO source),
+`components/assign-label-dialog.tsx` is the category dialog.
 
 **URL-synced filters**: filter state round-trips through the query string
 (`filtersToParams`/`paramsToFilters` in
