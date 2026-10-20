@@ -55,13 +55,15 @@ export function AgentDock() {
       className={
         isDesktop
           ? // max-w keeps the dock from outgrowing the viewport: the page
-            // always keeps MIN_PAGE_WIDTH (20rem, same constant the
-            // ResizeHandle clamps to) beside it, so a persisted 720px
-            // width can't squeeze main to Nothing on a small window. Pure
-            // CSS — it re-clamps on every window resize with no listener;
-            // the persisted value is untouched and restores when the
-            // window grows again.
-            "sticky top-14 flex h-[calc(100svh-3.5rem)] max-w-[calc(100vw-20rem)] flex-none flex-col border-l bg-background"
+            // always keeps MIN_PAGE_WIDTH beside it, so a persisted 720px
+            // width can't squeeze main to a sliver on a small window. Pure
+            // CSS — window resizes re-apply the cap with no listener and
+            // leave the persisted width untouched (it restores when the
+            // window grows again); drag/keyboard resize instead clamp to
+            // and commit the cap. 320px (not 20rem) so the CSS bound and
+            // the ResizeHandle's MIN_PAGE_WIDTH stay the same constant
+            // even if the root font-size ever changes.
+            "sticky top-14 flex h-[calc(100svh-3.5rem)] max-w-[calc(100vw-320px)] flex-none flex-col border-l bg-background"
           : "fixed inset-0 z-50 flex flex-col border-l bg-background shadow-lg"
       }
     >
@@ -102,11 +104,15 @@ export function AgentDock() {
 const RESIZE_KEY_STEP = 16
 
 /**
- * The page keeps at least 20rem beside the dock. Mirrors the aside's
- * `max-w-[calc(100vw-20rem)]` class (jsdom aside: drag/keyboard resize
- * clamps to the same limit so the previewed width matches what renders;
- * only meaningful on md+ where the dock is docked — the overlay below md
- * has no resize handle).
+ * The page keeps at least 320px beside the dock. Must stay the exact value
+ * the aside's `max-w-[calc(100vw-320px)]` class subtracts — px, not rem, so
+ * the CSS bound and this bound stay equal even if the root font-size ever
+ * changes. Caveat: `100vw`/`window.innerWidth` both include the vertical
+ * scrollbar, so when the cap is active on a scrollable page the space
+ * beside the dock falls the scrollbar's width short of the full 320px.
+ * (jsdom aside: drag/keyboard resize clamps to the same limit so the
+ * previewed width matches what renders; only meaningful on md+ where the
+ * dock is docked — the overlay below md has no resize handle.)
  */
 const MIN_PAGE_WIDTH = 320
 

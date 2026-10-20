@@ -86,7 +86,7 @@ describe("agent dock resize handle", () => {
   })
 
   it("Home/End clamp to the width bounds", () => {
-    // wide viewport (jsdom default 1024 would cap End at 100vw-20rem):
+    // wide viewport (jsdom default 1024 would cap End at 100vw-320px):
     // on a window large enough for the absolute bounds End reaches 720
     setViewportWidth(1920)
     renderWithQuery(createElement(AgentDock))
@@ -97,7 +97,7 @@ describe("agent dock resize handle", () => {
     expect(storage.getItem("geldlage.agent.width")).toBe("280")
   })
 
-  it("clamps drag and End to the viewport (page keeps 20rem beside the dock)", () => {
+  it("clamps drag and End to the viewport (page keeps 320px beside the dock)", () => {
     // Regression: the persisted width only knew the absolute 280–720
     // bounds, so a 720px dock on a small window (or a drag past the
     // window edge) squeezed the page to a sliver and the flex row
@@ -107,7 +107,7 @@ describe("agent dock resize handle", () => {
     stubSetPointerCapture()
     renderWithQuery(createElement(AgentDock))
     const aside = screen.getByRole("complementary")
-    expect(aside).toHaveClass("max-w-[calc(100vw-20rem)]")
+    expect(aside).toHaveClass("max-w-[calc(100vw-320px)]")
     aside.getBoundingClientRect = () => ({ width: 360 }) as DOMRect
     const handle = screen.getByRole("separator")
 

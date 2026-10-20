@@ -17,10 +17,11 @@
   box and thus fire ~2rem (px-4) later than the old viewport thresholds —
   so content reflows against the width
   actually left of the dock. The dock itself is additionally capped at
-  `100vw − 20rem` — a persisted 720 px can no longer squeeze the page to a
-  sliver on a small window (the cap re-applies on every window resize with
-  no listener; drag/keyboard resize clamp to the same limit, the persisted
-  value restores when the window grows again).
+  `100vw − 320px` — a persisted 720 px can no longer squeeze the page to a
+  sliver on a small window (window resizes re-apply the cap with no listener
+  and leave the persisted width untouched; drag/keyboard resize clamp to
+  and commit the same limit, so the persisted width follows the user's
+  last interaction).
 
 ## v1.18.0
 

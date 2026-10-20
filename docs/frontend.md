@@ -69,10 +69,15 @@ be portaled or live outside main).
 **Dock behavior**: on md+ the panel is a sticky flex column pinned under the
 header (`top-14`, `h-[calc(100svh-3.5rem)]`) whose width the user drags
 between 280 and 720 px (clamped, persisted) — additionally capped at
-`100vw − 20rem` (CSS `max-w-[calc(100vw-20rem)]` re-clamps on every window
+`100vw − 320px` (CSS `max-w-[calc(100vw-320px)]` re-clamps on every window
 resize without a listener; the same cap applies to drag/keyboard resize) so
-the page always keeps at least 20rem beside the dock. Below md it renders as
-a fixed full-screen overlay. Page content is **container-responsive**, not
+the page keeps at least 320px beside the dock — roughly: `100vw`/innerWidth
+include the vertical scrollbar, so the space beside the dock falls the
+scrollbar's width short of the full 320px when the cap is active. Window
+resizes never touch the persisted width (it restores when the window grows
+again); drag/keyboard resize clamp to and _commit_ the cap instead. Below md
+it renders as a fixed full-screen overlay. Page content is
+**container-responsive**, not
 viewport-responsive: `<main>` is a Tailwind `@container`, and its grids use
 `@min-[640px]:` / `@min-[1024px]:` variants (same intent as the old `sm:` /
 `lg:` viewport breakpoints — but container queries measure main's content
