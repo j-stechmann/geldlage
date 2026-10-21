@@ -9,6 +9,7 @@ import {
   toolsForRequest,
 } from "@/lib/agent/tools"
 import type {
+  CalculatorResult,
   CategoryTotalsPeriod,
   CategoryTotalsStatus,
 } from "@/lib/agent/tools"
@@ -128,7 +129,7 @@ beforeEach(() => {
 describe("toolsForRequest / toolByName", () => {
   it("maps the registry into the OpenAI wire format", () => {
     const wire = toolsForRequest()
-    expect(wire).toHaveLength(2)
+    expect(wire).toHaveLength(3)
     expect(wire[0].type).toBe("function")
     expect(wire[0].function.name).toBe("get_category_totals")
     expect(wire[0].function.description.length).toBeGreaterThan(10)
@@ -149,13 +150,23 @@ describe("toolsForRequest / toolByName", () => {
       required: ["table"],
       additionalProperties: false,
     })
+    expect(wire[2].function.name).toBe("calculator")
+    expect(wire[2].function.parameters).toMatchObject({
+      type: "object",
+      required: ["expression"],
+      additionalProperties: false,
+      properties: {
+        expression: { type: "string" },
+      },
+    })
   })
 
   it("resolves by name and rejects unknown tools", () => {
     expect(toolByName("get_category_totals")?.name).toBe("get_category_totals")
     expect(toolByName("query_data")?.name).toBe("query_data")
+    expect(toolByName("calculator")?.name).toBe("calculator")
     expect(toolByName("nope")).toBeUndefined()
-    expect(agentTools).toHaveLength(2)
+    expect(agentTools).toHaveLength(3)
   })
 })
 
@@ -583,5 +594,84 @@ describe("get_category_totals", () => {
     await expect(
       tool.execute({ period: "this_month", status: 1 }, { uid: uid1 })
     ).rejects.toThrow(/invalid args/)
+  })
+})
+
+describe("calculator", () => {
+  /** Cast helper matching the file's existing per-test result shapes. */
+  async function run(expression: unknown): Promise<CalculatorResult> {
+    const tool = toolByName("calculator")!
+    return (await tool.execute(
+      { expression },
+      { uid: uid1 }
+    )) as CalculatorResult
+  }
+
+  it("evaluates a plain sum", async () => {
+    const r = await run("12890 + 3400")
+    expect(r.expression).toBe("12890 + 3400")
+    expect(r.result).toBe(16290)
+  })
+
+  it("honours operator precedence and parentheses", async () => {
+    expect((await run("2 + 3 * 4")).result).toBe(14)
+    expect((await run("(2 + 3) * 4")).result).toBe(20)
+    expect((await run("-5 ^ 2")).result).toBe(-25)
+  })
+
+  it("handles decimal fractions (cent→euro conversion)", async () => {
+    expect((await run("(12890 + 3400) / 100")).result).toBe(162.9)
+  })
+
+  it("treats % as division remainder, not a percent sign", async () => {
+    // expr-eval's % is modulo: a model reading it as "percent of" would get
+    // a plausible but wrong "verified" result, so the semantics are pinned
+    // here and spelled out in the tool description.
+    expect((await run("150 % 40")).result).toBe(30)
+    expect((await run("200 % 50")).result).toBe(0)
+  })
+
+  it("rejects invalid args", async () => {
+    const tool = toolByName("calculator")!
+    await expect(
+      tool.execute({ expression: 42 }, { uid: uid1 })
+    ).rejects.toThrow(/invalid args/)
+    await expect(tool.execute("1 + 1", { uid: uid1 })).rejects.toThrow(
+      /invalid args/
+    )
+    await expect(
+      tool.execute({ expression: "  " }, { uid: uid1 })
+    ).rejects.toThrow(/invalid args/)
+    await expect(tool.execute({}, { uid: uid1 })).rejects.toThrow(
+      /invalid args/
+    )
+  })
+
+  it("rejects unparseable expressions", async () => {
+    await expect(run("1 +")).rejects.toThrow(/invalid expression/)
+    await expect(run("foo(1)")).rejects.toThrow(/invalid expression/)
+    await expect(run("x")).rejects.toThrow(/invalid expression/)
+  })
+
+  it("rejects expr-eval's non-arithmetic grammar", async () => {
+    // The parser instance is narrowed to pure arithmetic: built-in functions
+    // (including random()), constants, comparisons, string concatenation and
+    // array indexing must never reach the model as a "verified" number.
+    await expect(run("sqrt(16290)")).rejects.toThrow(/invalid expression/)
+    await expect(run("random()")).rejects.toThrow(/invalid expression/)
+    await expect(run("min(3, 7)")).rejects.toThrow(/invalid expression/)
+    await expect(run("PI")).rejects.toThrow(/invalid expression/)
+    await expect(run("true")).rejects.toThrow(/invalid expression/)
+    await expect(run("1 > 0")).rejects.toThrow(/invalid expression/)
+    await expect(run('"5" || "5"')).rejects.toThrow(/invalid expression/)
+    await expect(run("[1, 2][0]")).rejects.toThrow(/invalid expression/)
+    await expect(run("1 ? 2 : 3")).rejects.toThrow(/invalid expression/)
+  })
+
+  it("rejects non-finite results (division by zero)", async () => {
+    // expr-eval follows JS arithmetic, so 1/0 is Infinity: the tool must
+    // not hand the model an "infinite" number and have it read it as real.
+    await expect(run("1 / 0")).rejects.toThrow(/not a finite number/)
+    await expect(run("0 / 0")).rejects.toThrow(/not a finite number/)
   })
 })
