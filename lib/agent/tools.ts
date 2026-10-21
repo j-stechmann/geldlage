@@ -22,3 +22,5 @@ export {
 } from "@/lib/agent/tools/category-totals"
 
 export { query_data } from "@/lib/agent/tools/query-data"
+
+export { calculator, type CalculatorResult } from "@/lib/agent/tools/calculator"
