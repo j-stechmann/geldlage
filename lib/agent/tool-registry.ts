@@ -1,6 +1,7 @@
 import type { AgentTool } from "@/lib/agent/types"
 import { get_category_totals } from "@/lib/agent/tools/category-totals"
 import { query_data } from "@/lib/agent/tools/query-data"
+import { calculator } from "@/lib/agent/tools/calculator"
 
 /**
  * OpenAI wire-format translation for the agent tool registry (ADR-0033):
@@ -20,6 +21,7 @@ import { query_data } from "@/lib/agent/tools/query-data"
 export const agentTools = [
   get_category_totals,
   query_data,
+  calculator,
 ] as const satisfies AgentTool[]
 
 /**
