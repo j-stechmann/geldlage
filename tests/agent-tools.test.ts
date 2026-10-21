@@ -623,6 +623,14 @@ describe("calculator", () => {
     expect((await run("(12890 + 3400) / 100")).result).toBe(162.9)
   })
 
+  it("treats % as division remainder, not a percent sign", async () => {
+    // expr-eval's % is modulo: a model reading it as "percent of" would get
+    // a plausible but wrong "verified" result, so the semantics are pinned
+    // here and spelled out in the tool description.
+    expect((await run("150 % 40")).result).toBe(30)
+    expect((await run("200 % 50")).result).toBe(0)
+  })
+
   it("rejects invalid args", async () => {
     const tool = toolByName("calculator")!
     await expect(
@@ -643,6 +651,21 @@ describe("calculator", () => {
     await expect(run("1 +")).rejects.toThrow(/invalid expression/)
     await expect(run("foo(1)")).rejects.toThrow(/invalid expression/)
     await expect(run("x")).rejects.toThrow(/invalid expression/)
+  })
+
+  it("rejects expr-eval's non-arithmetic grammar", async () => {
+    // The parser instance is narrowed to pure arithmetic: built-in functions
+    // (including random()), constants, comparisons, string concatenation and
+    // array indexing must never reach the model as a "verified" number.
+    await expect(run("sqrt(16290)")).rejects.toThrow(/invalid expression/)
+    await expect(run("random()")).rejects.toThrow(/invalid expression/)
+    await expect(run("min(3, 7)")).rejects.toThrow(/invalid expression/)
+    await expect(run("PI")).rejects.toThrow(/invalid expression/)
+    await expect(run("true")).rejects.toThrow(/invalid expression/)
+    await expect(run("1 > 0")).rejects.toThrow(/invalid expression/)
+    await expect(run('"5" || "5"')).rejects.toThrow(/invalid expression/)
+    await expect(run("[1, 2][0]")).rejects.toThrow(/invalid expression/)
+    await expect(run("1 ? 2 : 3")).rejects.toThrow(/invalid expression/)
   })
 
   it("rejects non-finite results (division by zero)", async () => {

@@ -5,17 +5,22 @@
 ### Added
 
 - **agent — `calculator` tool for arithmetic in chat**: the agent can now
-  evaluate arithmetic expressions (Grundrechenarten, `^`, `%`, parentheses,
-  decimal fractions) through a third registered tool (`calculator`,
+  evaluate arithmetic expressions (Grundrechenarten, `^`, parentheses,
+  decimal fractions — where `%` is the division remainder, modulo, NOT a
+  percent sign; percentages are formed via multiplication/division) through
+  a third registered tool (`calculator`,
   lib/agent/tools/calculator.ts) instead of doing multi-step money math in
   its prose — cent→euro conversion, subtotal splits and percentage
   arithmetic become verified computations. The tool is stateless and
   user-independent (no money data flows through it; `ctx.uid` scoping is a
   no-op by design). Evaluation runs through expr-eval's own parser — never
-  `eval`/`Function` — so model-generated strings stay inert beyond
-  arithmetic; variables and function calls are rejected, and non-finite
-  results (division by zero → `Infinity` under JS arithmetic) are refused
-  rather than handed back as a believable number. Registry-only wiring:
+  `eval`/`Function` — narrowed to pure arithmetic: the parser instance's
+  non-arithmetic operator groups, built-in functions and constants are
+  pruned (expr-eval otherwise ships `random()`, `PI`, comparisons, string
+  concatenation etc. with no opt-out), so variables, function calls, and
+  comparisons all reject; non-finite results (division by zero →
+  `Infinity` under JS arithmetic) are refused rather than handed back as
+  a believable number. Registry-only wiring:
   `agentTools` (lib/agent/tool-registry.ts) gained one entry — wire format,
   dispatch and the system prompt's tool list derive from the registry, so
   no changes in the loop, executor, route or UI. Covered in agent-tools
