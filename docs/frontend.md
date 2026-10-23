@@ -158,9 +158,9 @@ deliberately conservative; only three things poll:
 ### `/` — Dashboard
 
 FilterBar (debounced text, date range, type, multi-select categories, account,
-Status, Label-Status) → KPI row → four charts. No transactions table — it
+Status, Label-Status) → KPI row → three charts. No transactions table — it
 lives on its own tab. Flow aggregates (cashflow, categories, transaction
-count) react to every filter including Status; balance and savings are
+count) react to every filter including Status; balance is
 time-scoped by design: snapshots anchor an absolute booked account balance,
 so content filters (q/type/category/labelStatus/**status**) are ignored
 ([lib/analytics/engine.ts](../lib/analytics/engine.ts),
