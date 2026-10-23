@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.19.1
+
+### Security
+
+- **docker — node base image pinned to `node:24.22.1-bookworm-slim`**
+  (CVE-2026-111497, HIGH: out-of-bounds write in Node's bundled Brotli
+  decoder, remote code execution possible when app code decompresses
+  attacker-controlled `Content-Encoding: br` payload — exposure here is
+  `undici`/`fetch` fetching external content, e.g. the `/api/llm/*` calls).
+  Both Dockerfile stages (`builder` and runtime) previously used the
+  floating `node:24-bookworm-slim` tag, so an image built or layer-cached
+  before the 2026-10-21 Node.js security releases contained a vulnerable
+  24.x runtime. Now pinned to 24.22.1 (first 24.x with the fix; the in-file
+  comment records why, Dependabot continues to raise minor/patch bumps on
+  top of the pinned tag). No application code changes.
+
 ## v1.19.0
 
 ### Added
