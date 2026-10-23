@@ -14,7 +14,7 @@ extend it.
 | [data-model.md](data-model.md)     | All tables, connection management, schema creation/migration incl. the destructive `label_rules` rebuild |
 | [csv-import.md](csv-import.md)     | DKB CSV format, German money/date parsing, import pipeline, occurrence dedupe, fuzzy reconciliation      |
 | [labelling.md](labelling.md)       | Worker loop, claim semantics, LLM client + prompts, label rules, completion/failure/deletion             |
-| [analytics.md](analytics.md)       | KPI formulas, full-month trimming, savings history, balance back-calculation, scoping rationale          |
+| [analytics.md](analytics.md)       | KPI formulas, full-month trimming, balance back-calculation, scoping rationale                            |
 | [frontend.md](frontend.md)         | React Query conventions, pages, polling, chart zoom, UI stack, category colors                           |
 | [api.md](api.md)                   | REST reference: all routes, shapes, status codes, conventions (descriptive appendix)                     |
 | [operations.md](operations.md)     | Makefile, model management, Docker, CI/release, env vars, security posture, backup, troubleshooting      |
@@ -61,7 +61,6 @@ German. These terms appear in code, schema, and docs.
 | `ohne Kategorie`                                | "Without category" — the visible state of `failed`/unlabeled rows; never a fallback label                     | [ADR-0013](adr/adr-0013-no-fallback-labels.md)        |
 | `erfunden` / `manuell`                          | Label origin: invented by the LLM vs. user-created/assigned                                                   | `categories.origin`; [data-model.md](data-model.md)   |
 | `wird kategorisiert`                            | "Being categorized" — the pending state shown in the table                                                    | [frontend.md](frontend.md)                            |
-| `Monatssaldo` / `laufender Monat`               | Monthly savings / running month (dashed bar in the savings chart)                                             | [analytics.md](analytics.md)                          |
 
 ## ADR index
 
