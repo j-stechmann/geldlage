@@ -3,7 +3,9 @@
 # --- Build stage -------------------------------------------------------------
 # node:24 glibc (Active LTS) base; better-sqlite3 v13 ships NAPI prebuilds that
 # are ABI-stable across node majors - glibc (bookworm) is what must match.
-FROM node:24-bookworm-slim AS builder
+# Pinned to 24.22.1: first 24.x with the Brotli decoder OOB-write fix
+# (CVE-2026-111497, Node.js security releases 2026-10-21).
+FROM node:24.22.1-bookworm-slim AS builder
 
 COPY --from=oven/bun:1.4.0 /usr/local/bin/bun /usr/local/bin/bun
 
@@ -23,7 +25,7 @@ RUN bun run build
 RUN test -f .next/standalone/node_modules/better-sqlite3/prebuilds/linux-x64.node
 
 # --- Runtime stage -----------------------------------------------------------
-FROM node:24-bookworm-slim
+FROM node:24.22.1-bookworm-slim
 
 ENV NODE_ENV=production \
     PORT=3000 \
