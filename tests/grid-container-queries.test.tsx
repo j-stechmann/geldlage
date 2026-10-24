@@ -21,6 +21,7 @@ import { renderWithQuery } from "./helpers-dom"
 const KPI_ROW = ["@min-[640px]:grid-cols-2", "@min-[1024px]:grid-cols-5"]
 const CHARTS_GRID = "@min-[1024px]:grid-cols-3"
 const SPAN_2 = "@min-[1024px]:col-span-2"
+const SPAN_3 = "@min-[1024px]:col-span-3"
 const IMPORTS_GRID = "@min-[1024px]:grid-cols-2"
 
 function stubPendingFetch() {
@@ -64,15 +65,21 @@ describe("grids inside <main> use container-query breakpoints", () => {
     expect(grid).toHaveClass(CHARTS_GRID)
     expect(grid?.className).not.toMatch(/(^|\s)lg:/)
 
-    // the two wide charts span 2 — but only under the container variant
-    for (const title of ["Monatlicher Cashflow", "Kontostand über Zeit"]) {
-      expect(cardFor(title)).toHaveClass(SPAN_2)
-      expect(cardFor(title).className).not.toContain("lg:col-span-2")
-    }
-    // the narrow charts must not span at all (no implicit columns)
-    for (const title of ["Top Ausgabenkategorien", "Monatssaldo"]) {
-      expect(cardFor(title).className).not.toContain("col-span")
-    }
+    // the hero chart (Kontostand über Zeit) spans the full grid width —
+    // but only under the container variant
+    expect(cardFor("Kontostand über Zeit")).toHaveClass(SPAN_3)
+    expect(cardFor("Kontostand über Zeit").className).not.toContain(
+      "lg:col-span"
+    )
+    // the remaining wide chart spans 2 — but only under the container variant
+    expect(cardFor("Monatlicher Cashflow")).toHaveClass(SPAN_2)
+    expect(cardFor("Monatlicher Cashflow").className).not.toContain(
+      "lg:col-span-2"
+    )
+    // the narrow chart must not span at all (no implicit columns)
+    expect(cardFor("Top Ausgabenkategorien").className).not.toContain(
+      "col-span"
+    )
   })
 
   it("imports: dropzone grid reflows against main, not the viewport", () => {

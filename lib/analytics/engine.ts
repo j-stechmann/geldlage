@@ -1,4 +1,4 @@
-import { and, eq, gt, gte, lt, lte, sql, type SQL } from "drizzle-orm"
+import { and, eq, gt, gte, lte, sql, type SQL } from "drizzle-orm"
 import { getDb } from "@/lib/db"
 import { importBatches, transactions } from "@/lib/db/schema"
 import { buildWhere, type TransactionFilters } from "@/lib/analytics/queries"
@@ -25,24 +25,6 @@ export interface TopCategoryPoint {
   txCount: number
 }
 
-export interface SavingsHistory {
-  /** last COMPLETE month (YYYY-MM) the series ends at */
-  lastMonth: string
-  lastMonthNetCents: number
-  /**
-   * true when lastMonth is not the previous calendar month, i.e. imports
-   * stopped after lastMonth — the UI can mark the headline as stale
-   */
-  lastMonthIsStale: boolean
-  /** zero-filled window of the 6 months ending at lastMonth */
-  months: MonthlyCashflowPoint[]
-  /**
-   * the still-running month, if it has any bookings. Provided separately
-   * so the UI can mark it as incomplete; NOT part of months.
-   */
-  currentMonth: MonthlyCashflowPoint | null
-}
-
 export interface AnalyticsResult {
   kpis: {
     currentBalanceCents: number | null
@@ -57,7 +39,6 @@ export interface AnalyticsResult {
   monthlyCashflow: MonthlyCashflowPoint[]
   balanceTimeline: BalancePoint[]
   topCategories: TopCategoryPoint[]
-  savingsHistory: SavingsHistory | null
 }
 
 interface BalanceAnchor {
@@ -71,7 +52,7 @@ interface BalanceAnchor {
  * 1. **Flow scope** — cashflow, categories, transaction count. Reacts to
  *    every filter including `status` (via `buildWhere`, shared with the
  *    transactions table).
- * 2. **Time-scoped scope** — balance (KPI + timeline) and savings history.
+ * 2. **Time-scoped scope** — balance (KPI + timeline).
  *    Snapshots anchor an *absolute booked* account balance, so every content
  *    filter is structurally out of scope: these aggregates are built from an
  *    allowlist (`buildTimeScopedWhere`: user, booked rows, optional account,
@@ -163,7 +144,7 @@ function lastDayOfMonth(iso: string): string {
 
 /**
  * Flow aggregates (cashflow, categories, KPIs) react to every filter and
- * share buildWhere with the transactions table. Balance and savings are
+ * share buildWhere with the transactions table. Balance (KPI + timeline) is
  * time-scoped by design — see buildTimeScopedWhere.
  */
 export function computeAnalytics(
@@ -308,97 +289,6 @@ export function computeAnalytics(
     }))
     .slice(0, 12)
 
-  // ── savings history: last 6 complete months, time-scoped only ─────
-  // Allowlist-built scope (user + booked + optional account): content
-  // filters including status are structurally out of scope.
-  const savingsWhere = buildTimeScopedWhere(userId, f.accountId)
-
-  let savingsHistory: SavingsHistory | null = null
-
-  // index seek instead of a full grouped scan: the latest booking month
-  // alone decides whether the window ends at prevOfToday or earlier
-  const latestBookingDate = db
-    .select({ max: sql<string | null>`MAX(${transactions.bookingDate})` })
-    .from(transactions)
-    .where(savingsWhere)
-    .get()?.max
-
-  if (latestBookingDate != null) {
-    const currentMonthKey = monthOf(today)
-    const prevOfToday = prevMonth(currentMonthKey)
-    const latestBookingMonth = latestBookingDate.slice(0, 7)
-    // never claim a month that has no bookings yet (stale imports) and
-    // never claim the still-running current month
-    const lastCompleteMonth =
-      prevOfToday < latestBookingMonth ? prevOfToday : latestBookingMonth
-    const windowStart = (() => {
-      let m = lastCompleteMonth
-      for (let i = 0; i < 5; i++) m = prevMonth(m)
-      return m
-    })()
-
-    // single bounded scan: the 6-month window plus the running month
-    // (bookings dated after `today` inside later months are irrelevant)
-    const rows = db
-      .select({
-        month: sql<string>`substr(${transactions.bookingDate}, 1, 7)`,
-        income: sql<number>`COALESCE(SUM(CASE WHEN ${transactions.amountCents} > 0 THEN ${transactions.amountCents} ELSE 0 END), 0)`,
-        expenses: sql<number>`COALESCE(SUM(CASE WHEN ${transactions.amountCents} < 0 THEN -${transactions.amountCents} ELSE 0 END), 0)`,
-      })
-      .from(transactions)
-      .where(
-        and(
-          savingsWhere,
-          gte(transactions.bookingDate, `${windowStart}-01`),
-          lt(transactions.bookingDate, `${nextMonth(currentMonthKey)}-01`)
-        )
-      )
-      .groupBy(sql`substr(${transactions.bookingDate}, 1, 7)`)
-      .all()
-      .map((r) => ({
-        month: r.month,
-        income: Number(r.income),
-        expenses: Number(r.expenses),
-      }))
-
-    const byMonth = new Map(rows.map((r) => [r.month, r]))
-    const months = monthsBetween(windowStart, lastCompleteMonth).map((m) => {
-      const row = byMonth.get(m)
-      const income = row?.income ?? 0
-      const expenses = row?.expenses ?? 0
-      return {
-        month: m,
-        incomeCents: income,
-        expensesCents: expenses,
-        netCents: income - expenses,
-      }
-    })
-    const last = months[months.length - 1]
-    // an empty window (no bookings in [windowStart, lastCompleteMonth]) must
-    // not crash: report zero net for the last complete month
-    const lastMonthNetCents = last ? last.netCents : 0
-
-    // the running month is appended separately (UI marks it incomplete)
-    const currentRow = byMonth.get(currentMonthKey)
-    const currentMonth: MonthlyCashflowPoint | null = currentRow
-      ? {
-          month: currentMonthKey,
-          incomeCents: currentRow.income,
-          expensesCents: currentRow.expenses,
-          netCents: currentRow.income - currentRow.expenses,
-        }
-      : null
-
-    savingsHistory = {
-      lastMonth: lastCompleteMonth,
-      lastMonthNetCents,
-      // stale = the series does not reach the previous calendar month
-      lastMonthIsStale: lastCompleteMonth < prevOfToday,
-      months,
-      currentMonth,
-    }
-  }
-
   // ── balance: snapshot anchor math, time-scoped only ───────────────
   const anchor = latestAnchor(userId, f.accountId)
   const { dateFrom, dateTo } = f
@@ -530,7 +420,6 @@ export function computeAnalytics(
     monthlyCashflow,
     balanceTimeline,
     topCategories,
-    savingsHistory,
   }
 }
 

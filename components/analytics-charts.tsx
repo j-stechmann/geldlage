@@ -22,7 +22,6 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
   ComposedChart,
   Line,
   LineChart,
@@ -31,7 +30,6 @@ import {
 } from "recharts"
 import type { AnalyticsResponse } from "@/components/analytics-kpis"
 import { resolveCategoryColor } from "@/lib/category-colors"
-import { formatCentsAsGerman } from "@/lib/money"
 
 const cashflowConfig = {
   income: { label: "Einnahmen", color: "var(--chart-2)" },
@@ -41,10 +39,6 @@ const cashflowConfig = {
 
 const balanceConfig = {
   balance: { label: "Kontostand", color: "var(--chart-2)" },
-} satisfies ChartConfig
-
-const savingsConfig = {
-  net: { label: "Saldo", color: "var(--chart-2)" },
 } satisfies ChartConfig
 
 function shortMonth(month: string): string {
@@ -171,202 +165,6 @@ export function CashflowChart({
   )
 }
 
-function fullMonth(month: string): string {
-  const [y, m] = month.split("-")
-  const names = [
-    "Januar",
-    "Februar",
-    "März",
-    "April",
-    "Mai",
-    "Juni",
-    "Juli",
-    "August",
-    "September",
-    "Oktober",
-    "November",
-    "Dezember",
-  ]
-  return `${names[Number.parseInt(m, 10) - 1]} ${y}`
-}
-
-export function SavingsChart({
-  data,
-  loading,
-}: {
-  data: AnalyticsResponse["savingsHistory"] | undefined
-  loading: boolean
-}) {
-  const chartData = React.useMemo(() => {
-    const complete = (data?.months ?? []).map((d) => ({
-      month: d.month,
-      net: d.netCents / 100,
-      incomeCents: d.incomeCents,
-      expensesCents: d.expensesCents,
-      netCents: d.netCents,
-      isCurrent: false,
-    }))
-    const cur = data?.currentMonth
-    if (!cur) return complete
-    return [
-      ...complete,
-      {
-        month: cur.month,
-        net: cur.netCents / 100,
-        incomeCents: cur.incomeCents,
-        expensesCents: cur.expensesCents,
-        netCents: cur.netCents,
-        isCurrent: true,
-      },
-    ]
-  }, [data])
-
-  const headlineMonth = data ? fullMonth(data.lastMonth) : null
-
-  const headlineBody = React.useMemo(() => {
-    const lastNetCents = data?.lastMonthNetCents
-    if (headlineMonth === null || lastNetCents === undefined) return null
-    const amount = formatCentsAsGerman(Math.abs(lastNetCents))
-    if (lastNetCents > 0) return `+${amount} € gespart`
-    if (lastNetCents < 0) return `−${amount} € überzogen`
-    return `±0,00 € ausgeglichen`
-  }, [data, headlineMonth])
-
-  const stale = data?.lastMonthIsStale === true
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Monatssaldo</CardTitle>
-        {stale ? (
-          <CardDescription className="text-muted-foreground/60 tabular-nums">
-            Datenstand {headlineMonth ?? ""} · {headlineBody ?? "…"}
-          </CardDescription>
-        ) : (
-          <CardDescription className="tabular-nums">
-            {loading ? (
-              <Skeleton className="h-4 w-52" />
-            ) : headlineMonth && headlineBody ? (
-              `${headlineMonth}: ${headlineBody}`
-            ) : (
-              "Gespart oder überzogen pro Monat"
-            )}
-          </CardDescription>
-        )}
-      </CardHeader>
-      <CardContent>
-        {loading ? (
-          <Skeleton className="h-72 w-full" />
-        ) : chartData.length === 0 ? (
-          <p className="py-16 text-center text-sm text-muted-foreground">
-            Keine Transaktionen vorhanden.
-          </p>
-        ) : (
-          <ChartContainer config={savingsConfig} className="h-72 w-full">
-            <BarChart data={chartData} accessibilityLayer>
-              <CartesianGrid vertical={false} />
-              <XAxis dataKey="month" tickLine={false} axisLine={false} />
-              <YAxis
-                tickLine={false}
-                axisLine={false}
-                width={64}
-                tickFormatter={(v: number) => euroShort(v)}
-              />
-              <ChartTooltip
-                cursor={{
-                  fill: "var(--muted)",
-                  fillOpacity: 0.15,
-                }}
-                content={
-                  <ChartTooltipContent
-                    formatter={(_value, _name, item) => {
-                      const p = item?.payload as
-                        | {
-                            incomeCents: number
-                            expensesCents: number
-                            netCents: number
-                            isCurrent?: boolean
-                          }
-                        | undefined
-                      if (!p) return null
-                      const income = formatCentsAsGerman(p.incomeCents)
-                      const expenses = formatCentsAsGerman(p.expensesCents)
-                      const saved = p.netCents > 0
-                      const overspent = p.netCents < 0
-                      const net = formatCentsAsGerman(Math.abs(p.netCents))
-                      return (
-                        <div className="grid gap-1">
-                          {p.isCurrent && (
-                            <div className="text-muted-foreground italic">
-                              laufender Monat
-                            </div>
-                          )}
-                          <div className="flex justify-between gap-4">
-                            <span className="text-muted-foreground">
-                              Einnahmen
-                            </span>
-                            <span className="font-mono font-medium tabular-nums">
-                              {income} €
-                            </span>
-                          </div>
-                          <div className="flex justify-between gap-4">
-                            <span className="text-muted-foreground">
-                              Ausgaben
-                            </span>
-                            <span className="font-mono font-medium tabular-nums">
-                              −{expenses} €
-                            </span>
-                          </div>
-                          <div className="flex justify-between gap-4 border-t border-border/50 pt-1">
-                            <span className="font-medium">
-                              {saved
-                                ? "Gespart"
-                                : overspent
-                                  ? "Überzogen"
-                                  : "Ausgeglichen"}
-                            </span>
-                            <span
-                              className={`font-mono font-medium tabular-nums ${overspent ? "text-destructive" : ""}`}
-                            >
-                              {saved ? "+" : overspent ? "−" : "±"}
-                              {net} €
-                            </span>
-                          </div>
-                        </div>
-                      )
-                    }}
-                    labelFormatter={(label) => fullMonth(String(label))}
-                  />
-                }
-              />
-              <Bar dataKey="net" radius={4}>
-                {chartData.map((d) => {
-                  const isLastComplete =
-                    !d.isCurrent && d.month === data?.lastMonth
-                  return (
-                    <Cell
-                      key={d.month}
-                      fill={
-                        d.net >= 0 ? "var(--color-net)" : "var(--destructive)"
-                      }
-                      fillOpacity={
-                        d.isCurrent ? 0.7 : isLastComplete ? 1 : 0.45
-                      }
-                      strokeDasharray={d.isCurrent ? "4 3" : undefined}
-                      stroke={d.isCurrent ? "var(--foreground)" : undefined}
-                      strokeWidth={d.isCurrent ? 1 : undefined}
-                    />
-                  )
-                })}
-              </Bar>
-            </BarChart>
-          </ChartContainer>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
 export function BalanceChart({
   data,
   loading,
@@ -392,11 +190,13 @@ export function BalanceChart({
   const visible = zoom.slice(chartData)
 
   // @min-[1024px] (container query on <main>, same threshold as the grid
-  // in app/page.tsx): a col-span keyed off the viewport would still span 2
-  // when the dock squeezes main below 1024px on a wide window — the card
-  // would span an implicit second column instead of stacking full-width.
+  // in app/page.tsx): a col-span keyed off the viewport would still span
+  // columns when the dock squeezes main below 1024px on a wide window —
+  // the card would create an implicit column instead of stacking
+  // full-width. The timeline is the dashboard's hero chart and spans the
+  // grid's full width.
   return (
-    <Card className="@min-[1024px]:col-span-2">
+    <Card className="@min-[1024px]:col-span-3">
       <CardHeader>
         <CardTitle>Kontostand über Zeit</CardTitle>
         <CardDescription>

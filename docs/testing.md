@@ -50,7 +50,6 @@ manifest **to the cent** ([ADR-0021](adr/adr-0021-oracle-fixture-testing.md)):
 - top categories, pending-row exclusion, re-import dedupe,
 - date-window semantics: partial-month exclusion from averages, the
   "slice-not-recompute" balance oracle against unfiltered results,
-- savings-history edge cases (stale imports, future bookings, running month),
 - raw-SQL "oracles" inside tests as an independent check against the same DB.
 
 A **second fixture** (`fixture-pending-resolved.csv`) drives the

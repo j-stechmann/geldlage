@@ -5,8 +5,8 @@ filter pipeline** ([lib/analytics/queries.ts](../lib/analytics/queries.ts)),
 with aggregation in SQL (SQLite, via drizzle `sql` fragments) and
 month-windowing/balance math in JavaScript
 ([lib/analytics/engine.ts](../lib/analytics/engine.ts)). The dashboard always
-reflects the filtered query results — with two deliberate exceptions
-(balances and savings history, see below).
+reflects the filtered query results — with one deliberate exception
+(balances, see below).
 
 ## Filters
 
@@ -50,15 +50,6 @@ in JS. The `null` category bucket is named "Unlabeled" and colored gray;
 every other category gets a stable color from the golden-ratio oklch palette
 ([frontend.md](frontend.md)).
 
-## Savings history (Monatssaldo)
-
-The last **6 complete months** of `income − expenses`, deliberately scoped
-**by time only**: text search, type, category, label-status, and `dateFrom`
-filters are stripped from the scope (account id is kept) — content filters
-would fragment the month series. The running month is computed separately and
-rendered as a dashed "laufender Monat" bar. A staleness flag marks the last
-complete month as stale when no new import covers it.
-
 ## Balance timeline (back-calculation)
 
 DKB exports carry a `Kontostand` snapshot at the _end_ of the export period —
@@ -84,16 +75,17 @@ flowchart LR
   empty visible window still yields a value; when `dateTo` precedes all
   data, `balance(dateTo) = anchor − Σ(bookings in (dateTo, anchorDate])`.
 
-**Why balance and savings history ignore content filters:** both derive from
-a _cumulative_ quantity. Filtering to " groceries in March " would break the
-suffix math (the anchor includes all transactions) and produce meaningless
-"balances". Time scoping (date range, account) is safe and preserved. This
-is the single most common source of "why doesn't the chart match my filter?"
-questions — the answer is that the chart would be wrong otherwise.
+**Why balance ignores content filters:** the balance derives from a
+_cumulative_ quantity. Filtering to " groceries in March "
+would break the suffix math (the anchor includes all transactions) and
+produce meaningless "balances". Time scoping (date range, account) is safe
+and preserved. This is the single most common source of "why doesn't the
+chart match my filter?" questions — the answer is that the chart would be
+wrong otherwise.
 
 ## Chart integration
 
-The dashboard renders cash flow, categories, balance, and savings via
+The dashboard renders cash flow, categories, and balance via
 Recharts inside shadcn `ChartContainer`s; time-series charts get
 pinch/wheel-zoom and drag-pan through the custom
 [hooks/use-chart-zoom.ts](../hooks/use-chart-zoom.ts) (a `resetKey` resets
