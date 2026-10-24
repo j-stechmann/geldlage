@@ -14,7 +14,7 @@ extend it.
 | [data-model.md](data-model.md)     | All tables, connection management, schema creation/migration incl. the destructive `label_rules` rebuild |
 | [csv-import.md](csv-import.md)     | DKB CSV format, German money/date parsing, import pipeline, occurrence dedupe, fuzzy reconciliation      |
 | [labelling.md](labelling.md)       | Worker loop, claim semantics, LLM client + prompts, label rules, completion/failure/deletion             |
-| [analytics.md](analytics.md)       | KPI formulas, full-month trimming, balance back-calculation, scoping rationale                            |
+| [analytics.md](analytics.md)       | KPI formulas, full-month trimming, balance back-calculation, scoping rationale                           |
 | [frontend.md](frontend.md)         | React Query conventions, pages, polling, chart zoom, UI stack, category colors                           |
 | [api.md](api.md)                   | REST reference: all routes, shapes, status codes, conventions (descriptive appendix)                     |
 | [operations.md](operations.md)     | Makefile, model management, Docker, CI/release, env vars, security posture, backup, troubleshooting      |

@@ -68,12 +68,18 @@ describe("grids inside <main> use container-query breakpoints", () => {
     // the hero chart (Kontostand über Zeit) spans the full grid width —
     // but only under the container variant
     expect(cardFor("Kontostand über Zeit")).toHaveClass(SPAN_3)
-    expect(cardFor("Kontostand über Zeit").className).not.toContain("lg:col-span")
+    expect(cardFor("Kontostand über Zeit").className).not.toContain(
+      "lg:col-span"
+    )
     // the remaining wide chart spans 2 — but only under the container variant
     expect(cardFor("Monatlicher Cashflow")).toHaveClass(SPAN_2)
-    expect(cardFor("Monatlicher Cashflow").className).not.toContain("lg:col-span-2")
+    expect(cardFor("Monatlicher Cashflow").className).not.toContain(
+      "lg:col-span-2"
+    )
     // the narrow chart must not span at all (no implicit columns)
-    expect(cardFor("Top Ausgabenkategorien").className).not.toContain("col-span")
+    expect(cardFor("Top Ausgabenkategorien").className).not.toContain(
+      "col-span"
+    )
   })
 
   it("imports: dropzone grid reflows against main, not the viewport", () => {
