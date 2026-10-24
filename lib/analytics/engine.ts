@@ -144,7 +144,7 @@ function lastDayOfMonth(iso: string): string {
 
 /**
  * Flow aggregates (cashflow, categories, KPIs) react to every filter and
- * share buildWhere with the transactions table. Balance and savings are
+ * share buildWhere with the transactions table. Balance (KPI + timeline) is
  * time-scoped by design — see buildTimeScopedWhere.
  */
 export function computeAnalytics(
