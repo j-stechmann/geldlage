@@ -6,7 +6,6 @@ import { KpiRow, useAnalytics } from "@/components/analytics-kpis"
 import {
   BalanceChart,
   CashflowChart,
-  SavingsChart,
   TopCategoriesChart,
 } from "@/components/analytics-charts"
 import { ErrorState } from "@/components/error-state"
@@ -59,20 +58,16 @@ export default function DashboardPage() {
             Container queries measure main's content box (px-4), so this
             fires ~2rem later than the viewport 1024px threshold. */}
         <div className="grid gap-4 @min-[1024px]:grid-cols-3">
+          <BalanceChart
+            data={analytics?.balanceTimeline}
+            loading={showLoading}
+          />
           <CashflowChart
             data={analytics?.monthlyCashflow}
             loading={showLoading}
           />
           <TopCategoriesChart
             data={analytics?.topCategories}
-            loading={showLoading}
-          />
-          <BalanceChart
-            data={analytics?.balanceTimeline}
-            loading={showLoading}
-          />
-          <SavingsChart
-            data={analytics?.savingsHistory}
             loading={showLoading}
           />
         </div>

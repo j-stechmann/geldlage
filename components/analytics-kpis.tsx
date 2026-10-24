@@ -38,23 +38,6 @@ export interface AnalyticsResponse {
     share: number
     txCount: number
   }>
-  savingsHistory: {
-    lastMonth: string
-    lastMonthNetCents: number
-    lastMonthIsStale: boolean
-    months: Array<{
-      month: string
-      incomeCents: number
-      expensesCents: number
-      netCents: number
-    }>
-    currentMonth: {
-      month: string
-      incomeCents: number
-      expensesCents: number
-      netCents: number
-    } | null
-  } | null
 }
 
 export function useAnalytics(params: string) {
