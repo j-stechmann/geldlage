@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.20.0
+
+### Changed
+
+- **dashboard — balance timeline promoted to full-width hero chart,
+  Monatssaldo dropped**: `Monatssaldo` and `Monatlicher Cashflow` both
+  visualized the same per-month net data (once as a standalone bar chart,
+  once as the net line inside the cashflow chart), so the standalone chart
+  is removed and `Kontostand über Zeit` moves to the top of the dashboard
+  as a full-width hero chart (`@min-[1024px]:col-span-3`) (#86). Frontend:
+  chart order is now Balance → Cashflow → Top Categories; `SavingsChart`,
+  `savingsConfig` and `fullMonth` deleted, `BalanceChart` spans 3 columns
+  (components/analytics-charts.tsx). Engine/API: the savings-history query,
+  the `SavingsHistory` interface and the `savingsHistory` field of the
+  analytics response are removed (`buildTimeScopedWhere` kept — it still
+  scopes the balance timeline; lib/analytics/engine.ts). Tests: the
+  savings-history fixture suite is gone; the layout regression now asserts
+  the hero chart's `@min-[1024px]:col-span-3`. Docs updated (ADR-0022 left
+  as historical record).
+
 ## v1.19.1
 
 ### Security
