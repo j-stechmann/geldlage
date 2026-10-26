@@ -76,9 +76,9 @@ const MAX_COUNT = 366
 /**
  * Normalize a user-supplied rule before parsing: uppercase, drop the
  * "RRULE:" prefix, compact UNTIL datetimes (rrule's parser only accepts
- * YYYYMMDDTHHMMSSZ — dashed RFC forms fail outright) and lift date-only
- * UNTIL to noon (a midnight UNTIL would silently drop that final
- * noon-anchored occurrence).
+ * YYYYMMDDTHHMMSSZ — dashed RFC forms fail outright), lift date-only and
+ * MIDNIGHT UNTIL to noon. A midnight UNTIL would silently drop that final
+ * noon-anchored occurrence — all-day plans end on the named day.
  */
 export function normalizeRuleInput(input: string): string {
   let raw = input
@@ -91,6 +91,11 @@ export function normalizeRuleInput(input: string): string {
   )
   raw = raw.replace(/(UNTIL=)(\d{4})-(\d{2})-(\d{2})(?!T)/g, "$1$2$3$4")
   raw = raw.replace(/(UNTIL=)(\d{8})(?!T)/g, "$1$2T120000Z")
+  // midnight datetime UNTIL: the noon-anchored occurrence on that day
+  // compares AFTER midnight and would be excluded (same failure the
+  // date-only lift guards against — a stored pre-fix rule is lifted here
+  // at read time too)
+  raw = raw.replace(/(UNTIL=\d{8}T)000000Z/g, "$1120000Z")
   return raw
 }
 

@@ -228,7 +228,8 @@ export function PlanCalendar({ accountId, onEventClick }: PlanCalendarProps) {
           onEventClick(data.occurrence)
         } else if (data?.transaction) {
           // bank chips deep-link into the transactions table with the row
-          // surfaced (day-filtered, expanded, highlighted)
+          // surfaced (expanded, highlighted) — the id lookup is user-scoped
+          // and independent of any filter state
           router.push(transactionDeepLink(data.transaction))
         }
       }}

@@ -41,6 +41,10 @@ Indexes: `planned_transactions_user_status_idx` `(user_id, status)` and
   (`1FR`, `-1SU`) are rejected for DAILY/WEEKLY — RFC-invalid, and rrule
   silently _ignores_ the ordinal there. Canonical stored form is rrule's
   serialization (no `RRULE:` prefix; `+1FR` ordinals normalized to `1FR`).
+  `UNTIL` inputs are lifted to **noon UTC** (date-only and midnight-datetime
+  forms) so the final noon-anchored occurrence on the named day stays
+  included — applied at read time as well, so pre-fix stored rules expand
+  consistently.
 - **Expansion**: `expandOccurrenceDates(dtstart, rrule, {from, to}, cap)`.
   Every rule is rebuilt with an **explicit dtstart** — `rrulestr` alone
   defaults `dtstart` to _now_ and would silently empty pre-today windows.

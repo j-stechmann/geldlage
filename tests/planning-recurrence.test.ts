@@ -191,6 +191,25 @@ describe("expandOccurrenceDates", () => {
     ).toEqual(["2030-03-14", "2030-03-15"])
   })
 
+  it("lifts a MIDNIGHT datetime UNTIL to noon — the final day stays included", () => {
+    // dashed and compact midnight forms both normalize to the stored noon
+    // canonical (a midnight UNTIL excluded the noon-anchored occurrence on
+    // the named day — the failure the date-only lift guards against)
+    expect(validateRrule("FREQ=MONTHLY;UNTIL=2030-03-15T00:00:00Z")).toBe(
+      "FREQ=MONTHLY;UNTIL=20300315T120000Z"
+    )
+    expect(validateRrule("FREQ=MONTHLY;UNTIL=20300315T000000Z")).toBe(
+      "FREQ=MONTHLY;UNTIL=20300315T120000Z"
+    )
+    // a rule stored pre-fix (midnight in the DB) is lifted at read time
+    expect(
+      expandOccurrenceDates("2030-03-14", "FREQ=DAILY;UNTIL=20300315T000000Z", {
+        from: "2030-03-14",
+        to: "2030-03-31",
+      })
+    ).toEqual(["2030-03-14", "2030-03-15"])
+  })
+
   it("honours COUNT", () => {
     const dates = expandOccurrenceDates("2026-06-01", "FREQ=MONTHLY;COUNT=2", {
       from: "2026-01-01",

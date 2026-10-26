@@ -21,9 +21,10 @@
   booked (washed `•`) and pending `Nicht gebucht` (dashed hollow `◌`; fed
   by a new `GET /api/transactions/calendar` window endpoint) —, month view
   is the default, all dialog dropdowns display their chosen label (Base UI
-  `items` maps), and dashed/date-only `UNTIL` forms are normalized (rrule
-  only parses compact datetimes; date-only lifted to noon so the final day
-  stays included). Bank chips deep-link to the transactions table
+  `items` maps), and `UNTIL` forms are normalized (rrule only parses compact
+  datetimes; dashed forms compacted, and date-only/midnight datetimes lifted
+  to noon so the final day stays included — also at read time, lifting
+  pre-fix stored rules). Bank chips deep-link to the transactions table
   (`?tx=<id>`; `GET /api/transactions` gained an `id` param —
   `queryTransactionById`, a user-scoped single-row lookup bypassing filters
   and pagination that also shares the row projection with the list query —
