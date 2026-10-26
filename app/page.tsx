@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import {
   EMPTY_FILTERS,
   filtersToParams,
+  hasContentFilters,
   type TableFilters,
 } from "@/lib/filters"
 import { germanDate, useForecast } from "@/components/planning/api"
@@ -94,6 +95,12 @@ export default function DashboardPage() {
               {forecast.withoutSnapshot
                 ? " (ohne Kontostand-Referenz: Summe der Buchungen)"
                 : ""}
+            </span>
+          )}
+          {forecastOn && hasContentFilters(filters) && (
+            <span className="text-xs text-muted-foreground">
+              Geplante Beträge reagieren nur auf den Kontofilter, nicht auf
+              die anderen Filter.
             </span>
           )}
         </div>

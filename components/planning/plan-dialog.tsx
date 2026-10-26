@@ -370,10 +370,7 @@ export function parseRruleToForm(
 }
 
 /** Build the fully-initialized form for a dialog open (edit plan or new). */
-function initialForm(
-  plan: PlanRow | null | undefined,
-  defaultDate: string | null | undefined
-): FormState {
+function initialForm(plan: PlanRow | null | undefined): FormState {
   if (plan) {
     const overrides = parseRruleToForm(plan.rrule, plan.dtstart)
     return {
@@ -389,8 +386,7 @@ function initialForm(
       ...overrides,
     }
   }
-  const todayIso = defaultDate ?? todayLocal()
-  return { ...EMPTY_FORM, dtstart: todayIso }
+  return { ...EMPTY_FORM, dtstart: todayLocal() }
 }
 
 function describePlanError(err: unknown): string {
@@ -419,30 +415,25 @@ export interface PlanDialogProps {
   onOpenChange: (open: boolean) => void
   /** set = edit existing plan; null/undefined = create */
   plan?: PlanRow | null
-  /** prefilled dtstart for creates (opened from an empty calendar day) */
-  defaultDate?: string | null
 }
 
 export function PlanDialog({
   open,
   onOpenChange,
   plan,
-  defaultDate,
 }: PlanDialogProps) {
   const isEdit = plan !== null && plan !== undefined
   const [busy, setBusy] = React.useState(false)
 
-  // initial state is derived per dialog open (plan/new + prefilled day);
-  // adjusting state during render ("adjusting state when a prop change",
-  // react.dev) avoids an effect entirely
-  const initKey = `${open ? "open" : "closed"}|${plan?.id ?? "new"}|${defaultDate ?? ""}`
-  const [form, setForm] = React.useState<FormState>(() =>
-    initialForm(plan, defaultDate)
-  )
+  // initial state is derived per dialog open (plan/new); adjusting state
+  // during render ("adjusting state when a prop change", react.dev) avoids
+  // an effect entirely
+  const initKey = `${open ? "open" : "closed"}|${plan?.id ?? "new"}`
+  const [form, setForm] = React.useState<FormState>(() => initialForm(plan))
   const [renderedKey, setRenderedKey] = React.useState(initKey)
   if (renderedKey !== initKey) {
     setRenderedKey(initKey)
-    setForm(initialForm(plan, defaultDate))
+    setForm(initialForm(plan))
   }
 
   const set = React.useCallback(

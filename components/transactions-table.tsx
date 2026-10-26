@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Badge } from "@/components/ui/badge"
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -152,6 +153,10 @@ export function TransactionsTable({
   }, [])
   const activation = useRowActivation()
 
+  // deep-link focus mode: the id lookup intentionally ignores filters, sort
+  // and pagination — keep the dead controls visibly off and label the state
+  const focusMode = Boolean(focusTxId)
+
   const params = React.useMemo(() => {
     // deep-linked focus (from /planung): the query fetches exactly the one
     // row via the id lookup, independent of any filter state
@@ -222,10 +227,16 @@ export function TransactionsTable({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-end gap-2">
+        {focusMode && (
+          <Badge variant="secondary" className="mr-auto font-normal">
+            Fokus-Ansicht: nur diese Transaktion — Filteränderung kehrt zur
+            Liste zurück
+          </Badge>
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" disabled={focusMode}>
                 <ArrowUpDown className="size-4" /> Sortierung
                 <span className="text-muted-foreground">
                   {SORT_LABELS[sort.key]}

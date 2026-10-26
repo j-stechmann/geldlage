@@ -204,19 +204,16 @@ export function PlansBoard() {
   const queryClient = useQueryClient()
   const [dialogOpen, setDialogOpen] = React.useState(false)
   const [editing, setEditing] = React.useState<PlanRow | null>(null)
-  const [defaultDate, setDefaultDate] = React.useState<string | null>(null)
   const [busyId, setBusyId] = React.useState<string | null>(null)
   const [deleting, setDeleting] = React.useState<PlanRow | null>(null)
   const [deleteBusy, setDeleteBusy] = React.useState(false)
 
   const openCreate = () => {
     setEditing(null)
-    setDefaultDate(null)
     setDialogOpen(true)
   }
   const openEdit = (plan: PlanRow) => {
     setEditing(plan)
-    setDefaultDate(null)
     setDialogOpen(true)
   }
 
@@ -293,7 +290,14 @@ export function PlansBoard() {
               accountId={null}
               onEventClick={(o: PlanOccurrence) => {
                 const plan = plans.find((p) => p.id === o.planId)
-                if (plan) openEdit(plan)
+                if (plan) {
+                  openEdit(plan)
+                } else {
+                  // the occurrence's plan is missing from the list — the
+                  // plans data is stale (e.g. another tab mutated); re-sync
+                  // instead of leaving a silently dead chip
+                  void plansQuery.refetch()
+                }
               }}
             />
           </CardContent>
@@ -345,7 +349,7 @@ export function PlansBoard() {
                   <CardTitle>Prognose (12 Monate)</CardTitle>
                   <CardDescription>
                     ab heutigem Guthaben, ohne geplante Beträge, die bereits
-                    gebucht sind
+                    gebucht sind; pausierte Pläne zählen mit
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-1 text-sm">
@@ -407,7 +411,6 @@ export function PlansBoard() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         plan={editing}
-        defaultDate={defaultDate}
       />
 
       <Dialog
