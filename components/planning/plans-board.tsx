@@ -152,6 +152,17 @@ function PlanRowCard({
             Aktivieren
           </Button>
         )}
+        {plan.status === "finished" && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            onClick={() => onToggleStatus(plan, "active")}
+          >
+            <Play data-icon="inline-start" />
+            Reaktivieren
+          </Button>
+        )}
         {plan.status !== "finished" && (
           <Button
             variant="ghost"

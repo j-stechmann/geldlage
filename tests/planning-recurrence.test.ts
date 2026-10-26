@@ -231,6 +231,25 @@ describe("nextOccurrenceDate", () => {
     )
     expect(nextOccurrenceDate("2026-01-01", null, "2026-06-01")).toBeNull()
   })
+  it("widens the horizon for sparse live rules (ladder) instead of lying null", () => {
+    // MONTHLY;INTERVAL=100: next occurrence ~8 years out — the first 400-day
+    // window draws a blank, the ladder is what makes this non-null
+    expect(
+      nextOccurrenceDate(
+        "2026-03-01",
+        "FREQ=MONTHLY;INTERVAL=100;BYMONTHDAY=1",
+        "2026-10-26"
+      )
+    ).toBe("2034-07-01")
+    // a dead rule (exhausted COUNT) still scans the whole ladder → null
+    expect(
+      nextOccurrenceDate(
+        "2026-03-01",
+        "FREQ=MONTHLY;COUNT=2;BYMONTHDAY=1",
+        "2026-10-26"
+      )
+    ).toBeNull()
+  })
 })
 
 describe("isEmptyRule", () => {

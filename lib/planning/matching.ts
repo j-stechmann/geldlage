@@ -51,6 +51,39 @@ export function dayDiffFor(isoA: string, isoB: string): number {
   return Math.abs(Math.round((a - b) / 86_400_000))
 }
 
+/** ISO date ± days (UTC calendar arithmetic); "" for non-date input. */
+function isoShift(iso: string, days: number): string {
+  const t = Date.parse(`${iso}T00:00:00Z`)
+  if (!Number.isFinite(t)) return ""
+  return new Date(t + days * 86_400_000).toISOString().slice(0, 10)
+}
+
+/** First index with bookingDate >= from ("": no bound → 0). */
+function lowerBoundByDate(tx: MatchCandidate[], from: string): number {
+  if (from === "") return 0
+  let lo = 0
+  let hi = tx.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (tx[mid].bookingDate < from) lo = mid + 1
+    else hi = mid
+  }
+  return lo
+}
+
+/** First index with bookingDate > to ("": no candidates → 0). */
+function upperBoundByDate(tx: MatchCandidate[], to: string): number {
+  if (to === "") return 0
+  let lo = 0
+  let hi = tx.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (tx[mid].bookingDate <= to) lo = mid + 1
+    else hi = mid
+  }
+  return lo
+}
+
 function amountWithinTolerance(planCents: number, txCents: number): boolean {
   const tolerance = Math.max(
     AMOUNT_TOLERANCE_FLOOR_CENTS,
@@ -101,14 +134,27 @@ interface PairCandidate {
  * |date offset|, then |amount difference|, then transaction id; each
  * occurrence and each transaction is consumed at most once. Results are
  * deterministic for a given (occurrences, transactions) input.
+ *
+ * Candidate rows are sorted once by bookingDate so every occurrence only
+ * evaluates its [+5/−7] day slice instead of every row — for the wide
+ * forecast windows this turns the pairing into O(N·log M) lookups over
+ * ≤ 13-day slices. The result set is unchanged: the date slice exactly
+ * mirrors viable()'s date bound, and pairs are fully re-sorted afterwards.
  */
 export function matchPlannedOccurrences(
   occurrences: MatchableOccurrence[],
   transactions: MatchCandidate[]
 ): OccurrenceMatch[] {
+  const sortedTx = [...transactions].sort(
+    (a, b) =>
+      a.bookingDate.localeCompare(b.bookingDate) || a.id.localeCompare(b.id)
+  )
   const pairs: PairCandidate[] = []
   for (const occ of occurrences) {
-    for (const tx of transactions) {
+    const lo = lowerBoundByDate(sortedTx, isoShift(occ.date, -MATCH_DAYS_BEFORE))
+    const hi = upperBoundByDate(sortedTx, isoShift(occ.date, MATCH_DAYS_AFTER))
+    for (let i = lo; i < hi; i++) {
+      const tx = sortedTx[i]
       const offsetAbs = viable(occ, tx)
       if (offsetAbs === null) continue
       pairs.push({

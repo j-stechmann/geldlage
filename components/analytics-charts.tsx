@@ -255,6 +255,8 @@ export function CashflowChart({
  * planned occurrences — see computeForecast). A history extending beyond
  * today (imported future bookings) suppresses the projection line entirely:
  * its anchor overlaps real dates and the merged line would run backwards.
+ * With NO history at all (fresh user: no snapshots, no bookings) the dashed
+ * projection stands alone from today so planned-only balances still render.
  */
 function mergeBalance(
   hist: AnalyticsResponse["balanceTimeline"],
@@ -271,10 +273,21 @@ function mergeBalance(
   }))
   if (!forecast) return points
   const last = points[points.length - 1]
-  if (!last || last.date > forecast.today) return points
-  last.projected = last.balance
+  if (last && last.date > forecast.today) return points
+  if (last) {
+    last.projected = last.balance
+    for (const p of forecast.projectedBalance) {
+      if (p.date <= last.date) continue
+      points.push({
+        date: p.date,
+        balance: null,
+        projected: p.balanceCents / 100,
+      })
+    }
+    return points
+  }
+  // no real balance points: the projection is the only series
   for (const p of forecast.projectedBalance) {
-    if (p.date <= last.date) continue
     points.push({
       date: p.date,
       balance: null,
@@ -398,6 +411,8 @@ export function TopCategoriesChart({
   const chartData = React.useMemo(
     () =>
       (data ?? []).map((c) => ({
+        /** identity for the forecast merge: null = the uncategorized bucket */
+        categoryId: c.categoryId,
         name: c.name,
         value: c.totalCents / 100,
         planned: 0,
@@ -409,14 +424,19 @@ export function TopCategoriesChart({
   const merged = React.useMemo(() => {
     if (!forecast) return chartData
     const rows = [...chartData]
-    const byName = new Map(rows.map((r) => [r.name, r]))
+    // merge by CATEGORY ID, not name: the engine labels actual
+    // uncategorized spending "Unlabeled" while plannedCategories calls the
+    // same bucket "ohne Kategorie" — keyed on the id (null == null) the
+    // planned money stacks onto its true bucket instead of a twin row
+    const byId = new Map(rows.map((r) => [r.categoryId, r]))
     for (const p of forecast.plannedCategories) {
       const planned = p.totalCents / 100
-      const existing = byName.get(p.name)
+      const existing = byId.get(p.categoryId)
       if (existing) {
         existing.planned = planned
       } else {
         rows.push({
+          categoryId: p.categoryId,
           name: p.name,
           value: 0,
           planned,

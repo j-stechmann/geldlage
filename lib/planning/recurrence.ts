@@ -281,18 +281,26 @@ export function expandOccurrenceDates(
 
 /**
  * Next occurrence date strictly at-or-after `afterIso`, or null. Scans a
- * bounded window (the same cap applies) so an unbounded daily rule cannot
- * scan forever when the next date is farther than the cap away.
+ * growing window (first attempt the default horizon, then wider) so an
+ * unbounded daily rule cannot scan forever — while a live but *sparse* rule
+ * (large INTERVAL, 5th-weekday ordinals, leap-day rules) still finds its
+ * real next date instead of a misleading null. The ladder is bounded: a
+ * rule that truly never fires again (expired UNTIL, exhausted COUNT) costs
+ * at most four bounded scans.
  */
+const NEXT_HORIZON_LADDER = [400, 1600, 6400, 25_600]
+
 export function nextOccurrenceDate(
   dtstart: string,
   rruleText: string | null,
-  afterIso: string,
-  horizonDays = 400
+  afterIso: string
 ): string | null {
   const from = dtstart > afterIso ? dtstart : afterIso
   const [y, m, d] = from.split("-").map(Number)
-  const to = isoOf(new Date(Date.UTC(y, m - 1, d + horizonDays, 12)))
-  const dates = expandOccurrenceDates(dtstart, rruleText, { from, to }, 1)
-  return dates[0] ?? null
+  for (const horizonDays of NEXT_HORIZON_LADDER) {
+    const to = isoOf(new Date(Date.UTC(y, m - 1, d + horizonDays, 12)))
+    const dates = expandOccurrenceDates(dtstart, rruleText, { from, to }, 1)
+    if (dates.length > 0) return dates[0]
+  }
+  return null
 }

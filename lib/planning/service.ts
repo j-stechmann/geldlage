@@ -367,9 +367,12 @@ export function updatePlan(
   assertOwnedRef(categories, validated.categoryId, userId, "category_not_found")
   const nextDtstart = validated.dtstart ?? existing.dtstart
   // a rule or dtstart change must still yield ≥ 1 occurrence — check against
-  // the EFFECTIVE combination (patched field or the one kept from the row)
+  // the EFFECTIVE combination: the patched rrule wins even when it nulls the
+  // rule (null = one-off on nextDtstart, which needs no occurrence check)
+  const effectiveRrule =
+    "rrule" in validated ? (validated.rrule ?? null) : existing.rrule
   if ("rrule" in validated || validated.dtstart !== undefined) {
-    assertRuleProducesOccurrence(nextDtstart, validated.rrule ?? existing.rrule)
+    assertRuleProducesOccurrence(nextDtstart, effectiveRrule)
   }
   db.update(plannedTransactions)
     .set({

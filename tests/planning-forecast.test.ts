@@ -176,8 +176,7 @@ describe("computeForecast", () => {
     expect(forecast.monthlyPlanned).toEqual([
       {
         month: "2026-03",
-        // one-off C (299,00) + weekly D 3× (12,34) = 336,02 — but wait: the
-        // comment block at the top said 299,00 + 37,02 = 336,02 €
+        // one-off C (299,00) + weekly D 3× (12,34) = 299,00 + 37,02 = 336,02 €
         incomeCents: 0,
         expensesCents: 29_900 + 3 * 1_234,
         netCents: -(29_900 + 3 * 1_234),

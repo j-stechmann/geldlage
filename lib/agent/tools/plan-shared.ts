@@ -117,7 +117,14 @@ export function planSummaries(rows: PlanRow[]): {
 
 function clipText(s: string | null): string | null {
   if (s === null || s.length <= SUMMARY_TEXT_CHARS) return s
-  return s.slice(0, SUMMARY_TEXT_CHARS - 1) + "…"
+  // keep surrogate pairs intact: never cut between a high and a low surrogate
+  let cut = SUMMARY_TEXT_CHARS - 1
+  const high = s.charCodeAt(cut - 1)
+  const low = s.charCodeAt(cut)
+  if (high >= 0xd800 && high <= 0xdbff && low >= 0xdc00 && low <= 0xdfff) {
+    cut -= 1
+  }
+  return s.slice(0, cut) + "…"
 }
 
 /**
