@@ -65,6 +65,22 @@ describe("matchPlannedOccurrences", () => {
     ).toEqual([])
   })
 
+  it("zero-amount bookings never match (placeholder rows)", () => {
+    // a 0-cent row would otherwise slip the sign check against expense plans
+    // (both sides non-positive) and clear the 5 € tolerance floor for plans
+    // of ≤ 5 € — e.g. a 0 € reservation entry ticking off a 5 € plan
+    expect(
+      matchPlannedOccurrences(
+        [occ({ amountCents: -500 })],
+        [tx({ amountCents: 0 })]
+      )
+    ).toEqual([])
+    // large plan: the amount tolerance never accepted it, unchanged
+    expect(matchPlannedOccurrences([occ()], [tx({ amountCents: 0 })])).toEqual(
+      []
+    )
+  })
+
   it("amount tolerance: max(5 €, 1 %) — below matches, above does not", () => {
     // plan −950,00 € ⇒ 1 % = 9,50 € ⇒ effective tolerance 950 ct
     // inside the tolerance (94,99 ct deviation? no: 949 ct)

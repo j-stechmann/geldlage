@@ -99,8 +99,8 @@ export default function DashboardPage() {
           )}
           {forecastOn && hasContentFilters(filters) && (
             <span className="text-xs text-muted-foreground">
-              Geplante Beträge reagieren nur auf den Kontofilter, nicht auf
-              die anderen Filter.
+              Geplante Beträge reagieren nur auf den Kontofilter, nicht auf die
+              anderen Filter.
             </span>
           )}
         </div>

@@ -187,18 +187,26 @@ function buildRrule(s: FormState): string | null {
     }
   }
   if (s.endMode === "until") {
-    if (s.untilDate && isValidIsoDate(s.untilDate)) {
-      // noon-anchored UNTIL → the chosen day stays INCLUDED (occurrences sit
-      // at noon on the same UTC clock)
-      const u = noonUtc(s.untilDate)
-      const pad = (n: number) => String(n).padStart(2, "0")
-      parts.push(
-        `UNTIL=${u.getUTCFullYear()}${pad(u.getUTCMonth() + 1)}${pad(u.getUTCDate())}T${pad(u.getUTCHours())}${pad(u.getUTCMinutes())}${pad(u.getUTCSeconds())}Z`
-      )
+    // a CHOSEN end condition must be complete: an empty/invalid date would
+    // otherwise silently save an unbounded rule while the form displays
+    // "Am Datum" — throw so the effective-rule memo flips to error state
+    // (inline message + disabled save) instead of dropping the part
+    if (!s.untilDate || !isValidIsoDate(s.untilDate)) {
+      throw new Error("Enddatum fehlt oder ist ungültig")
     }
+    // noon-anchored UNTIL → the chosen day stays INCLUDED (occurrences sit
+    // at noon on the same UTC clock)
+    const u = noonUtc(s.untilDate)
+    const pad = (n: number) => String(n).padStart(2, "0")
+    parts.push(
+      `UNTIL=${u.getUTCFullYear()}${pad(u.getUTCMonth() + 1)}${pad(u.getUTCDate())}T${pad(u.getUTCHours())}${pad(u.getUTCMinutes())}${pad(u.getUTCSeconds())}Z`
+    )
   } else if (s.endMode === "count") {
     const n = Math.round(s.count)
-    if (Number.isInteger(n) && n >= 1 && n <= 366) parts.push(`COUNT=${n}`)
+    if (!Number.isInteger(n) || n < 1 || n > 366) {
+      throw new Error("Anzahl muss zwischen 1 und 366 liegen")
+    }
+    parts.push(`COUNT=${n}`)
   }
   return parts.join(";")
 }
@@ -417,11 +425,7 @@ export interface PlanDialogProps {
   plan?: PlanRow | null
 }
 
-export function PlanDialog({
-  open,
-  onOpenChange,
-  plan,
-}: PlanDialogProps) {
+export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
   const isEdit = plan !== null && plan !== undefined
   const [busy, setBusy] = React.useState(false)
 

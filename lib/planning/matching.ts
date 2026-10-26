@@ -104,6 +104,11 @@ function viable(occ: MatchableOccurrence, tx: MatchCandidate): number | null {
   const offset = offsetMs / 86_400_000
   if (!Number.isFinite(offset)) return null
   if (offset < -MATCH_DAYS_BEFORE || offset > MATCH_DAYS_AFTER) return null
+  // plans are validated non-zero; a 0-cent row (reservation placeholders,
+  // reversed card holds) must never check a plan off — as a non-positive it
+  // would slip the sign check for expense plans and clear the 5 € tolerance
+  // floor for plans of ≤ 5 € (|plan − 0| ≤ 500)
+  if (tx.amountCents === 0) return null
   if (occ.amountCents > 0 !== tx.amountCents > 0) return null
   if (occ.accountId !== null && occ.accountId !== tx.accountId) return null
   if (occ.counterparty !== null && !counterpartyMatches(occ.counterparty, tx))

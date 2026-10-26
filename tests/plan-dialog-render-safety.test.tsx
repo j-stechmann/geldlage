@@ -104,4 +104,70 @@ describe("plan dialog: invalid builder input must not crash the page", () => {
     })
     expect(saveButton()).toBeDisabled()
   })
+
+  it("an incomplete 'Am Datum' end condition is an error, not a silently unbounded rule", async () => {
+    renderWithQuery(
+      <PlanDialog
+        open
+        onOpenChange={() => {}}
+        plan={{
+          ...BASE_PLAN,
+          rrule: "FREQ=MONTHLY;UNTIL=20261231T120000Z",
+        }}
+      />
+    )
+    const input = await waitFor(() => inputByLabel("Enddatum"))
+
+    // clearing the chosen end date must NOT save an unbounded rule under a
+    // form still displaying "Am Datum" — it disarms the dialog like every
+    // other rule error
+    fireEvent.change(input, { target: { value: "" } })
+    await waitFor(() => {
+      expect(document.body.textContent).toContain(
+        "Enddatum fehlt oder ist ungültig"
+      )
+    })
+    expect(saveButton()).toBeDisabled()
+
+    // re-entering a date clears the error and re-enables the dialog
+    fireEvent.change(input, { target: { value: "2026-12-31" } })
+    await waitFor(() => {
+      expect(document.body.textContent).not.toContain(
+        "Enddatum fehlt oder ist ungültig"
+      )
+    })
+    expect(saveButton()).toBeEnabled()
+  })
+
+  it("an out-of-range 'Nach N Vorfällen' count is contained the same way", async () => {
+    renderWithQuery(
+      <PlanDialog
+        open
+        onOpenChange={() => {}}
+        plan={{
+          ...BASE_PLAN,
+          rrule: "FREQ=DAILY;COUNT=5",
+        }}
+      />
+    )
+    const input = await waitFor(() => inputByLabel("Anzahl Vorfälle"))
+
+    // 500 used to be silently dropped → the stored rule lost its COUNT and
+    // ran unbounded; now it disarms the dialog instead
+    fireEvent.change(input, { target: { value: "500" } })
+    await waitFor(() => {
+      expect(document.body.textContent).toContain(
+        "Anzahl muss zwischen 1 und 366 liegen"
+      )
+    })
+    expect(saveButton()).toBeDisabled()
+
+    fireEvent.change(input, { target: { value: "12" } })
+    await waitFor(() => {
+      expect(document.body.textContent).not.toContain(
+        "Anzahl muss zwischen 1 und 366 liegen"
+      )
+    })
+    expect(saveButton()).toBeEnabled()
+  })
 })
