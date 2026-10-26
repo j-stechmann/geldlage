@@ -729,8 +729,14 @@ export function computeForecast(
   let totalPlannedExpenses = 0
   for (const o of occurrences) {
     // MATCHED occurrences are real money already — they sit in the booked
-    // history and would double-count the forecast (planned = not-yet-booked)
-    if (o.matched !== null) continue
+    // history and would double-count the forecast (planned = not-yet-booked).
+    // Horizon edge: a match whose booking posts AFTER horizonEnd is not part
+    // of this projection at all (starting balance stops at today, realFuture
+    // at horizonEnd), so the planned occurrence remains its only in-horizon
+    // representation and stays counted. bookingDate ≤ horizonEnd is what
+    // makes "already booked" true within this projection: ≤ today sits in
+    // the starting balance, > today in the realFuture sum.
+    if (o.matched !== null && o.matched.bookingDate <= horizonEnd) continue
     const month = o.date.slice(0, 7)
     const entry = monthlyPlanned.get(month) ?? {
       incomeCents: 0,

@@ -87,9 +87,14 @@ is left untouched; the forecast endpoint is deliberately separate.
   `withoutSnapshot`. Account filter respected like the balance timeline.
 - **Planned aggregates use only UNMATCHED occurrences** from today through
   `months` (clamped 1–60, default 12): matched ones are booked money
-  already inside the actuals — including them would double-count. Also
-  included in the _balance projection_ (but not the planned sums): booked
-  rows dated after today (`realFuture`, e.g. postdated standing orders).
+  already inside the actuals — including them would double-count. One
+  horizon edge stays counted: a match whose booking posts after
+  `horizonEnd` (within the ± posting-drift window) is outside the
+  projection's real data entirely, so the planned occurrence remains its
+  only in-horizon representation (`bookingDate ≤ horizonEnd` defines
+  "already booked" here). Also included in the _balance projection_ (but
+  not the planned sums): booked rows dated after today (`realFuture`, e.g.
+  postdated standing orders).
 - Outputs: `monthlyPlanned` (per month income/expenses/net — the current
   month counts from today, so the dashboard stacks real partials + remaining
   plans), `projectedBalance` (running balance at today + every day with

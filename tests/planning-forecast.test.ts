@@ -357,4 +357,68 @@ describe("computeForecast", () => {
     })
     expect(clamped.horizon.to).toBe("2031-02-28")
   })
+
+  // Horizon edge (regression): a match whose booking posts AFTER horizonEnd
+  // is outside the projection's real data entirely (starting balance stops
+  // at today, realFuture at horizonEnd) — the planned occurrence must stay
+  // counted, otherwise the money appears in neither aggregate.
+  it("keeps a match booked past horizonEnd counted as planned", () => {
+    seedBatch({ snapshotDate: "2026-01-31", snapshotAmountCents: 100_000 })
+    seedPlan({
+      amountCents: -95_000,
+      dtstart: "2026-01-27",
+      rrule: "FREQ=MONTHLY;BYMONTHDAY=27",
+      counterparty: "Mietwerk GmbH",
+    })
+
+    // booking posts 2026-04-02 (+6 days from the 03-27 occurrence, inside
+    // the +7 match window) — after the horizon end 2026-03-31
+    seedTx("2026-04-02", -95_000, { payee: "Mietwerk GmbH" })
+
+    const after = computeForecast(userId, { months: 1, today: "2026-03-15" })
+    expect(after.horizon).toEqual({ from: "2026-03-15", to: "2026-03-31" })
+    // the March occurrence is the only in-horizon representation → counted
+    expect(after.monthlyPlanned).toEqual([
+      {
+        month: "2026-03",
+        incomeCents: 0,
+        expensesCents: 95_000,
+        netCents: -95_000,
+      },
+    ])
+    expect(after.projectedBalance).toEqual([
+      { date: "2026-03-15", balanceCents: 100_000 },
+      { date: "2026-03-27", balanceCents: 5_000 },
+    ])
+    expect(after.plannedCategories).toEqual([
+      {
+        categoryId: null,
+        name: "ohne Kategorie",
+        color: null,
+        totalCents: 95_000,
+        share: 1,
+      },
+    ])
+  })
+
+  // the double-count protection itself, at the same horizon: a booking
+  // dated ON horizonEnd is real in-horizon money — the occurrence stays
+  // excluded and the realFuture balance point carries the amount instead
+  it("stays excluded when the match books on horizonEnd", () => {
+    seedBatch({ snapshotDate: "2026-01-31", snapshotAmountCents: 100_000 })
+    seedPlan({
+      amountCents: -95_000,
+      dtstart: "2026-01-27",
+      rrule: "FREQ=MONTHLY;BYMONTHDAY=27",
+      counterparty: "Mietwerk GmbH",
+    })
+    seedTx("2026-03-31", -95_000, { payee: "Mietwerk GmbH" })
+
+    const inside = computeForecast(userId, { months: 1, today: "2026-03-15" })
+    expect(inside.monthlyPlanned).toEqual([])
+    expect(inside.projectedBalance).toEqual([
+      { date: "2026-03-15", balanceCents: 100_000 },
+      { date: "2026-03-31", balanceCents: 5_000 },
+    ])
+  })
 })

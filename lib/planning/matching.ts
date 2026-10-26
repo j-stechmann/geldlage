@@ -44,13 +44,6 @@ export interface OccurrenceMatch {
   transactionId: string
 }
 
-/** Absolute day difference between two ISO date strings (matches match.ts). */
-export function dayDiffFor(isoA: string, isoB: string): number {
-  const a = Date.parse(`${isoA}T00:00:00Z`)
-  const b = Date.parse(`${isoB}T00:00:00Z`)
-  return Math.abs(Math.round((a - b) / 86_400_000))
-}
-
 /** ISO date ± days (UTC calendar arithmetic); "" for non-date input. */
 function isoShift(iso: string, days: number): string {
   const t = Date.parse(`${iso}T00:00:00Z`)

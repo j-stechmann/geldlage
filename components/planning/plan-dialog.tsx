@@ -470,23 +470,47 @@ export function PlanDialog({
     enabled: open,
   })
 
-  // the effective RRULE text: builder output, unless the user edits raw
-  const effectiveRrule = React.useMemo<string | null>(() => {
+  // the effective RRULE text: builder output, unless the user edits raw —
+  // plus a rule-error flag. buildRrule can throw (parseByMonthDay on
+  // garbage/duplicate month days); the memo must never: an uncaught render
+  // error here would unmount the whole app (no error.tsx boundary exists).
+  // The flag turns the throw into inline preview text + a disabled save.
+  const effective = React.useMemo<{
+    rrule: string | null
+    error: string | null
+  }>(() => {
     if (form.rawDirty) {
-      return form.rawRrule.trim() === "" ? null : form.rawRrule.trim()
+      return {
+        rrule: form.rawRrule.trim() === "" ? null : form.rawRrule.trim(),
+        error: null,
+      }
     }
-    return buildRrule(form)
+    try {
+      return { rrule: buildRrule(form), error: null }
+    } catch (err) {
+      return {
+        rrule: null,
+        error:
+          err instanceof Error && err.message
+            ? err.message
+            : "Ungültige Wiederholungsregel",
+      }
+    }
   }, [form])
+  const effectiveRrule = effective.rrule
 
   // ── preview: next ≤3 dates, from the effective rule (same engine as the
   // server: the rrule package) ──
   const preview = React.useMemo(() => {
+    if (effective.error !== null) {
+      return { dates: [] as string[], error: effective.error }
+    }
     const dtstart = form.dtstart
     if (!isValidIsoDate(dtstart))
       return { dates: [] as string[], error: null as string | null }
-    if (effectiveRrule === null) return { dates: [dtstart], error: null }
+    if (effective.rrule === null) return { dates: [dtstart], error: null }
     try {
-      const parsed = rrulestr(normalizeRuleInput(effectiveRrule), {
+      const parsed = rrulestr(normalizeRuleInput(effective.rrule), {
         forceset: false,
       })
       if (!(parsed instanceof RRule))
@@ -512,7 +536,7 @@ export function PlanDialog({
     } catch {
       return { dates: [], error: "Wiederholungsregel ist ungültig" }
     }
-  }, [effectiveRrule, form.dtstart])
+  }, [effective, form.dtstart])
 
   // short-month hint: monthly rules on days ≥ 29 skip short months
   const monthDayHint = React.useMemo(() => {
@@ -528,6 +552,10 @@ export function PlanDialog({
   }, [form.freq, form.monthlyMode, form.byMonthDayText])
 
   const save = async () => {
+    // defense in depth: the button is already disabled on a rule error —
+    // saving would otherwise send rrule: null and silently strip a
+    // recurrence the failed builder simply couldn't render
+    if (effective.error !== null) return
     setBusy(true)
     try {
       const amountText = form.amountText.trim()
@@ -576,7 +604,10 @@ export function PlanDialog({
     }
   }
 
-  const canSave = isValidIsoDate(form.dtstart) && form.amountText.trim() !== ""
+  const canSave =
+    isValidIsoDate(form.dtstart) &&
+    form.amountText.trim() !== "" &&
+    effective.error === null
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
