@@ -210,6 +210,55 @@ describe("expandOccurrenceDates", () => {
     ).toEqual(["2030-03-14", "2030-03-15"])
   })
 
+  it("lifts EVERY sub-noon UNTIL time to noon (not just midnight)", () => {
+    // 06:00 / 11:30 on the final day sit BEFORE the noon anchor — without
+    // the lift the named day's occurrence silently drops
+    expect(validateRrule("FREQ=DAILY;UNTIL=20300315T060000Z")).toBe(
+      "FREQ=DAILY;UNTIL=20300315T120000Z"
+    )
+    expect(validateRrule("FREQ=DAILY;UNTIL=20300315T113000Z")).toBe(
+      "FREQ=DAILY;UNTIL=20300315T120000Z"
+    )
+    // floating (no-Z) sub-noon datetimes: rrule parses them as UTC anyway —
+    // lifted AND canonicalized with the Z designator
+    expect(validateRrule("FREQ=DAILY;UNTIL=20300315T060000")).toBe(
+      "FREQ=DAILY;UNTIL=20300315T120000Z"
+    )
+    // times AT/AFTER noon already include the occurrence — untouched
+    expect(validateRrule("FREQ=DAILY;UNTIL=20300315T120000Z")).toBe(
+      "FREQ=DAILY;UNTIL=20300315T120000Z"
+    )
+    expect(validateRrule("FREQ=DAILY;UNTIL=20300315T123045Z")).toBe(
+      "FREQ=DAILY;UNTIL=20300315T123045Z"
+    )
+    expect(validateRrule("FREQ=DAILY;UNTIL=20300315T235959Z")).toBe(
+      "FREQ=DAILY;UNTIL=20300315T235959Z"
+    )
+    // …and the lifted bound keeps the final day's occurrence
+    expect(
+      expandOccurrenceDates("2030-03-01", "FREQ=DAILY;UNTIL=20300315T060000Z", {
+        from: "2030-03-01",
+        to: "2030-03-31",
+      })
+    ).toEqual([
+      "2030-03-01",
+      "2030-03-02",
+      "2030-03-03",
+      "2030-03-04",
+      "2030-03-05",
+      "2030-03-06",
+      "2030-03-07",
+      "2030-03-08",
+      "2030-03-09",
+      "2030-03-10",
+      "2030-03-11",
+      "2030-03-12",
+      "2030-03-13",
+      "2030-03-14",
+      "2030-03-15",
+    ])
+  })
+
   it("honours COUNT", () => {
     const dates = expandOccurrenceDates("2026-06-01", "FREQ=MONTHLY;COUNT=2", {
       from: "2026-01-01",

@@ -77,8 +77,11 @@ const MAX_COUNT = 366
  * Normalize a user-supplied rule before parsing: uppercase, drop the
  * "RRULE:" prefix, compact UNTIL datetimes (rrule's parser only accepts
  * YYYYMMDDTHHMMSSZ — dashed RFC forms fail outright), lift date-only and
- * MIDNIGHT UNTIL to noon. A midnight UNTIL would silently drop that final
- * noon-anchored occurrence — all-day plans end on the named day.
+ * every SUB-NOON UNTIL time to noon. A sub-noon UNTIL (midnight, 06:00,
+ * …) would silently drop that final noon-anchored occurrence — all-day
+ * plans end on the named day; times ≥ 12:00:00 already include it.
+ * Floating (no-Z) datetimes are canonicalized with Z — rrule parses them
+ * as UTC anyway.
  */
 export function normalizeRuleInput(input: string): string {
   let raw = input
@@ -91,11 +94,15 @@ export function normalizeRuleInput(input: string): string {
   )
   raw = raw.replace(/(UNTIL=)(\d{4})-(\d{2})-(\d{2})(?!T)/g, "$1$2$3$4")
   raw = raw.replace(/(UNTIL=)(\d{8})(?!T)/g, "$1$2T120000Z")
-  // midnight datetime UNTIL: the noon-anchored occurrence on that day
-  // compares AFTER midnight and would be excluded (same failure the
-  // date-only lift guards against — a stored pre-fix rule is lifted here
-  // at read time too)
-  raw = raw.replace(/(UNTIL=\d{8}T)000000Z/g, "$1120000Z")
+  // sub-noon datetime UNTIL (00:00:00–11:59:59, Z or floating): the
+  // noon-anchored occurrence on that day compares AFTER it and would be
+  // excluded — the same failure the date-only lift guards against. Stored
+  // pre-fix rules are lifted here at read time too.
+  raw = raw.replace(
+    /(UNTIL=\d{8}T)(\d{2})(\d{2})(\d{2})(Z?)/g,
+    (_m, pre: string, hh: string, mm: string, ss: string, z: string) =>
+      Number(hh) < 12 ? `${pre}120000Z` : `${pre}${hh}${mm}${ss}${z || "Z"}`
+  )
   return raw
 }
 

@@ -236,6 +236,32 @@ describe("POST /api/plans", () => {
     expect((await res.json()).error).toBe("invalid_rrule")
   })
 
+  it("accepts sparse-but-live rules whose first occurrence lies years ahead", async () => {
+    // a leap-day yearly plan with dtstart in a non-leap year: the first
+    // occurrence (2028-02-29) is ~624 days out — beyond a fixed 400-day
+    // check, found by the same bounded ladder nextOccurrenceDate uses
+    const leap = await postPlan(`${BASE}/api/plans`, {
+      amountCents: -950_00,
+      dtstart: "2026-06-15",
+      rrule: "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=29",
+    })
+    expect(leap.status).toBe(201)
+    expect(getStored((await leap.json()).plan.id)!.rrule).toBe(
+      "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=29"
+    )
+
+    // MONTHLY;INTERVAL=100 fires ~8⅓ years out (2034-07-01) — ladder rung 3
+    const sparse = await postPlan(`${BASE}/api/plans`, {
+      amountCents: -100,
+      dtstart: "2026-03-01",
+      rrule: "FREQ=MONTHLY;INTERVAL=100;BYMONTHDAY=1",
+    })
+    expect(sparse.status).toBe(201)
+    expect(getStored((await sparse.json()).plan.id)!.rrule).toBe(
+      "FREQ=MONTHLY;INTERVAL=100;BYMONTHDAY=1"
+    )
+  })
+
   it("accepts a dtstart at the 1900 floor", async () => {
     const res = await postPlan(`${BASE}/api/plans`, {
       amountCents: -100,

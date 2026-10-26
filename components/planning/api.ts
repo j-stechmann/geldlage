@@ -347,7 +347,10 @@ export function describeRrule(rruleText: string | null): string {
   } else if (freq === "MONTHLY") {
     const byDay = parts.get("BYDAY")
     const byMonthDay = parts.get("BYMONTHDAY")
-    if (byDay && /^(1|2|3|4|-1)(MO|TU|WE|TH|FR|SA|SU)(,.+)*$/.exec(byDay)) {
+    // ordinal BYDAY of any width — validation accepts every RFC ordinal
+    // (e.g. 5FR), so the badge must describe it, not degrade to a bare
+    // "monatlich"
+    if (byDay && /^(-?\d+)(MO|TU|WE|TH|FR|SA|SU)(,.+)*$/.exec(byDay.trim())) {
       const ordinals = describeByWeekday(byDay)
       base = `${interval === 1 ? "am" : `alle ${interval} Monate am`} ${ordinals}`
     } else if (byMonthDay) {

@@ -39,9 +39,13 @@ EXDATE/RDATE` as well as multi-line/`DTSTART:` pastes (dtstart is a
    **RRULE semantics are RRULE's**: monthly `BYMONTHDAY=31` SKIPS short
    months (bank debits would clamp to month end); the form warns when day
    ≥ 29 is picked. `COUNT ≤ 366` + window caps bound every expansion.
-   `UNTIL` inputs are lifted to **noon UTC** (date-only and midnight
-   datetime forms) so the named end day stays included — also applied at
-   read time, lifting pre-fix stored rules.
+   `UNTIL` inputs are lifted to **noon UTC** (any sub-noon datetime form:
+   date-only, midnight, `06:00Z` …, floating no-Z included; times at/after
+   noon stay) so the named end day stays included — also applied at
+   read time, lifting pre-fix stored rules. The occurrence-productivity
+   check on create/update walks the same bounded next-date ladder as
+   `nextOccurrenceDate` (~70 y) — sparse-but-live rules (leap-day yearly,
+   large INTERVAL) are creatable, dead ones are rejected.
 
 3. **Read-time matching, zero storage.** Each occurrences request pairs
    planned occurrences with real `Gebucht` rows of the same user (± the

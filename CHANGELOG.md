@@ -22,9 +22,12 @@
   by a new `GET /api/transactions/calendar` window endpoint) —, month view
   is the default, all dialog dropdowns display their chosen label (Base UI
   `items` maps), and `UNTIL` forms are normalized (rrule only parses compact
-  datetimes; dashed forms compacted, and date-only/midnight datetimes lifted
-  to noon so the final day stays included — also at read time, lifting
-  pre-fix stored rules). Bank chips deep-link to the transactions table
+  datetimes; dashed forms compacted, and every sub-noon UNTIL — date-only,
+  midnight, `06:00Z` …, floating no-Z included — lifted to noon so the
+  final day stays included; also at read time, lifting pre-fix stored
+  rules), and validated rules must yield an occurrence within the bounded
+  next-date ladder (~70 y — sparse-but-live rules like leap-day yearly are
+  creatable, dead rules rejected). Bank chips deep-link to the transactions table
   (`?tx=<id>`; `GET /api/transactions` gained an `id` param —
   `queryTransactionById`, a user-scoped single-row lookup bypassing filters
   and pagination that also shares the row projection with the list query —

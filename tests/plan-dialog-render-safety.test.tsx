@@ -170,4 +170,48 @@ describe("plan dialog: invalid builder input must not crash the page", () => {
     })
     expect(saveButton()).toBeEnabled()
   })
+
+  it("a sparse-but-live rule previews its real next dates (ladder, not a 400-day window)", async () => {
+    // leap-day yearly plan anchored in a non-leap year: the first occurrence
+    // (2028-02-29) is > 2 years after dtstart — a fixed 400-day preview
+    // window used to falsely claim "keinen Termin"; the preview now walks
+    // the same bounded ladder as the server's validation and shows 2028 /
+    // 2032 / 2036
+    renderWithQuery(
+      <PlanDialog
+        open
+        onOpenChange={() => {}}
+        plan={{
+          ...BASE_PLAN,
+          dtstart: "2026-06-15",
+          rrule: "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=29",
+        }}
+      />
+    )
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("29.02.2028")
+    })
+    expect(document.body.textContent).toContain("29.02.2032")
+    expect(document.body.textContent).not.toContain("erzeugt keinen Termin")
+    expect(saveButton()).toBeEnabled()
+  })
+
+  it("no-month YEARLY hints are mode-accurate (copy once swapped the modes)", async () => {
+    // mday: every month (the old text wrongly said "nur im Januar")
+    renderWithQuery(
+      <PlanDialog
+        open
+        onOpenChange={() => {}}
+        plan={{
+          ...BASE_PLAN,
+          dtstart: "2026-06-15",
+          rrule: "FREQ=YEARLY;BYMONTHDAY=15",
+        }}
+      />
+    )
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("jedem Monat wieder")
+    })
+    expect(document.body.textContent).not.toContain("nur im Januar")
+  })
 })

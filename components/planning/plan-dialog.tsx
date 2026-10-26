@@ -37,6 +37,7 @@ import {
   expandOccurrenceDates,
   isValidIsoDate,
   isoDatePlus,
+  nextOccurrenceDate,
   noonUtc,
 } from "@/lib/planning/recurrence"
 
@@ -418,6 +419,29 @@ function describePlanError(err: unknown): string {
   return map[err.code] ?? fallback
 }
 
+/**
+ * Hint for YEARLY rules with no month chips — mode-accurate per the rrule
+ * engine: without BYMONTH, BYMONTHDAY repeats the day every month (12×/year),
+ * while ordinal BYDAY counts across the YEAR (1st–4th weekday → January,
+ * last → December). Extracted pure so the regression tests can lock the
+ * semantics — the copy used to describe the two modes swapped.
+ */
+export function yearlyNoMonthHint(yearlyMode: FormState["yearlyMode"]): string {
+  if (yearlyMode === "mday") {
+    return (
+      "Kein Monat gewählt — der gewählte Tag kehrt dann in jedem Monat " +
+      "wieder (12× pro Jahr); wähle Monate, wenn der Termin nur einmal " +
+      "jährlich kommen soll."
+    )
+  }
+  return (
+    "Kein Monat gewählt — die Ordnungszahl zählt über das ganze Jahr " +
+    "(„1. Mo“ = erster Montag des Jahres; „letzte Fr“ = letzter Freitag " +
+    "des Jahres); wähle Monate, wenn der Termin in einem bestimmten " +
+    "Monat kommen soll."
+  )
+}
+
 export interface PlanDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -505,21 +529,26 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
       return { dates: [] as string[], error: null as string | null }
     if (effective.rrule === null) return { dates: [dtstart], error: null }
     try {
+      // parse-check first: expandOccurrenceDates swallows malformed rules
+      // as "no occurrences" — a broken raw rule must still read as
+      // "ungültig", not as a dead-but-valid rule
       const parsed = rrulestr(normalizeRuleInput(effective.rrule), {
         forceset: false,
       })
       if (!(parsed instanceof RRule))
         return { dates: [], error: "Regel nicht unterstützt" }
-      // explicit dtstart — parse-only rules default dtstart to "now" and
-      // would return nothing for windows before today
-      const rule = new RRule({
-        ...parsed.origOptions,
-        dtstart: noonUtc(dtstart),
-      } as never)
-      const dates = rule
-        .between(noonUtc(dtstart), noonUtc(isoDatePlus(dtstart, 400)), true)
-        .slice(0, 3)
-        .map((d) => d.toISOString().slice(0, 10))
+      // next dates via the same bounded horizon ladder the server's
+      // validation uses (nextOccurrenceDate): sparse-but-live rules
+      // (leap-day yearly, large INTERVAL) preview their real next dates —
+      // a fixed 400-day window would falsely claim "keinen Termin"
+      const dates: string[] = []
+      let cursor = dtstart
+      for (let i = 0; i < 3; i++) {
+        const next = nextOccurrenceDate(dtstart, effective.rrule, cursor)
+        if (next === null) break
+        dates.push(next)
+        cursor = isoDatePlus(next, 1)
+      }
       if (dates.length === 0) {
         return {
           dates,
@@ -1003,8 +1032,7 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
                 </div>
                 {form.byMonth.length === 0 && (
                   <p className="text-xs text-muted-foreground">
-                    Kein Monat gewählt — BYMONTH entfällt und die Regel liefert
-                    (bei Tag-Muster) nur im Januar.
+                    {yearlyNoMonthHint(form.yearlyMode)}
                   </p>
                 )}
                 <div className="grid gap-3 sm:grid-cols-2">

@@ -41,8 +41,9 @@ Indexes: `planned_transactions_user_status_idx` `(user_id, status)` and
   (`1FR`, `-1SU`) are rejected for DAILY/WEEKLY — RFC-invalid, and rrule
   silently _ignores_ the ordinal there. Canonical stored form is rrule's
   serialization (no `RRULE:` prefix; `+1FR` ordinals normalized to `1FR`).
-  `UNTIL` inputs are lifted to **noon UTC** (date-only and midnight-datetime
-  forms) so the final noon-anchored occurrence on the named day stays
+  `UNTIL` inputs are lifted to **noon UTC** (any sub-noon datetime form —
+  date-only, midnight, `06:00Z` …, floating no-Z included; times at/after
+  noon stay) so the final noon-anchored occurrence on the named day stays
   included — applied at read time as well, so pre-fix stored rules expand
   consistently.
 - **Expansion**: `expandOccurrenceDates(dtstart, rrule, {from, to}, cap)`.
@@ -111,15 +112,15 @@ All routes `runtime = "nodejs"`, `dynamic = "force-dynamic"`, hand-rolled
 validation (error `{error: "code", message}`), session-scoped, CSRF on
 writes ([api.md](api.md)):
 
-| Route                                              | Purpose                                                                                                                                                                             |
-| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/plans`                                   | list + `nextDueDate` per plan                                                                                                                                                       |
-| `POST /api/plans`                                  | create; validates `amountCents ≠ 0`, `dtstart` ISO (not before 1900), RRULE allowlist + ≥ 1 occurrence, ownership of account/category                                               |
-| `PATCH /api/plans/[id]`                            | partial update; dtstart/rule changes re-check occurrence productivity                                                                                                               |
-| `DELETE /api/plans/[id]`                           | delete (no other data references plans)                                                                                                                                             |
-| `GET /api/plans/occurrences?from&to&accountId`     | expanded window + match states; window ≤ 400 days                                                                                                                                   |
-| `GET /api/plans/forecast?months&accountId`         | projection envelope                                                                                                                                                                 |
-| `GET /api/transactions/calendar?from&to&accountId` | compact bank rows (Gebucht **and** Nicht gebucht — pending rows carry a Buchungsdatum and show dashed/hollow) for the same window; counterparty = payee (Ausgang) / payer (Eingang) |
+| Route                                              | Purpose                                                                                                                                                                                                                               |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/plans`                                   | list + `nextDueDate` per plan                                                                                                                                                                                                         |
+| `POST /api/plans`                                  | create; validates `amountCents ≠ 0`, `dtstart` ISO (not before 1900), RRULE allowlist + first occurrence within the bounded next-date ladder (~70 y — sparse-but-live rules like leap-day yearly pass), ownership of account/category |
+| `PATCH /api/plans/[id]`                            | partial update; dtstart/rule changes re-check occurrence productivity                                                                                                                                                                 |
+| `DELETE /api/plans/[id]`                           | delete (no other data references plans)                                                                                                                                                                                               |
+| `GET /api/plans/occurrences?from&to&accountId`     | expanded window + match states; window ≤ 400 days                                                                                                                                                                                     |
+| `GET /api/plans/forecast?months&accountId`         | projection envelope                                                                                                                                                                                                                   |
+| `GET /api/transactions/calendar?from&to&accountId` | compact bank rows (Gebucht **and** Nicht gebucht — pending rows carry a Buchungsdatum and show dashed/hollow) for the same window; counterparty = payee (Ausgang) / payer (Eingang)                                                   |
 
 ## Agent access
 

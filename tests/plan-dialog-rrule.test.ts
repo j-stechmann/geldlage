@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from "vitest"
-import { parseRruleToForm } from "@/components/planning/plan-dialog"
+import {
+  parseRruleToForm,
+  yearlyNoMonthHint,
+} from "@/components/planning/plan-dialog"
+import { describeRrule } from "@/components/planning/api"
 
 const DTSTART = "2026-01-01"
 
@@ -108,5 +112,46 @@ describe("parseRruleToForm faithfulness gate", () => {
       rawDirty: false,
     })
     expect(parseRruleToForm("nonsense", DTSTART).rawDirty).toBe(true)
+  })
+})
+
+describe("yearlyNoMonthHint (mode-accurate engine semantics)", () => {
+  it("mday without BYMONTH repeats EVERY month, not just January", () => {
+    // rrule: FREQ=YEARLY;BYMONTHDAY=15 (no BYMONTH) → the 15th of every
+    // month (verified against the engine) — the copy used to claim the
+    // opposite (swapped modes)
+    const hint = yearlyNoMonthHint("mday")
+    expect(hint).toContain("jedem Monat")
+    expect(hint).toContain("12× pro Jahr")
+    expect(hint).not.toContain("Januar")
+  })
+
+  it("wday without BYMONTH counts the ordinal across the YEAR", () => {
+    // rrule: FREQ=YEARLY;BYDAY=1MO (no BYMONTH) → first Monday of the year
+    // (January); "letzte" → last weekday of the year (December)
+    const hint = yearlyNoMonthHint("wday")
+    expect(hint).toContain("ganze Jahr")
+    expect(hint).toContain("erster Montag des Jahres")
+    expect(hint).toContain("letzter Freitag")
+    expect(hint).not.toContain("jedem Monat")
+  })
+})
+
+describe("describeRrule ordinal BYDAY", () => {
+  it("describes ordinals the builder itself never offers (e.g. 5FR)", () => {
+    // validation accepts every RFC ordinal on MONTHLY rules, so a stored
+    // 5FR plan exists — the Wiederholung badge must say "5. Fr" instead of
+    // silently degrading to a bare "monatlich"
+    expect(describeRrule("FREQ=MONTHLY;BYDAY=5FR")).toBe("am 5. Fr")
+    expect(describeRrule("FREQ=MONTHLY;BYDAY=10MO")).toBe("am 10. Mo")
+    // unchanged neighbours: the builder's own ordinals and multi-ordinal
+    // lists
+    expect(describeRrule("FREQ=MONTHLY;BYDAY=1FR")).toBe("am 1. Fr")
+    expect(describeRrule("FREQ=MONTHLY;BYDAY=-1FR")).toBe("am letzten Fr")
+    expect(describeRrule("FREQ=MONTHLY;BYDAY=1FR,-1FR")).toBe(
+      "am 1. Fr/letzten Fr"
+    )
+    // plain-BYDAY rules keep the previous fallback text
+    expect(describeRrule("FREQ=MONTHLY;BYDAY=MO")).toBe("monatlich")
   })
 })

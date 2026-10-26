@@ -211,19 +211,20 @@ function assertOwnedRef(
   }
 }
 
-/** A validated rule must produce at least one occurrence at/after dtstart. */
+/**
+ * A validated rule must produce at least one occurrence at/after dtstart.
+ * The check walks the same bounded horizon ladder as nextOccurrenceDate
+ * (≈ 70 years) instead of a fixed short window: sparse-but-live rules
+ * (leap-day yearly, large INTERVAL) must be creatable even when their
+ * first occurrence lies years ahead, while genuinely dead rules (expired
+ * UNTIL, exhausted COUNT) still fail all four bounded scans.
+ */
 function assertRuleProducesOccurrence(
   dtstart: string,
   rruleText: string | null
 ) {
   if (isEmptyRule(rruleText)) return
-  const dates = expandOccurrenceDates(
-    dtstart,
-    rruleText,
-    { from: dtstart, to: isoDatePlus(dtstart, 400) },
-    1
-  )
-  if (dates.length === 0) {
+  if (nextOccurrenceDate(dtstart, rruleText, dtstart) === null) {
     throw new PlanValidationError(
       "rrule produces no occurrence at or after dtstart",
       "invalid_rrule"
