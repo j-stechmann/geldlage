@@ -149,6 +149,30 @@ export function validateRrule(input: string): string {
       "freq must be DAILY, WEEKLY, MONTHLY or YEARLY"
     )
   }
+  // RFC 5545: ordinal BYDAY values ("1FR", "-1SU") are only defined for
+  // MONTHLY/YEARLY — rrule silently IGNORES the ordinal for DAILY/WEEKLY
+  // (WEEKLY;BYDAY=1MO behaves as plain WEEKLY;BYDAY=MO), so storing such a
+  // rule would bake a silent semantic lie into an otherwise validated plan.
+  if (
+    (opts.freq === RRule.DAILY || opts.freq === RRule.WEEKLY) &&
+    opts.byweekday !== undefined &&
+    opts.byweekday !== null
+  ) {
+    const tokens = Array.isArray(opts.byweekday)
+      ? opts.byweekday
+      : [opts.byweekday]
+    const hasOrdinal = tokens.some(
+      (t) =>
+        typeof t === "object" &&
+        t !== null &&
+        (t as { n?: number | null }).n != null
+    )
+    if (hasOrdinal) {
+      throw new RuleValidationError(
+        "ordinal BYDAY (e.g. 1FR) requires MONTHLY or YEARLY"
+      )
+    }
+  }
   const interval = opts.interval ?? 1
   if (
     typeof interval !== "number" ||
@@ -230,21 +254,29 @@ export function expandOccurrenceDates(
   if (isEmptyRule(rruleText)) {
     return dtstart >= w.from && dtstart <= w.to ? [dtstart] : []
   }
-  const parsed = rrulestr(normalizeRuleInput(rruleText as string), {
-    forceset: false,
-  })
-  if (!(parsed instanceof RRule)) return []
-  const rule = new RRule({
-    ...parsed.origOptions,
-    dtstart: noonUtc(dtstart),
-  } as never)
-  const after = noonUtc(w.from)
-  const before = noonUtc(w.to)
-  return rule
-    .between(after, before, true)
-    .slice(0, cap)
-    .map(isoOf)
-    .filter((iso, i, arr) => i === 0 || arr[i - 1] !== iso)
+  try {
+    const parsed = rrulestr(normalizeRuleInput(rruleText as string), {
+      forceset: false,
+    })
+    if (!(parsed instanceof RRule)) return []
+    const rule = new RRule({
+      ...parsed.origOptions,
+      dtstart: noonUtc(dtstart),
+    } as never)
+    const after = noonUtc(w.from)
+    const before = noonUtc(w.to)
+    return rule
+      .between(after, before, true)
+      .slice(0, cap)
+      .map(isoOf)
+      .filter((iso, i, arr) => i === 0 || arr[i - 1] !== iso)
+  } catch {
+    // Every stored rule is validated at write time, so this is
+    // belt-and-suspenders: a pathological row degrades to "no occurrences"
+    // instead of taking a read route (plan list, occurrences, forecast,
+    // calendar) down with it.
+    return []
+  }
 }
 
 /**

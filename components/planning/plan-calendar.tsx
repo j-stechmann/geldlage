@@ -18,6 +18,7 @@ import {
   type CalendarTransaction,
   type PlanOccurrence,
 } from "@/components/planning/api"
+import { isoDateLocal, todayLocal } from "@/lib/analytics/date"
 import { euro } from "@/lib/money"
 import { resolveCategoryColor } from "@/lib/category-colors"
 
@@ -121,10 +122,10 @@ export function PlanCalendar({ accountId, onEventClick }: PlanCalendarProps) {
       date: Date
       timeZone: string
     }) => {
-      const from = info.range.start.toISOString().slice(0, 10)
-      const to = new Date(info.range.end.getTime() - 1)
-        .toISOString()
-        .slice(0, 10)
+      // local calendar dates — toISOString() would shift the window edges
+      // across UTC midnight for non-UTC timezones
+      const from = isoDateLocal(info.range.start)
+      const to = isoDateLocal(new Date(info.range.end.getTime() - 1))
       setWindow((prev) =>
         prev && prev.from === from && prev.to === to ? prev : { from, to }
       )
@@ -132,7 +133,9 @@ export function PlanCalendar({ accountId, onEventClick }: PlanCalendarProps) {
     []
   )
 
-  const todayIso = new Date().toISOString().slice(0, 10)
+  // local "today" — the UTC date from toISOString() miscolors overdue chips
+  // around local midnight for non-UTC timezones
+  const todayIso = todayLocal()
 
   const events = React.useMemo<CalendarEvent<OccurrenceData>[]>(() => {
     const occurrences = occurrencesQuery.data?.occurrences ?? []

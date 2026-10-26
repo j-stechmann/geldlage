@@ -37,7 +37,9 @@ Indexes: `planned_transactions_user_status_idx` `(user_id, status)` and
   `FREQ ∈ {DAILY, WEEKLY, MONTHLY, YEARLY}`; parts allowlist
   `INTERVAL/COUNT/UNTIL/BYDAY/BYMONTHDAY/BYMONTH/BYSETPOS/WKST`;
   `INTERVAL 1–100`, `COUNT 1–366`; multi-line texts and `DTSTART:`/`EXDATE:`/
-  `RDATE:`-carrying inputs rejected. Canonical stored form is rrule's
+  `RDATE:`-carrying inputs rejected. Ordinal (numeric) `BYDAY` values
+  (`1FR`, `-1SU`) are rejected for DAILY/WEEKLY — RFC-invalid, and rrule
+  silently _ignores_ the ordinal there. Canonical stored form is rrule's
   serialization (no `RRULE:` prefix; `+1FR` ordinals normalized to `1FR`).
 - **Expansion**: `expandOccurrenceDates(dtstart, rrule, {from, to}, cap)`.
   Every rule is rebuilt with an **explicit dtstart** — `rrulestr` alone
@@ -100,7 +102,7 @@ writes ([api.md](api.md)):
 | Route                                              | Purpose                                                                                                                                                                             |
 | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET /api/plans`                                   | list + `nextDueDate` per plan                                                                                                                                                       |
-| `POST /api/plans`                                  | create; validates `amountCents ≠ 0`, `dtstart` ISO, RRULE allowlist + ≥ 1 occurrence, ownership of account/category                                                                 |
+| `POST /api/plans`                                  | create; validates `amountCents ≠ 0`, `dtstart` ISO (not before 1900), RRULE allowlist + ≥ 1 occurrence, ownership of account/category                                               |
 | `PATCH /api/plans/[id]`                            | partial update; dtstart/rule changes re-check occurrence productivity                                                                                                               |
 | `DELETE /api/plans/[id]`                           | delete (no other data references plans)                                                                                                                                             |
 | `GET /api/plans/occurrences?from&to&accountId`     | expanded window + match states; window ≤ 400 days                                                                                                                                   |

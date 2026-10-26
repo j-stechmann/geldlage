@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { RRule, rrulestr } from "rrule"
 import { normalizeRuleInput } from "@/lib/planning/recurrence"
+import { todayLocal } from "@/lib/analytics/date"
 import {
   Dialog,
   DialogContent,
@@ -32,7 +33,12 @@ import {
   type PlanFormValues,
   type PlanRow,
 } from "@/components/planning/api"
-import { isValidIsoDate, isoDatePlus, noonUtc } from "@/lib/planning/recurrence"
+import {
+  expandOccurrenceDates,
+  isValidIsoDate,
+  isoDatePlus,
+  noonUtc,
+} from "@/lib/planning/recurrence"
 
 interface AccountOption {
   id: number
@@ -197,12 +203,25 @@ function buildRrule(s: FormState): string | null {
   return parts.join(";")
 }
 
+/** Ascending-ISO equality of two occurrence expansions. */
+function sameOccurrenceSets(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((d, i) => d === b[i])
+}
+
 /**
  * Map a stored RRULE back into the builder fields; returns the overrides to
- * apply. `rawDirty=true` when the rule uses shapes the builder can't render
- * (e.g. BYSETPOS) — the raw text stays authoritative then.
+ * apply. The result is gated on faithfulness: whenever the builder fields
+ * (EMPTY_FORM + overrides) cannot reproduce the stored rule's occurrences
+ * 1:1, `rawDirty=true` and the raw text stays authoritative — an untouched
+ * edit-save must never silently rewrite a recurrence the builder can't
+ * represent (2+ month-chips with a weekday pattern, multi-ordinal BYDAY,
+ * weekday-yearly without BYMONTH, BYDAY+BYMONTHDAY mixes, WKST variants).
+ * Exported for the dialog round-trip regression tests.
  */
-function parseRruleToForm(rruleText: string | null): Partial<FormState> {
+export function parseRruleToForm(
+  rruleText: string | null,
+  dtstart?: string | null
+): Partial<FormState> {
   if (rruleText === null || rruleText.trim() === "") {
     return { freq: "", rawRrule: "", rawDirty: false }
   }
@@ -261,9 +280,11 @@ function parseRruleToForm(rruleText: string | null): Partial<FormState> {
           typeof wd === "number"
             ? wd
             : ((wd as { weekday?: number }).weekday ?? -1)
+        // rrule's Weekday carries the ordinal as `n` ("1FR" → {weekday:4,n:1});
+        // plain tokens have no n — reading `.nth` would never resolve
         const nth: number | undefined =
           typeof wd === "object" && wd !== null
-            ? ((wd as { nth?: number }).nth ?? undefined)
+            ? ((wd as { n?: number }).n ?? undefined)
             : undefined
         const letter = LETTERS[weekday]
         if (!letter) return ""
@@ -272,12 +293,13 @@ function parseRruleToForm(rruleText: string | null): Partial<FormState> {
       .filter(Boolean)
 
     if (freq === "WEEKLY") {
-      // ordinal BYDAY tokens are not valid for weekly rules (rrule would
-      // never produce them) — filtered defensively anyway
-      overrides.byDay = byDayTokens.filter((t) => !/^\d/.test(t))
+      // ordinal BYDAY tokens are not valid for weekly rules (validation
+      // rejects them) — filtered defensively anyway, signed forms included
+      overrides.byDay = byDayTokens.filter((t) => !/^-?\d/.test(t))
     }
     if (freq === "MONTHLY" || freq === "YEARLY") {
-      const ordinals = byDayTokens.filter((t) => /^\d/.test(t))
+      // signed tokens too: "1FR,-1FR" is two ordinals, not one + a plain day
+      const ordinals = byDayTokens.filter((t) => /^-?\d/.test(t))
       const monthDays = (collect(o.bymonthday) as (number | string)[])
         .map((n) => Number.parseInt(String(n), 10))
         .filter((n) => Number.isInteger(n))
@@ -315,7 +337,32 @@ function parseRruleToForm(rruleText: string | null): Partial<FormState> {
       }
     }
     overrides.rawRrule = rruleText
-    overrides.rawDirty = false
+    // Faithfulness gate: rebuild the rule exactly as the dialog's effective
+    // rule would be on an untouched open ({EMPTY_FORM + overrides}) and
+    // require it to produce the SAME occurrences as the stored rule over an
+    // 800-day window (two annual cycles — catches year-level aliasing like
+    // "1MO yearly" vs a plain yearly whose first year coincides). Equal sets
+    // → the builder can own the rule; otherwise the raw text stays
+    // authoritative. A string comparison would be wrong here: canonical
+    // spellings differ (e.g. an explicit INTERVAL=1) while the semantics
+    // agree.
+    let faithful = false
+    if (dtstart != null && isValidIsoDate(dtstart)) {
+      const w = { from: dtstart, to: isoDatePlus(dtstart, 800) }
+      let rebuilt: string | null = null
+      try {
+        rebuilt = buildRrule({ ...EMPTY_FORM, ...overrides })
+      } catch {
+        rebuilt = null
+      }
+      faithful =
+        rebuilt !== null &&
+        sameOccurrenceSets(
+          expandOccurrenceDates(dtstart, rruleText, w),
+          expandOccurrenceDates(dtstart, rebuilt, w)
+        )
+    }
+    overrides.rawDirty = !faithful
     return overrides
   } catch {
     return { rawRrule: rruleText, rawDirty: true }
@@ -328,7 +375,7 @@ function initialForm(
   defaultDate: string | null | undefined
 ): FormState {
   if (plan) {
-    const overrides = parseRruleToForm(plan.rrule)
+    const overrides = parseRruleToForm(plan.rrule, plan.dtstart)
     return {
       ...EMPTY_FORM,
       direction: plan.amountCents > 0 ? "Eingang" : "Ausgang",
@@ -342,7 +389,7 @@ function initialForm(
       ...overrides,
     }
   }
-  const todayIso = defaultDate ?? new Date().toISOString().slice(0, 10)
+  const todayIso = defaultDate ?? todayLocal()
   return { ...EMPTY_FORM, dtstart: todayIso }
 }
 
@@ -353,7 +400,8 @@ function describePlanError(err: unknown): string {
   const map: Record<string, string> = {
     invalid_amount:
       "Betrag ist ungültig (nicht-null Ganzzahl in Cent erwartet)",
-    invalid_dtstart: "Startdatum ist kein gültiges Datum",
+    invalid_dtstart:
+      "Startdatum ist kein gültiges Datum (frühestens 01.01.1900)",
     invalid_rrule: "Wiederholungsregel ist ungültig",
     invalid_status: "Status ist ungültig",
     invalid_counterparty: "Vertragspartner ist zu lang (max. 128 Bytes)",

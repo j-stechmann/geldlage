@@ -152,6 +152,13 @@ describe("POST /api/plans", () => {
         "invalid_dtstart",
       ],
       [
+        // year floor: reads expand forward from dtstart with rrule, which
+        // has no internal iteration cap — pre-1900 dtstarts are pointless
+        // and pathological
+        { amountCents: -100, rrule: null, dtstart: "1899-12-31" },
+        "invalid_dtstart",
+      ],
+      [
         { amountCents: -100, dtstart: "2026-01-01", rrule: "FREQ=SECONDLY" },
         "invalid_rrule",
       ],
@@ -222,6 +229,15 @@ describe("POST /api/plans", () => {
     })
     expect(res.status).toBe(400)
     expect((await res.json()).error).toBe("invalid_rrule")
+  })
+
+  it("accepts a dtstart at the 1900 floor", async () => {
+    const res = await postPlan(`${BASE}/api/plans`, {
+      amountCents: -100,
+      dtstart: "1900-01-01",
+    })
+    expect(res.status).toBe(201)
+    expect(getStored((await res.json()).plan.id)!.dtstart).toBe("1900-01-01")
   })
 
   it("creates a plan (201) with a canonicalized rrule", async () => {
@@ -372,6 +388,12 @@ describe("GET /api/plans/occurrences", () => {
     expect((await getOccurrences("from=01.01.2026&to=2026-02-01")).status).toBe(
       400
     )
+    // non-ISO shapes that previously 500'd: the default-window derivation
+    // ran isoDatePlus on the raw `from` BEFORE validating it
+    const noDash = await getOccurrences("from=garbage")
+    expect(noDash.status).toBe(400)
+    expect((await noDash.json()).error).toBe("invalid_window")
+    expect((await getOccurrences("from=2026-10")).status).toBe(400)
     expect((await getOccurrences("from=2026-02-01&to=2026-01-01")).status).toBe(
       400
     )

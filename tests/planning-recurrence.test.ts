@@ -95,6 +95,21 @@ describe("validateRrule", () => {
     ).not.toThrow()
   })
 
+  it("rejects ordinal BYDAY for DAILY/WEEKLY (RFC: ordinals are MONTHLY/YEARLY-only)", () => {
+    // rrule silently ignores the ordinal there (WEEKLY;BYDAY=1MO behaves as
+    // every Monday) — storing it would bake a semantic lie into the plan
+    expectRuleError("FREQ=WEEKLY;BYDAY=1MO")
+    expectRuleError("FREQ=WEEKLY;BYDAY=-1SU")
+    expectRuleError("FREQ=DAILY;BYDAY=1FR")
+    // non-ordinal weekday filtering stays allowed on DAILY/WEEKLY …
+    expect(() => validateRrule("FREQ=DAILY;BYDAY=MO")).not.toThrow()
+    expect(() => validateRrule("FREQ=WEEKLY;BYDAY=MO,TU")).not.toThrow()
+    // … and ordinals keep working where they belong
+    expect(() => validateRrule("FREQ=MONTHLY;BYDAY=1FR")).not.toThrow()
+    expect(() => validateRrule("FREQ=MONTHLY;BYDAY=-1FR")).not.toThrow()
+    expect(() => validateRrule("FREQ=YEARLY;BYDAY=1MO")).not.toThrow()
+  })
+
   it("rejects rule sets / multiple lines", () => {
     expectRuleError("DTSTART:20260101T120000Z\nRRULE:FREQ=DAILY;COUNT=5")
   })

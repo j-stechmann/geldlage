@@ -35,6 +35,13 @@ import { todayLocal } from "@/lib/analytics/date"
 
 const MAX_TEXT = 500
 const MAX_COUNTERPARTY = 128
+/**
+ * dtstart floor (year): occurrence expansion walks forward from dtstart on
+ * every read (plan list, occurrences, forecast) and rrule has no internal
+ * iteration cap — a pre-1900 dtstart would make each request iterate
+ * centuries per plan for no representable purpose.
+ */
+const MIN_DTSTART_YEAR = 1900
 /** occurrence-window cap for the occurrences endpoint (days) */
 export const MAX_OCCURRENCE_WINDOW_DAYS = 400
 /** forecast horizon cap (months) */
@@ -97,9 +104,13 @@ export function validatePlanInput(
 
   if ("dtstart" in input && input.dtstart !== null) {
     const v = input.dtstart
-    if (typeof v !== "string" || !isValidIsoDate(v)) {
+    if (
+      typeof v !== "string" ||
+      !isValidIsoDate(v) ||
+      Number.parseInt(v.slice(0, 4), 10) < MIN_DTSTART_YEAR
+    ) {
       throw new PlanValidationError(
-        "dtstart must be an ISO date (YYYY-MM-DD)",
+        `dtstart must be an ISO date (YYYY-MM-DD) from ${MIN_DTSTART_YEAR}-01-01 onward`,
         "invalid_dtstart"
       )
     }

@@ -21,8 +21,17 @@ export async function GET(request: NextRequest) {
 
   const today = todayLocal()
   const from = sp.get("from") ?? today
+  // `from` must be validated BEFORE deriving the default window from it —
+  // isoDatePlus throws on non-ISO input (a 500) instead of answering the
+  // invalid_window 400 this route promises
+  if (!isValidIsoDate(from)) {
+    return NextResponse.json(
+      { error: "invalid_window", message: "from/to must be ISO dates" },
+      { status: 400 }
+    )
+  }
   const toRaw = sp.get("to") ?? isoDatePlus(from, 89)
-  if (!isValidIsoDate(from) || !isValidIsoDate(toRaw)) {
+  if (!isValidIsoDate(toRaw)) {
     return NextResponse.json(
       { error: "invalid_window", message: "from/to must be ISO dates" },
       { status: 400 }
