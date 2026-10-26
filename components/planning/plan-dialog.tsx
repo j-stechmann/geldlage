@@ -165,6 +165,12 @@ function parseByMonthDay(text: string): number[] {
 /** Compose the RRULE text from the builder fields; null = one-off. */
 function buildRrule(s: FormState): string | null {
   if (s.freq === "") return null
+  // the interval input clamps only the lower bound — a typed 500 must fail
+  // INLINE (like the count end condition does) instead of producing a green
+  // preview and a save-time 400-toast from the server's MAX_INTERVAL cap
+  if (!Number.isInteger(s.interval) || s.interval < 1 || s.interval > 100) {
+    throw new Error("Intervall muss zwischen 1 und 100 liegen")
+  }
   const parts: string[] = [`FREQ=${s.freq}`]
   if (s.interval > 1) parts.push(`INTERVAL=${s.interval}`)
   if (s.freq === "WEEKLY" && s.byDay.length > 0) {

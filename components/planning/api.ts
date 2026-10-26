@@ -359,10 +359,43 @@ export function describeRrule(rruleText: string | null): string {
       base = interval === 1 ? "monatlich" : `alle ${interval} Monate`
     }
   } else if (freq === "YEARLY") {
-    const byMonth = describeByMonth(parts.get("BYMONTH"))
+    const byMonthRaw = parts.get("BYMONTH")
     const byMonthDay = parts.get("BYMONTHDAY")
-    const byDay = describeByWeekday(parts.get("BYDAY"))
-    base = `jährlich${byMonth ? ` in ${byMonth}` : ""}${byMonthDay ? ` am ${ordinalizeMonthDays(byMonthDay)}` : byDay ? ` am ${byDay}` : ""}`
+    const byDayRaw = parts.get("BYDAY")
+    // interval is part of the cadence ("alle 2 Jahre"), never a bare "jährlich"
+    const years = interval === 1 ? "jährlich" : `alle ${interval} Jahre`
+    const byDayTokens = (byDayRaw ?? "").split(",").filter(Boolean)
+    const allOrdinalByDay =
+      byDayTokens.length > 0 &&
+      byDayTokens.every((t) => /^(-?\d+)(MO|TU|WE|TH|FR|SA|SU)$/.test(t))
+    // BYDAY + BYMONTHDAY intersect per RFC 5545 — no compact truthful text:
+    // keep the full raw rule (same escape hatch as BYSETPOS)
+    if (byDayRaw !== undefined && byMonthDay !== undefined) return rruleText
+    if (byMonthRaw === undefined && byMonthDay !== undefined) {
+      // yearless BYMONTHDAY repeats the day in EVERY month (12×/year —
+      // engine-verified; the dialog warns at creation): the badge must say
+      // so instead of a lying "jährlich am 15."
+      base =
+        interval === 1
+          ? `am ${ordinalizeMonthDays(byMonthDay)} jedes Monats`
+          : `am ${ordinalizeMonthDays(byMonthDay)} jedes Monats (alle ${interval} Jahre)`
+    } else if (
+      byMonthRaw === undefined &&
+      byDayRaw !== undefined &&
+      !allOrdinalByDay
+    ) {
+      // yearless plain BYDAY repeats that weekday all year (~52×/year)
+      const weekdays = describeByWeekday(byDayRaw)
+      base =
+        interval === 1
+          ? `jeden ${weekdays}`
+          : `jeden ${weekdays} (alle ${interval} Jahre)`
+    } else {
+      // genuinely annual: any BYMONTH, or a yearless ordinal BYDAY
+      // ("1MO" counts across the whole year → once per interval-year)
+      const byMonth = describeByMonth(byMonthRaw)
+      base = `${years}${byMonth ? ` in ${byMonth}` : ""}${byMonthDay ? ` am ${ordinalizeMonthDays(byMonthDay)}` : byDayRaw ? ` am ${describeByWeekday(byDayRaw)}` : ""}`
+    }
   } else {
     return rruleText
   }

@@ -171,6 +171,39 @@ describe("plan dialog: invalid builder input must not crash the page", () => {
     expect(saveButton()).toBeEnabled()
   })
 
+  it("an 'Alle' interval beyond 100 fails inline, not as a save-time 400", async () => {
+    // the input handler clamps only the low end; a typed 500 used to leave a
+    // green preview while the server capped INTERVAL at 100 — save then
+    // failed with a generic toast. It must disarm the dialog like COUNT does.
+    renderWithQuery(
+      <PlanDialog
+        open
+        onOpenChange={() => {}}
+        plan={{
+          ...BASE_PLAN,
+          rrule: "FREQ=MONTHLY;BYMONTHDAY=1",
+        }}
+      />
+    )
+    const input = await waitFor(() => inputByLabel("Intervall"))
+
+    fireEvent.change(input, { target: { value: "500" } })
+    await waitFor(() => {
+      expect(document.body.textContent).toContain(
+        "Intervall muss zwischen 1 und 100 liegen"
+      )
+    })
+    expect(saveButton()).toBeDisabled()
+
+    fireEvent.change(input, { target: { value: "2" } })
+    await waitFor(() => {
+      expect(document.body.textContent).not.toContain(
+        "Intervall muss zwischen 1 und 100 liegen"
+      )
+    })
+    expect(saveButton()).toBeEnabled()
+  })
+
   it("a sparse-but-live rule previews its real next dates (ladder, not a 400-day window)", async () => {
     // leap-day yearly plan anchored in a non-leap year: the first occurrence
     // (2028-02-29) is > 2 years after dtstart — a fixed 400-day preview

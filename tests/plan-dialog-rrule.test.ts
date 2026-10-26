@@ -137,6 +137,64 @@ describe("yearlyNoMonthHint (mode-accurate engine semantics)", () => {
   })
 })
 
+describe("describeRrule YEARLY cadence (engine-accurate)", () => {
+  it("yearless BYMONTHDAY repeats monthly, not annually", () => {
+    // engine semantics (probe-verified): FREQ=YEARLY;BYMONTHDAY=15 fires on
+    // the 15th of EVERY month — the badge used to lie with "jährlich am 15."
+    expect(describeRrule("FREQ=YEARLY;BYMONTHDAY=15")).toBe(
+      "am 15. jedes Monats"
+    )
+    expect(describeRrule("FREQ=YEARLY;BYMONTHDAY=1,15,-1")).toBe(
+      "am 1./15./letzten Tag jedes Monats"
+    )
+    expect(describeRrule("FREQ=YEARLY;INTERVAL=2;BYMONTHDAY=15")).toBe(
+      "am 15. jedes Monats (alle 2 Jahre)"
+    )
+    // the COUNT/UNTIL suffix composes onto the yearless wording too
+    expect(describeRrule("FREQ=YEARLY;BYMONTHDAY=15;COUNT=5")).toBe(
+      "am 15. jedes Monats, 5×"
+    )
+  })
+
+  it("yearless plain BYDAY repeats weekly", () => {
+    // FREQ=YEARLY;BYDAY=MO → every Monday (~52×/year), not once a year
+    expect(describeRrule("FREQ=YEARLY;BYDAY=MO")).toBe("jeden Mo")
+    expect(describeRrule("FREQ=YEARLY;INTERVAL=2;BYDAY=MO")).toBe(
+      "jeden Mo (alle 2 Jahre)"
+    )
+  })
+
+  it("genuinely annual shapes keep the yearly wording", () => {
+    // yearless ordinal BYDAY counts across the whole year (January)
+    expect(describeRrule("FREQ=YEARLY;BYDAY=1MO")).toBe("jährlich am 1. Mo")
+    expect(describeRrule("FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=15")).toBe(
+      "jährlich in März am 15."
+    )
+    expect(describeRrule("FREQ=YEARLY;BYMONTH=3;BYDAY=1FR")).toBe(
+      "jährlich in März am 1. Fr"
+    )
+    expect(describeRrule("FREQ=YEARLY")).toBe("jährlich")
+    // interval > 1 is part of the cadence — surfaced, not swallowed
+    expect(
+      describeRrule("FREQ=YEARLY;INTERVAL=2;BYMONTH=3;BYMONTHDAY=15")
+    ).toBe("alle 2 Jahre in März am 15.")
+    expect(describeRrule("FREQ=YEARLY;INTERVAL=2;BYDAY=1MO")).toBe(
+      "alle 2 Jahre am 1. Mo"
+    )
+  })
+
+  it("BYDAY + BYMONTHDAY intersect — full raw rule instead of a compact lie", () => {
+    // only Monday 1sts qualify (once a year, some years none) — "jährlich
+    // am 1." would hide the weekday limiter
+    expect(describeRrule("FREQ=YEARLY;BYMONTHDAY=1;BYDAY=MO")).toBe(
+      "FREQ=YEARLY;BYMONTHDAY=1;BYDAY=MO"
+    )
+    expect(describeRrule("FREQ=YEARLY;BYMONTH=3;BYDAY=MO;BYMONTHDAY=1")).toBe(
+      "FREQ=YEARLY;BYMONTH=3;BYDAY=MO;BYMONTHDAY=1"
+    )
+  })
+})
+
 describe("describeRrule ordinal BYDAY", () => {
   it("describes ordinals the builder itself never offers (e.g. 5FR)", () => {
     // validation accepts every RFC ordinal on MONTHLY rules, so a stored

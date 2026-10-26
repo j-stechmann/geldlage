@@ -76,7 +76,13 @@
   ErrorState + retry instead of rendering as silent empty states; the
   Top-Ausgabenkategorien tooltip no longer presents the Ist-period share
   behind a planned-only amount (the planned segment entry prints its
-  supplement alone).
+  supplement alone); the plan list's Wiederholung badge states the engine's
+  real cadence for yearless YEARLY rules (BYMONTHDAY ⇒ "jedes Monats",
+  plain BYDAY ⇒ "jeden <Tag>" — both used to read as a lying "jährlich";
+  INTERVAL > 1 is part of the text, BYDAY+BYMONTHDAY intersections fall
+  back to the raw rule); an "Alle" (INTERVAL) beyond 100 in the plan dialog
+  disarms the dialog with an inline error instead of a green preview
+  followed by a save-time 400.
 
 ## v1.20.0
 
