@@ -388,11 +388,15 @@ function adoptLegacyIssuer(db: Db) {
     )
     return
   }
+  // Every table with a users(id) FK MUST be listed here (no ON DELETE
+  // action exists): a missed table keeps the duplicate's FK alive and the
+  // DELETE FROM users below fails the whole startup migration.
   const childTables = [
     "accounts",
     "categories",
     "label_rules",
     "import_batches",
+    "planned_transactions",
     "transactions",
   ]
   for (const legacyUser of legacyUsers) {

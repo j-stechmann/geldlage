@@ -448,6 +448,17 @@ describe("GET /api/plans/occurrences", () => {
     expect((await getOccurrences("from=2024-01-01&to=2026-01-01")).status).toBe(
       400
     )
+    // windows must also stay within ±60 months of TODAY: rrule expansion
+    // walks from dtstart occurrence-by-occurrence up to the window start
+    // (no seek), so a far window burns CPU linear in that distance per
+    // recurring plan — and its width cap cannot even decide such input
+    // (isoDatePlus overflows 4-digit ISO near year 9999)
+    const farFuture = await getOccurrences("from=2999-01-01&to=2999-02-10")
+    expect(farFuture.status).toBe(400)
+    expect((await farFuture.json()).error).toBe("window_too_far")
+    const farPast = await getOccurrences("from=1900-01-01&to=1900-02-01")
+    expect(farPast.status).toBe(400)
+    expect((await farPast.json()).error).toBe("window_too_far")
     expect(
       (await getOccurrences("from=2026-01-01&to=2026-02-01&accountId=0")).status
     ).toBe(400)

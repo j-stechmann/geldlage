@@ -18,6 +18,7 @@ import {
   type CalendarTransaction,
   type PlanOccurrence,
 } from "@/components/planning/api"
+import { ErrorState } from "@/components/error-state"
 import { isoDateLocal, todayLocal } from "@/lib/analytics/date"
 import { euro } from "@/lib/money"
 import { resolveCategoryColor } from "@/lib/category-colors"
@@ -28,12 +29,15 @@ function localMidnight(iso: string): Date {
 }
 
 /** Chip label: counterparty/purpose + signed, German-formatted amount. */
-function chipTitle(entry: {
-  label: string | null
-  purpose: string | null
-  amountCents: number
-}): string {
-  const label = entry.label ?? entry.purpose ?? "Geplant"
+function chipTitle(
+  entry: {
+    label: string | null
+    purpose: string | null
+    amountCents: number
+  },
+  fallback: string
+): string {
+  const label = entry.label ?? entry.purpose ?? fallback
   return `${label} · ${euro(entry.amountCents)}`
 }
 
@@ -114,6 +118,10 @@ export function PlanCalendar({ accountId, onEventClick }: PlanCalendarProps) {
     window?.to ?? null,
     accountId
   )
+  // failed window reads stay visible instead of rendering as an empty
+  // month (the dashboard's ErrorState pattern) — placeholder data keeps a
+  // possibly stale calendar visible beneath
+  const calendarLoadFailed = occurrencesQuery.isError || bookedQuery.isError
 
   const handleRangeChange = React.useCallback(
     (info: {
@@ -155,11 +163,14 @@ export function PlanCalendar({ accountId, onEventClick }: PlanCalendarProps) {
       } else {
         color = categoryColor ?? "var(--primary)"
       }
-      const title = chipTitle({
-        label: o.counterparty,
-        purpose: o.purpose,
-        amountCents: o.amountCents,
-      })
+      const title = chipTitle(
+        {
+          label: o.counterparty,
+          purpose: o.purpose,
+          amountCents: o.amountCents,
+        },
+        "Geplant"
+      )
       return {
         id: o.id,
         title: o.matched !== null ? `✓ ${title}` : title,
@@ -178,11 +189,14 @@ export function PlanCalendar({ accountId, onEventClick }: PlanCalendarProps) {
           tx.categoryId !== null && tx.categoryColor !== null
             ? resolveCategoryColor(tx.categoryId, tx.categoryColor)
             : "var(--primary)"
-        const title = chipTitle({
-          label: tx.counterparty,
-          purpose: tx.purpose,
-          amountCents: tx.amountCents,
-        })
+        const title = chipTitle(
+          {
+            label: tx.counterparty,
+            purpose: tx.purpose,
+            amountCents: tx.amountCents,
+          },
+          "Buchung"
+        )
         const pending = tx.status === "Nicht gebucht"
         // booked = washed (40 %); pending = washed further (20 %), hollow
         // marker + the dashed provisional chip variant
@@ -209,34 +223,45 @@ export function PlanCalendar({ accountId, onEventClick }: PlanCalendarProps) {
   ])
 
   return (
-    <EventCalendar
-      views={["month", "agenda"]}
-      defaultView="month"
-      events={events}
-      loading={occurrencesQuery.isLoading || bookedQuery.isLoading}
-      interactions={{ drag: false, resize: false, selectSlot: false }}
-      enableShortcuts={false}
-      eventTooltip={{ delay: 300 }}
-      locale={deLocale}
-      weekStartsOn={1}
-      i18n={GERMAN_I18N}
-      onRangeChange={handleRangeChange}
-      onEventClick={(occurrence: EventCalendarOccurrence<OccurrenceData>) => {
-        const data = occurrence.event.data
-        if (data?.occurrence) {
-          // plan chips open the plan dialog
-          onEventClick(data.occurrence)
-        } else if (data?.transaction) {
-          // bank chips deep-link into the transactions table with the row
-          // surfaced (expanded, highlighted) — the id lookup is user-scoped
-          // and independent of any filter state
-          router.push(transactionDeepLink(data.transaction))
-        }
-      }}
-      className="h-[70vh] min-h-[540px] rounded-lg border"
-    >
-      <EventCalendarNav />
-      <EventCalendarContent />
-    </EventCalendar>
+    <>
+      {calendarLoadFailed && (
+        <ErrorState
+          className="mb-2"
+          onRetry={() => {
+            void occurrencesQuery.refetch()
+            void bookedQuery.refetch()
+          }}
+        />
+      )}
+      <EventCalendar
+        views={["month", "agenda"]}
+        defaultView="month"
+        events={events}
+        loading={occurrencesQuery.isLoading || bookedQuery.isLoading}
+        interactions={{ drag: false, resize: false, selectSlot: false }}
+        enableShortcuts={false}
+        eventTooltip={{ delay: 300 }}
+        locale={deLocale}
+        weekStartsOn={1}
+        i18n={GERMAN_I18N}
+        onRangeChange={handleRangeChange}
+        onEventClick={(occurrence: EventCalendarOccurrence<OccurrenceData>) => {
+          const data = occurrence.event.data
+          if (data?.occurrence) {
+            // plan chips open the plan dialog
+            onEventClick(data.occurrence)
+          } else if (data?.transaction) {
+            // bank chips deep-link into the transactions table with the row
+            // surfaced (expanded, highlighted) — the id lookup is user-scoped
+            // and independent of any filter state
+            router.push(transactionDeepLink(data.transaction))
+          }
+        }}
+        className="h-[70vh] min-h-[540px] rounded-lg border"
+      >
+        <EventCalendarNav />
+        <EventCalendarContent />
+      </EventCalendar>
+    </>
   )
 }

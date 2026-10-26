@@ -57,6 +57,27 @@
   isolation, patch semantics, capped summaries, registry/prompt wiring).
   Docs: ADR-0036, planning.md agent-access section, ADR index.
 
+### Fixed
+
+- **planning review follow-ups**:
+  `planned_transactions` is now in `adoptLegacyIssuer`'s child tables — the
+  legacy-rebrand merge (legacy user + JIT-created duplicate) previously
+  died on `DELETE FROM users` with a FK violation (and aborted boot)
+  whenever the duplicate workspace held a plan (regression-tested);
+  `GET /api/plans/occurrences` bounds the window to ±60 months of today
+  (`window_too_far`, 1826 d = the forecast horizon cap) — rrule expansion
+  walks from `dtstart` occurrence-by-occurrence (no seek), so far-future
+  windows could block the event loop ~0.6 s per DAILY plan
+  (window-cap arithmetic also no longer relies on overflowing 4-digit ISO
+  `isoDatePlus` near year 9999; regression-tested); unplanned-looking bank
+  chips (no counterparty/purpose) on the /planung calendar no longer fall
+  back to the word "Geplant" — they read "Buchung"; the /planung page
+  surfaces failed plan/calendar/forecast reads with the dashboard's
+  ErrorState + retry instead of rendering as silent empty states; the
+  Top-Ausgabenkategorien tooltip no longer presents the Ist-period share
+  behind a planned-only amount (the planned segment entry prints its
+  supplement alone).
+
 ## v1.20.0
 
 ### Changed

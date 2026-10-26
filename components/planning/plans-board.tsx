@@ -42,6 +42,7 @@ import {
   type PlanOccurrence,
   type PlanRow,
 } from "@/components/planning/api"
+import { ErrorState } from "@/components/error-state"
 import { euro } from "@/lib/money"
 import { resolveCategoryColor } from "@/lib/category-colors"
 
@@ -308,13 +309,22 @@ export function PlansBoard() {
             <CardHeader className="pb-2">
               <CardTitle>Aktive Pläne</CardTitle>
               <CardDescription>
-                {active.length === 0
-                  ? "Noch keine Pläne angelegt."
-                  : `${active.length} aktiv oder pausiert`}
+                {plansQuery.isError
+                  ? "Pläne konnten nicht geladen werden."
+                  : active.length === 0
+                    ? "Noch keine Pläne angelegt."
+                    : `${active.length} aktiv oder pausiert`}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
-              {active.length === 0 ? (
+              {plansQuery.isError ? (
+                /* failed plan reads surface instead of reading as "empty" —
+                   the dashboard's ErrorState pattern */
+                <ErrorState
+                  onRetry={() => void plansQuery.refetch()}
+                  className="border-none bg-transparent px-0"
+                />
+              ) : active.length === 0 ? (
                 <p className="py-8 text-center text-sm text-muted-foreground">
                   Miete, Gehalt, Abo? Legen Sie Ihren ersten Plan an.
                 </p>
@@ -335,7 +345,21 @@ export function PlansBoard() {
 
           {(() => {
             const forecast = forecastQuery.data
-            if (!forecast) return null
+            if (!forecast) {
+              // a failed projection reads visibly (retryable) instead of the
+              // card silently disappearing
+              if (!forecastQuery.isError) return null
+              return (
+                <Card>
+                  <CardContent>
+                    <ErrorState
+                      onRetry={() => void forecastQuery.refetch()}
+                      className="border-none bg-transparent px-0"
+                    />
+                  </CardContent>
+                </Card>
+              )
+            }
             const projected =
               forecast.projectedBalance[forecast.projectedBalance.length - 1]
                 ?.balanceCents ?? null

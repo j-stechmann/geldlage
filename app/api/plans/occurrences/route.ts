@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import {
   listOccurrences,
   MAX_OCCURRENCE_WINDOW_DAYS,
+  MAX_WINDOW_DISTANCE_DAYS,
 } from "@/lib/planning/service"
 import { isValidIsoDate, isoDatePlus } from "@/lib/planning/recurrence"
 import { todayLocal } from "@/lib/analytics/date"
@@ -40,6 +41,23 @@ export async function GET(request: NextRequest) {
   if (from > toRaw) {
     return NextResponse.json(
       { error: "invalid_window", message: "from must not be after to" },
+      { status: 400 }
+    )
+  }
+  // Distance cap BEFORE the width cap: occurrence expansion walks rrule
+  // forward occurrence-by-occurrence from dtstart until the window opens
+  // (rrule has no seek), so a valid-width window far from today would burn
+  // seconds of CPU per recurring plan — and the width cap itself cannot
+  // decide such input (its isoDatePlus arithmetic overflows the 4-digit ISO
+  // year near 9999 into uncomparable strings).
+  const lowerBound = isoDatePlus(today, -MAX_WINDOW_DISTANCE_DAYS)
+  const upperBound = isoDatePlus(today, MAX_WINDOW_DISTANCE_DAYS)
+  if (from < lowerBound || toRaw > upperBound) {
+    return NextResponse.json(
+      {
+        error: "window_too_far",
+        message: `window must lie within ${MAX_WINDOW_DISTANCE_DAYS} days of today`,
+      },
       { status: 400 }
     )
   }

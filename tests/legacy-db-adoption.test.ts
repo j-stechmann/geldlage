@@ -279,6 +279,20 @@ describe("legacy issuer migration (rebrand users.issuer rewrite)", () => {
           updatedAt: new Date().toISOString(),
         })
         .run()
+      // A plan the duplicate created on the new issuer: without
+      // planned_transactions in adoptLegacyIssuer's child tables this row
+      // keeps the users(id) FK alive and the delete below fails the whole
+      // merge (startup crash).
+      db.insert(schema.plannedTransactions)
+        .values({
+          id: "dup-plan",
+          userId: dupId,
+          amountCents: -4_200,
+          dtstart: "2026-03-01",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+        .run()
 
       migrateSchema(db)
 
@@ -294,6 +308,11 @@ describe("legacy issuer migration (rebrand users.issuer rewrite)", () => {
       expect(
         db.all<{ n: number }>(
           `SELECT COUNT(*) AS n FROM accounts WHERE user_id = ${legacyId}`
+        )[0]?.n
+      ).toBe(1)
+      expect(
+        db.all<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM planned_transactions WHERE user_id = ${legacyId}`
         )[0]?.n
       ).toBe(1)
     })

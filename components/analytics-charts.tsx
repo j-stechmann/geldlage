@@ -69,6 +69,44 @@ function euroShort(euros: number): string {
   return Math.round(euros).toLocaleString("de-DE")
 }
 
+/** One merged row of the planned-vs-actual categories chart. */
+export interface CategoryTooltipRow {
+  /** Ist euros of the actual-filter period (0 = planned-only row) */
+  value?: number
+  planned?: number
+  /** share among the row's own denominator: the Ist total for actual rows, the planned horizon total for planned-only rows */
+  share?: number
+}
+
+/**
+ * Tooltip text of one stacked segment of the planned-vs-actual categories
+ * chart (exported for the denominator regression tests). The planned
+ * (washed) segment entry prints its supplement alone; the Ist entry carries
+ * a share ONLY where the row actually has Ist money — a planned-only row
+ * would otherwise silently inherit the Ist-period " (N %)" denominator it
+ * never contributed to (and the planned segment would double-print the
+ * planned amount).
+ */
+export function topCategoriesTooltip(
+  value: unknown,
+  name: unknown,
+  item: { payload?: CategoryTooltipRow } | undefined | null
+): string {
+  const payload = item?.payload
+  const planned = payload?.planned ?? 0
+  const fmt = (n: number) =>
+    n.toLocaleString("de-DE", { minimumFractionDigits: 2 })
+  if (name === "planned") {
+    return `${fmt(Number(value))} € geplant`
+  }
+  const actualShare = (payload?.value ?? 0) > 0 ? payload?.share : undefined
+  return (
+    `${fmt(Number(value))} €` +
+    (planned > 0 ? ` + ${fmt(planned)} € geplant` : "") +
+    (actualShare != null ? ` (${Math.round(actualShare * 100)} %)` : "")
+  )
+}
+
 function ZoomResetButton({
   zoomed,
   onReset,
@@ -493,19 +531,9 @@ export function TopCategoriesChart({
               <ChartTooltip
                 content={
                   <ChartTooltipContent
-                    formatter={(value, _name, item) => {
-                      const payload = item?.payload as
-                        { share?: number; planned?: number } | undefined
-                      const share = payload?.share
-                      const planned = payload?.planned ?? 0
-                      return (
-                        `${Number(value).toLocaleString("de-DE", { minimumFractionDigits: 2 })} €` +
-                        (planned > 0
-                          ? ` + ${planned.toLocaleString("de-DE", { minimumFractionDigits: 2 })} € geplant`
-                          : "") +
-                        (share != null ? ` (${Math.round(share * 100)} %)` : "")
-                      )
-                    }}
+                    formatter={(value, name, item) =>
+                      topCategoriesTooltip(value, name, item ?? undefined)
+                    }
                   />
                 }
               />
