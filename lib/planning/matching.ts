@@ -151,7 +151,10 @@ export function matchPlannedOccurrences(
   )
   const pairs: PairCandidate[] = []
   for (const occ of occurrences) {
-    const lo = lowerBoundByDate(sortedTx, isoShift(occ.date, -MATCH_DAYS_BEFORE))
+    const lo = lowerBoundByDate(
+      sortedTx,
+      isoShift(occ.date, -MATCH_DAYS_BEFORE)
+    )
     const hi = upperBoundByDate(sortedTx, isoShift(occ.date, MATCH_DAYS_AFTER))
     for (let i = lo; i < hi; i++) {
       const tx = sortedTx[i]

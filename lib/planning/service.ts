@@ -102,7 +102,10 @@ export function validatePlanInput(
     out.amountCents = v
   }
 
-  if ("dtstart" in input && input.dtstart !== null) {
+  if ("dtstart" in input) {
+    // dtstart is not clearable (NOT NULL column) — an explicit null is as
+    // invalid as any other non-date value, never a silent no-op that reads
+    // back as a successful update
     const v = input.dtstart
     if (
       typeof v !== "string" ||
@@ -363,6 +366,14 @@ export function updatePlan(
   const existing = getPlan(userId, planId)
   if (!existing) return null
   const validated = validatePlanInput(input)
+  // a body naming no known field would otherwise 200 with only an updatedAt
+  // bump — indistinguishable from a successful edit
+  if (Object.keys(validated).length === 0) {
+    throw new PlanValidationError(
+      "no updatable fields provided",
+      "invalid_plan"
+    )
+  }
   assertOwnedRef(accounts, validated.accountId, userId, "account_not_found")
   assertOwnedRef(categories, validated.categoryId, userId, "category_not_found")
   const nextDtstart = validated.dtstart ?? existing.dtstart
@@ -564,8 +575,11 @@ function enrichWithMatches(
       },
     ])
   )
+  // occurrence-key → row: O(1) per match instead of a scan
+  // (the occurrence count is unbounded across plans × window size)
+  const occurrencesById = new Map(occurrences.map((o) => [o.id, o]))
   for (const m of matchPlannedOccurrences(matchables, rows)) {
-    const occurrence = occurrences.find((o) => o.id === m.occurrenceKey)
+    const occurrence = occurrencesById.get(m.occurrenceKey)
     if (occurrence) occurrence.matched = txById.get(m.transactionId) ?? null
   }
 }

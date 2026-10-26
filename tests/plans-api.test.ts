@@ -152,6 +152,11 @@ describe("POST /api/plans", () => {
         "invalid_dtstart",
       ],
       [
+        // dtstart is not clearable: an explicit null is a 400, not a no-op
+        { amountCents: -100, rrule: null, dtstart: null },
+        "invalid_dtstart",
+      ],
+      [
         // year floor: reads expand forward from dtstart with rrule, which
         // has no internal iteration cap — pre-1900 dtstarts are pointless
         // and pathological
@@ -320,6 +325,23 @@ describe("PATCH /api/plans/[id]", () => {
     expect(res.status).toBe(404)
     const unknown = await patchPlan("missing", { status: "paused" })
     expect(unknown.status).toBe(404)
+  })
+
+  it("400 on an empty patch instead of a silent updatedAt-only 200", async () => {
+    const id = await seedSimplePlan()
+    const empty = await patchPlan(id, {})
+    expect(empty.status).toBe(400)
+    expect((await empty.json()).error).toBe("invalid_plan")
+    // nothing was written — the row is byte-identical to creation
+    expect(getStored(id)!.updatedAt).toBe(getStored(id)!.createdAt)
+  })
+
+  it("400 on dtstart: null (not clearable) and leaves the plan untouched", async () => {
+    const id = await seedSimplePlan({ rrule: "FREQ=MONTHLY;BYMONTHDAY=1" })
+    const res = await patchPlan(id, { dtstart: null })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe("invalid_dtstart")
+    expect(getStored(id)!.dtstart).toBe("2026-01-01")
   })
 
   it("validates rrule updates; accepts nulling the rule with a moved dtstart", async () => {
