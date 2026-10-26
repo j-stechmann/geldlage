@@ -129,7 +129,7 @@ beforeEach(() => {
 describe("toolsForRequest / toolByName", () => {
   it("maps the registry into the OpenAI wire format", () => {
     const wire = toolsForRequest()
-    expect(wire).toHaveLength(3)
+    expect(wire).toHaveLength(7)
     expect(wire[0].type).toBe("function")
     expect(wire[0].function.name).toBe("get_category_totals")
     expect(wire[0].function.description.length).toBeGreaterThan(10)
@@ -159,14 +159,45 @@ describe("toolsForRequest / toolByName", () => {
         expression: { type: "string" },
       },
     })
+    // Plan quartet (ADR-0036): wire schemas stay flat — reads first, then
+    // creates, patches and the destructive delete.
+    const names = wire.map((w) => w.function.name)
+    expect(names).toEqual([
+      "get_category_totals",
+      "query_data",
+      "calculator",
+      "list_plans",
+      "create_plan",
+      "update_plan",
+      "delete_plan",
+    ])
+    expect(wire[4].function.parameters).toMatchObject({
+      type: "object",
+      required: ["amount_cents", "dtstart"],
+      additionalProperties: false,
+    })
+    expect(wire[5].function.parameters).toMatchObject({
+      type: "object",
+      required: ["id"],
+      additionalProperties: false,
+    })
+    expect(wire[6].function.parameters).toMatchObject({
+      type: "object",
+      required: ["id"],
+      additionalProperties: false,
+    })
   })
 
   it("resolves by name and rejects unknown tools", () => {
     expect(toolByName("get_category_totals")?.name).toBe("get_category_totals")
     expect(toolByName("query_data")?.name).toBe("query_data")
     expect(toolByName("calculator")?.name).toBe("calculator")
+    expect(toolByName("list_plans")?.name).toBe("list_plans")
+    expect(toolByName("create_plan")?.name).toBe("create_plan")
+    expect(toolByName("update_plan")?.name).toBe("update_plan")
+    expect(toolByName("delete_plan")?.name).toBe("delete_plan")
     expect(toolByName("nope")).toBeUndefined()
-    expect(agentTools).toHaveLength(3)
+    expect(agentTools).toHaveLength(7)
   })
 })
 

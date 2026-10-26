@@ -97,17 +97,18 @@ here. Guides cross-link to the ADRs they implement.
 
 ### Labeling & LLM
 
-| ADR                                                    | Decision                                                                              |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------- |
-| [0009](adr/adr-0009-worker-reliability-protocol.md)    | Worker reliability protocol (claim-time attempts, health gate, drain detection)       |
-| [0012](adr/adr-0012-local-llama-server.md)             | Local llama.cpp llama-server via OpenAI-compatible API                                |
-| [0013](adr/adr-0013-no-fallback-labels.md)             | No fallback labels — explicit `failed` state                                          |
-| [0014](adr/adr-0014-claim-time-attempt-increment.md)   | Attempt increment at claim time + attempts-snapshot guards                            |
-| [0015](adr/adr-0015-health-gate.md)                    | Health gate before labeling ticks                                                     |
-| [0016](adr/adr-0016-grammar-constrained-decoding.md)   | Grammar-constrained decoding, context budget guard, retry taxonomy                    |
-| [0017](adr/adr-0017-marker-neutralization-symmetry.md) | Marker-neutralization symmetry between prompt and stored labels                       |
-| [0033](adr/adr-0033-agent-panel-tool-loop.md)          | Agent chat panel: native tool loop over the shared llama-server, invite-based threads |
-| [0034](adr/adr-0034-agent-read-query-dsl.md)           | Read-only JSON query DSL for the agent (`query_data`) on a readonly SQLite connection |
+| ADR                                                    | Decision                                                                                |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| [0009](adr/adr-0009-worker-reliability-protocol.md)    | Worker reliability protocol (claim-time attempts, health gate, drain detection)         |
+| [0012](adr/adr-0012-local-llama-server.md)             | Local llama.cpp llama-server via OpenAI-compatible API                                  |
+| [0013](adr/adr-0013-no-fallback-labels.md)             | No fallback labels — explicit `failed` state                                            |
+| [0014](adr/adr-0014-claim-time-attempt-increment.md)   | Attempt increment at claim time + attempts-snapshot guards                              |
+| [0015](adr/adr-0015-health-gate.md)                    | Health gate before labeling ticks                                                       |
+| [0016](adr/adr-0016-grammar-constrained-decoding.md)   | Grammar-constrained decoding, context budget guard, retry taxonomy                      |
+| [0017](adr/adr-0017-marker-neutralization-symmetry.md) | Marker-neutralization symmetry between prompt and stored labels                         |
+| [0033](adr/adr-0033-agent-panel-tool-loop.md)          | Agent chat panel: native tool loop over the shared llama-server, invite-based threads   |
+| [0034](adr/adr-0034-agent-read-query-dsl.md)           | Read-only JSON query DSL for the agent (`query_data`) on a readonly SQLite connection   |
+| [0036](adr/adr-0036-agent-plan-write-tools.md)         | Agent write tools for plans — first mutable domain (plan CRUD via the planning service) |
 
 ### Planning & forecast
 

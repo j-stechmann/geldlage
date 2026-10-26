@@ -37,6 +37,21 @@
   plan API routes; vendored ReUI sources are lint-ignored
   (eslint.config.mjs). Docs: new planning.md + ADR-0035, data-model/api/
   frontend/analytics/testing updated.
+- **agent — the LLM can now manage plans (CRUD)**: four new tools
+  (`list_plans`, `create_plan`, `update_plan`, `delete_plan`) call the
+  same user-scoped planning service as the REST routes (ADR-0036 — first
+  write tools; ADR-0033's read-only stance lifted domain by domain).
+  `list_plans` returns compact, capped summaries with the computed
+  `next_due_date` (the query DSL cannot expand RRULEs); `update_plan`
+  patches single fields incl. pause/finish via `status`. snake_case tool
+  surface both ways (ADR-0034 naming), loud unknown-field rejection,
+  `PlanValidationError` codes folded into `code: message` tool errors the
+  model self-corrects from; deletes stay prompt-guarded (resolve ids via
+  `list_plans`/`query_data` first, confirm in chat, prefer
+  `status: finished`; system prompt gains a registry-gated plan rules
+  block). Tests: agent-plan-tools (validation passthrough, cross-user
+  isolation, patch semantics, capped summaries, registry/prompt wiring).
+  Docs: ADR-0036, planning.md agent-access section, ADR index.
 
 ## v1.20.0
 

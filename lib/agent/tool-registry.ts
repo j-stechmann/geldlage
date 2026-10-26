@@ -2,6 +2,10 @@ import type { AgentTool } from "@/lib/agent/types"
 import { get_category_totals } from "@/lib/agent/tools/category-totals"
 import { query_data } from "@/lib/agent/tools/query-data"
 import { calculator } from "@/lib/agent/tools/calculator"
+import { list_plans } from "@/lib/agent/tools/list-plans"
+import { create_plan } from "@/lib/agent/tools/create-plan"
+import { update_plan } from "@/lib/agent/tools/update-plan"
+import { delete_plan } from "@/lib/agent/tools/delete-plan"
 
 /**
  * OpenAI wire-format translation for the agent tool registry (ADR-0033):
@@ -22,6 +26,13 @@ export const agentTools = [
   get_category_totals,
   query_data,
   calculator,
+  // Plan quartet (ADR-0036): the first write tools — read via list_plans
+  // (plus query_data's planned_transactions), mutations over the planning
+  // service's user-scoped CRUD.
+  list_plans,
+  create_plan,
+  update_plan,
+  delete_plan,
 ] as const satisfies AgentTool[]
 
 /**

@@ -107,6 +107,24 @@ writes ([api.md](api.md)):
 | `GET /api/plans/forecast?months&accountId`         | projection envelope                                                                                                                                                                 |
 | `GET /api/transactions/calendar?from&to&accountId` | compact bank rows (Gebucht **and** Nicht gebucht — pending rows carry a Buchungsdatum and show dashed/hollow) for the same window; counterparty = payee (Ausgang) / payer (Eingang) |
 
+## Agent access
+
+The chat agent holds read AND write access to plans
+([ADR-0036](adr/adr-0036-agent-plan-write-tools.md)) — the first mutable
+tool domain (ADR-0033 shipped read-only tools only). Four registry tools
+call the same user-scoped service functions as the routes above
+(`ctx.uid`, validation reused wholesale): `list_plans` (compact, capped,
+newest first, plus the computed `next_due_date` — the query DSL cannot
+expand RRULEs), `create_plan`, `update_plan` (single-field patches incl.
+pause/finish via `status`) and `delete_plan`. The tool surface is
+snake_case in both directions (args and results, matching the
+[ADR-0034](adr/adr-0034-agent-read-query-dsl.md) catalog naming); unknown
+arg keys are rejected, and `PlanValidationError` codes surface as
+`code: message` tool errors the model can self-correct from. Deletes carry
+no mechanical confirmation token — the system prompt makes the model
+resolve ids via `list_plans`/`query_data` first, confirm in chat before
+`delete_plan`, and prefer `status: finished` for mere completion.
+
 ## Frontend
 
 German UI. `/planung` composes the ReUI EventCalendar
