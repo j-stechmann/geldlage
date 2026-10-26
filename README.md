@@ -1,10 +1,15 @@
 # Geldlage
 
-Next.js app for analyzing bank CSV exports (currently the DKB format): import
-via drag-and-drop, automatic categorization through a local LLM
+Analyzes what the bank **already booked** (DKB CSV import): import via
+drag-and-drop, automatic categorization through a local LLM
 (llama.cpp `llama-server`), manual label management with learned counterparty
 rules, and analytics (balance, monthly cash flow, savings rate, top
-categories) that always reflect the filtered query results.
+categories) that always reflect the filtered query results. Future money is
+planned on `/planung` — **geplante Transaktionen**, recurring (full RFC 5545
+RRULE) or one-off — rendered on a calendar with a check-off against real
+bookings (erwartet/überfällig/gebucht) and a balance/cashflow projection
+behind the "Geplant einblenden" dashboard toggle
+([ADR-0035](docs/adr/adr-0035-planned-transactions-rrule.md)).
 
 | Dashboard                                                                                                | Imports                                                                             |
 | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |

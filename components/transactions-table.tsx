@@ -114,7 +114,14 @@ const DEFAULT_SORTABLE: SortKey[] = [
   "amountCents",
 ]
 
-export function TransactionsTable({ filters }: { filters: TableFilters }) {
+export function TransactionsTable({
+  filters,
+  focusTxId,
+}: {
+  filters: TableFilters
+  /** deep-linked transaction (from /planung): expanded + highlighted */
+  focusTxId?: string | null
+}) {
   const [page, setPage] = React.useState(1)
   const [sort, setSort] = React.useState<{ key: SortKey; desc: boolean }>({
     key: "bookingDate",
@@ -146,13 +153,18 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
   const activation = useRowActivation()
 
   const params = React.useMemo(() => {
+    // deep-linked focus (from /planung): the query fetches exactly the one
+    // row via the id lookup, independent of any filter state
+    if (focusTxId) {
+      return new URLSearchParams({ id: focusTxId, page: "1", pageSize: "25" })
+    }
     const sp = filtersToParams(filters)
     sp.set("page", String(page))
     sp.set("pageSize", "25")
     sp.set("sort", SORT_TO_FIELD[sort.key])
     sp.set("dir", sort.desc ? "desc" : "asc")
     return sp
-  }, [filters, page, sort])
+  }, [filters, page, sort, focusTxId])
 
   // value-based identity: page/reset must not fire on page changes
   const filterKey = React.useMemo(
@@ -175,6 +187,16 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
   if (lastExpandContext !== expandContext) {
     setLastExpandContext(expandContext)
     setExpandedId(null)
+  }
+
+  // deep-link focus (from the /planung calendar): expand the row during
+  // render — after a concurrent context reset above, so the focus survives
+  // the deep link's own filter change. lastFocus init null so the FIRST
+  // value also fires (mount is a legitimate focus event).
+  const [lastFocusTxId, setLastFocusTxId] = React.useState<string | null>(null)
+  if ((focusTxId ?? null) !== lastFocusTxId) {
+    setLastFocusTxId(focusTxId ?? null)
+    if (focusTxId) setExpandedId(focusTxId)
   }
 
   const { data, isLoading, isFetching, isError, refetch } =
@@ -382,6 +404,7 @@ export function TransactionsTable({ filters }: { filters: TableFilters }) {
                       activation={activation}
                       onToggle={toggleExpandedRow}
                       onAssign={openAssignDialog}
+                      focus={focusTxId != null && row.id === focusTxId}
                     />
                     {isExpanded && (
                       <TransactionDetailRow row={row} colSpan={totalColumns} />

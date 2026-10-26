@@ -138,6 +138,7 @@ describe("query catalog integrity", () => {
       "categories",
       "import_batches",
       "label_rules",
+      "planned_transactions",
       "transactions",
     ])
   })

@@ -15,6 +15,7 @@ extend it.
 | [csv-import.md](csv-import.md)     | DKB CSV format, German money/date parsing, import pipeline, occurrence dedupe, fuzzy reconciliation      |
 | [labelling.md](labelling.md)       | Worker loop, claim semantics, LLM client + prompts, label rules, completion/failure/deletion             |
 | [analytics.md](analytics.md)       | KPI formulas, full-month trimming, balance back-calculation, scoping rationale                           |
+| [planning.md](planning.md)         | Geplante Transaktionen: RRULE semantics, occurrence matching, forecast scope                             |
 | [frontend.md](frontend.md)         | React Query conventions, pages, polling, chart zoom, UI stack, category colors                           |
 | [api.md](api.md)                   | REST reference: all routes, shapes, status codes, conventions (descriptive appendix)                     |
 | [operations.md](operations.md)     | Makefile, model management, Docker, CI/release, env vars, security posture, backup, troubleshooting      |
@@ -29,7 +30,8 @@ backup, troubleshooting) → [api.md](api.md) as reference.
 **I want to contribute code** → [architecture.md](architecture.md) →
 [data-model.md](data-model.md) → [csv-import.md](csv-import.md) →
 [labelling.md](labelling.md) → [analytics.md](analytics.md) →
-[testing.md](testing.md); skim the ADR index below as you touch each area.
+[planning.md](planning.md) → [testing.md](testing.md); skim the ADR index
+below as you touch each area.
 
 **I maintain this** → [operations.md](operations.md) →
 [testing.md](testing.md) → the full ADR index.
@@ -58,6 +60,10 @@ German. These terms appear in code, schema, and docs.
 | `Kundenreferenz`                                | Customer reference — DKB's per-contract reference for recurring SEPA debits; the booked↔booked identity field | [ADR-0007](adr/adr-0007-fuzzy-reconciliation.md)      |
 | `Kontostand`                                    | Account balance snapshot in the CSV preamble — the balance anchor                                             | [analytics.md](analytics.md)                          |
 | `Kategorie` / `Label`                           | Used interchangeably: the `categories` table is the label vocabulary                                          | [labelling.md](labelling.md)                          |
+| `geplant` / `Plan`                              | Planned (future) transaction — virtual, never in `transactions`                                               | [planning.md](planning.md)                            |
+| `erwartet` / `überfällig` / `gebucht`           | Occurrence states: pending, overdue (unmatched, past due), matched to a real booked row (✓)                   | [planning.md](planning.md)                            |
+| `Prognose`                                      | The balance/cashflow projection over planned occurrences (third analytics scope, own endpoint)                | [planning.md](planning.md)                            |
+| `Geplant einblenden`                            | Dashboard toggle for the planned-vs-actual overlay                                                            | [frontend.md](frontend.md)                            |
 | `ohne Kategorie`                                | "Without category" — the visible state of `failed`/unlabeled rows; never a fallback label                     | [ADR-0013](adr/adr-0013-no-fallback-labels.md)        |
 | `erfunden` / `manuell`                          | Label origin: invented by the LLM vs. user-created/assigned                                                   | `categories.origin`; [data-model.md](data-model.md)   |
 | `wird kategorisiert`                            | "Being categorized" — the pending state shown in the table                                                    | [frontend.md](frontend.md)                            |
@@ -102,6 +108,12 @@ here. Guides cross-link to the ADRs they implement.
 | [0017](adr/adr-0017-marker-neutralization-symmetry.md) | Marker-neutralization symmetry between prompt and stored labels                       |
 | [0033](adr/adr-0033-agent-panel-tool-loop.md)          | Agent chat panel: native tool loop over the shared llama-server, invite-based threads |
 | [0034](adr/adr-0034-agent-read-query-dsl.md)           | Read-only JSON query DSL for the agent (`query_data`) on a readonly SQLite connection |
+
+### Planning & forecast
+
+| ADR                                                | Decision                                                            |
+| -------------------------------------------------- | ------------------------------------------------------------------- |
+| [0035](adr/adr-0035-planned-transactions-rrule.md) | Geplante Transaktionen — virtual overlay, read-time matching, RRULE |
 
 ### API & frontend
 

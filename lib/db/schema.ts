@@ -290,6 +290,55 @@ export const chatMessages = sqliteTable(
   ]
 )
 
+export const plannedTransactions = sqliteTable(
+  "planned_transactions",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => randomUUID()),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    /** NULL = plans apply to "any account" (shows on all accounts) */
+    accountId: integer("account_id").references(() => accounts.id),
+    /** optional — free text, drives occurrence matching (see lib/planning/matching.ts) */
+    counterparty: text("counterparty"),
+    purpose: text("purpose"),
+    /** signed integer cents (ADR-0002): positive = Einnahme, negative = Ausgabe; never 0 */
+    amountCents: integer("amount_cents").notNull(),
+    categoryId: integer("category_id").references(() => categories.id),
+    /** first occurrence date, ISO YYYY-MM-DD */
+    dtstart: text("dtstart").notNull(),
+    /**
+     * RFC 5545 RRULE value (bare, e.g. "FREQ=MONTHLY;INTERVAL=1;BYMONTHDAY=1")
+     * — validated against the allowlist in lib/planning/recurrence.ts.
+     * NULL = one-off plan occurring exactly on dtstart.
+     */
+    rrule: text("rrule"),
+    /** active | paused | finished (paused still expands; finished does not) */
+    status: text("status").$type<PlanStatus>().notNull().default("active"),
+    notes: text("notes"),
+    createdAt: text("created_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+    updatedAt: text("updated_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+  },
+  (t) => [
+    index("planned_transactions_user_status_idx").on(t.userId, t.status),
+    index("planned_transactions_account_idx").on(t.accountId),
+    // Runtime enforcement comes from the hand-written DDL in lib/db/index.ts;
+    // these check() defs only matter for drizzle-kit push and must stay in
+    // sync with it.
+    check("planned_transactions_amount_not_zero", sql`${t.amountCents} <> 0`),
+    check(
+      "planned_transactions_status_check",
+      sql`${t.status} IN ('active', 'paused', 'finished')`
+    ),
+  ]
+)
+
 export type ChatThread = typeof chatThreads.$inferSelect
 export type ChatThreadMember = typeof chatThreadMembers.$inferSelect
 export type ChatMessage = typeof chatMessages.$inferSelect
@@ -303,4 +352,7 @@ export type ImportBatch = typeof importBatches.$inferSelect
 export type Category = typeof categories.$inferSelect
 export type LabelRule = typeof labelRules.$inferSelect
 export type Transaction = typeof transactions.$inferSelect
+export type PlannedTransaction = typeof plannedTransactions.$inferSelect
+export type PlanStatus = "active" | "paused" | "finished"
+export type NewPlannedTransaction = typeof plannedTransactions.$inferInsert
 export type NewTransaction = typeof transactions.$inferInsert

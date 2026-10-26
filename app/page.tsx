@@ -9,14 +9,20 @@ import {
   TopCategoriesChart,
 } from "@/components/analytics-charts"
 import { ErrorState } from "@/components/error-state"
+import { Button } from "@/components/ui/button"
 import {
   EMPTY_FILTERS,
   filtersToParams,
   type TableFilters,
 } from "@/lib/filters"
+import { germanDate, useForecast } from "@/components/planning/api"
+import { euro } from "@/lib/money"
+
+const FORECAST_MONTHS = 12
 
 export default function DashboardPage() {
   const [filters, setFilters] = React.useState<TableFilters>(EMPTY_FILTERS)
+  const [forecastOn, setForecastOn] = React.useState(false)
 
   const params = React.useMemo(
     () => filtersToParams(filters).toString(),
@@ -30,6 +36,16 @@ export default function DashboardPage() {
     isError,
     refetch,
   } = useAnalytics(params)
+
+  // the planned-vs-actual overlay (ADR-0035): honors the account filter the
+  // same way the balance does — content filters are out of scope for money
+  // anchored on absolute snapshots
+  const forecastQuery = useForecast(
+    forecastOn,
+    FORECAST_MONTHS,
+    filters.accountId
+  )
+  const forecast = forecastQuery.data
 
   const showLoading = isLoading || (isError && !analytics)
 
@@ -53,6 +69,35 @@ export default function DashboardPage() {
       >
         <KpiRow analytics={analytics} loading={showLoading} />
 
+        <div
+          className={`flex flex-wrap items-center gap-3 transition-opacity ${forecastOn && forecastQuery.isFetching ? "opacity-70" : ""}`}
+        >
+          <Button
+            size="sm"
+            variant={forecastOn ? "default" : "outline"}
+            aria-pressed={forecastOn}
+            onClick={() => setForecastOn((v) => !v)}
+          >
+            Geplant einblenden
+          </Button>
+          {forecastOn && forecast && (
+            <span className="text-sm text-muted-foreground">
+              Projektion{" "}
+              <strong className="font-medium text-foreground tabular-nums">
+                {euro(
+                  forecast.projectedBalance[
+                    forecast.projectedBalance.length - 1
+                  ]?.balanceCents ?? null
+                )}
+              </strong>{" "}
+              zum {germanDate(forecast.horizon.to)}
+              {forecast.withoutSnapshot
+                ? " (ohne Kontostand-Referenz: Summe der Buchungen)"
+                : ""}
+            </span>
+          )}
+        </div>
+
         {/* @min-[1024px] (container query on <main>) instead of viewport
             lg: the charts reflow against the space left of the agent dock.
             Container queries measure main's content box (px-4), so this
@@ -60,14 +105,17 @@ export default function DashboardPage() {
         <div className="grid gap-4 @min-[1024px]:grid-cols-3">
           <BalanceChart
             data={analytics?.balanceTimeline}
+            forecast={forecastOn ? forecast : undefined}
             loading={showLoading}
           />
           <CashflowChart
             data={analytics?.monthlyCashflow}
+            forecast={forecastOn ? forecast : undefined}
             loading={showLoading}
           />
           <TopCategoriesChart
             data={analytics?.topCategories}
+            forecast={forecastOn ? forecast : undefined}
             loading={showLoading}
           />
         </div>

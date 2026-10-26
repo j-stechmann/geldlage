@@ -159,23 +159,10 @@ export interface TransactionPage {
   pageCount: number
 }
 
-export function queryTransactions(
-  f: TransactionFilters,
-  userId: number,
-  page: number,
-  pageSize: number
-): TransactionPage {
+/** The shared row projection of both transactions queries. */
+function txRowSelect() {
   const db = getDb()
-  const where = buildWhere(f, userId)
-
-  const total =
-    db
-      .select({ count: sql<number>`count(*)` })
-      .from(transactions)
-      .where(where)
-      .get()?.count ?? 0
-
-  const rows = db
+  return db
     .select({
       id: transactions.id,
       bookingDate: transactions.bookingDate,
@@ -200,6 +187,25 @@ export function queryTransactions(
     .from(transactions)
     .leftJoin(categories, eq(transactions.categoryId, categories.id))
     .leftJoin(accounts, eq(transactions.accountId, accounts.id))
+}
+
+export function queryTransactions(
+  f: TransactionFilters,
+  userId: number,
+  page: number,
+  pageSize: number
+): TransactionPage {
+  const db = getDb()
+  const where = buildWhere(f, userId)
+
+  const total =
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(transactions)
+      .where(where)
+      .get()?.count ?? 0
+
+  const rows = txRowSelect()
     .where(where)
     .orderBy(...buildOrderBy(f))
     .limit(pageSize)
@@ -211,5 +217,25 @@ export function queryTransactions(
     total,
     page,
     pageCount: Math.max(1, Math.ceil(total / pageSize)),
+  }
+}
+
+/**
+ * Precise single-row lookup (deep link from the /planung calendar):
+ * user-scoped, ignores every other filter — a miss or a foreign id is an
+ * empty page, never a leak.
+ */
+export function queryTransactionById(
+  id: string,
+  userId: number
+): TransactionPage {
+  const row = txRowSelect()
+    .where(and(eq(transactions.userId, userId), eq(transactions.id, id)))
+    .get()
+  return {
+    rows: row ? [row] : [],
+    total: row ? 1 : 0,
+    page: 1,
+    pageCount: 1,
   }
 }

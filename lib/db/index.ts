@@ -246,6 +246,34 @@ export function createSchemaSqlite(db: Db) {
   db.run(
     `CREATE INDEX IF NOT EXISTS transactions_payee_idx ON transactions (payee)`
   )
+  // ── planned transactions (ADR-0035): virtual, recurring or one-off.
+  // Never inserted into transactions — the forecast expands occurrences and
+  // matches them read-time against booked rows (lib/planning/matching.ts).
+  // The status CHECK is runtime-enforced here; the drizzle check() defs in
+  // schema.ts must stay in sync with it.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS planned_transactions (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      account_id INTEGER REFERENCES accounts(id),
+      counterparty TEXT,
+      purpose TEXT,
+      amount_cents INTEGER NOT NULL CHECK (amount_cents <> 0),
+      category_id INTEGER REFERENCES categories(id),
+      dtstart TEXT NOT NULL,
+      rrule TEXT,
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'finished')),
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `)
+  db.run(
+    `CREATE INDEX IF NOT EXISTS planned_transactions_user_status_idx ON planned_transactions (user_id, status)`
+  )
+  db.run(
+    `CREATE INDEX IF NOT EXISTS planned_transactions_account_idx ON planned_transactions (account_id)`
+  )
   // ── agent chat (ADR-0033): threads + invites/members + messages. The
   // role CHECK is runtime-enforced here; the drizzle check() defs in
   // schema.ts must stay in sync with it.
@@ -635,6 +663,34 @@ export function migrateSchema(db: Db) {
   )
   db.run(
     `CREATE INDEX IF NOT EXISTS transactions_payee_idx ON transactions (payee)`
+  )
+  // ── planned transactions (ADR-0035): virtual, recurring or one-off.
+  // Never inserted into transactions — the forecast expands occurrences and
+  // matches them read-time against booked rows (lib/planning/matching.ts).
+  // The status CHECK is runtime-enforced here; the drizzle check() defs in
+  // schema.ts must stay in sync with it.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS planned_transactions (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      account_id INTEGER REFERENCES accounts(id),
+      counterparty TEXT,
+      purpose TEXT,
+      amount_cents INTEGER NOT NULL CHECK (amount_cents <> 0),
+      category_id INTEGER REFERENCES categories(id),
+      dtstart TEXT NOT NULL,
+      rrule TEXT,
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'finished')),
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `)
+  db.run(
+    `CREATE INDEX IF NOT EXISTS planned_transactions_user_status_idx ON planned_transactions (user_id, status)`
+  )
+  db.run(
+    `CREATE INDEX IF NOT EXISTS planned_transactions_account_idx ON planned_transactions (account_id)`
   )
   // ── agent chat (ADR-0033): threads + invites/members + messages. The
   // role CHECK is runtime-enforced here; the drizzle check() defs in

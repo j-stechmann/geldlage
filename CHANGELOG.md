@@ -1,5 +1,43 @@
 # Changelog
 
+## v1.21.0
+
+### Added
+
+- **planning — geplante Transaktionen (calendar, matching, forecast)**:
+  future money becomes plannable — recurring (full RFC 5545 RRULE via the
+  `rrule` package) or one-off plans live in a new virtual
+  `planned_transactions` table and **never touch `transactions`**
+  (dedupe/labeling/snapshot machinery unchanged, ADR-0035). New
+  `lib/planning/` (recurrence validation allowlist + noon-UTC expansion,
+  read-time greedy occurrence matching vs. booked rows with
+  erwartet/überfällig/gebucht states — no stored matches, forecast on a
+  third analytics scope in `GET /api/plans/forecast`), new routes
+  `/api/plans` (+`/[id]`, `/occurrences`, `/forecast`), a `/planung` page
+  with the ReUI EventCalendar (Base UI twin, copy-and-own under
+  `components/reui/`), a full RRULE builder dialog with live next-dates
+  preview (same engine as the server), and a forecast summary card. The
+  calendar also renders REAL bank transactions carrying a Buchungsdatum —
+  booked (washed `•`) and pending `Nicht gebucht` (dashed hollow `◌`; fed
+  by a new `GET /api/transactions/calendar` window endpoint) —, month view
+  is the default, all dialog dropdowns display their chosen label (Base UI
+  `items` maps), and dashed/date-only `UNTIL` forms are normalized (rrule
+  only parses compact datetimes; date-only lifted to noon so the final day
+  stays included). Bank chips deep-link to the transactions table
+  (`?tx=<id>`; `GET /api/transactions` gained an `id` param —
+  `queryTransactionById`, a user-scoped single-row lookup bypassing filters
+  and pagination that also shares the row projection with the list query —
+  the table queries exactly that row, then expands, highlights and scrolls
+  to it; render-time focus adjustment, jsdom-tested). The dashboard's "Geplant einblenden"
+  planned-vs-actual mode (dashed
+  projection line, stacked planned cashflow/category bars, projected
+  horizon balance). The agent's read-only query DSL catalog (ADR-0034)
+  gained `planned_transactions`. Tests: RRULE validation/expansion,
+  matching tolerances + greedy determinism, forecast oracle to the cent,
+  plan API routes; vendored ReUI sources are lint-ignored
+  (eslint.config.mjs). Docs: new planning.md + ADR-0035, data-model/api/
+  frontend/analytics/testing updated.
+
 ## v1.20.0
 
 ### Changed
