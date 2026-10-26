@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from "vitest"
 import {
+  parseByMonthDay,
   parseRruleToForm,
   yearlyNoMonthHint,
 } from "@/components/planning/plan-dialog"
@@ -112,6 +113,33 @@ describe("parseRruleToForm faithfulness gate", () => {
       rawDirty: false,
     })
     expect(parseRruleToForm("nonsense", DTSTART).rawDirty).toBe(true)
+  })
+})
+
+describe("parseByMonthDay token strictness", () => {
+  it("accepts clean integer lists (whitespace, negatives, empty)", () => {
+    expect(parseByMonthDay("1,15")).toEqual([1, 15])
+    expect(parseByMonthDay(" 28 , 29 ")).toEqual([28, 29])
+    expect(parseByMonthDay("-1")).toEqual([-1])
+    expect(parseByMonthDay("")).toEqual([])
+    expect(parseByMonthDay("   ")).toEqual([])
+  })
+
+  it("rejects decimal typos instead of silently coercing them", () => {
+    // parseInt used to coerce "1.5" → day 1: the user saves a recurring
+    // plan on a different day than they typed, with no error anywhere.
+    expect(() => parseByMonthDay("1.5")).toThrow("Ganzzahlen")
+    expect(() => parseByMonthDay("1,2.5")).toThrow("Ganzzahlen")
+    // digits glued via a letter ("O" vs "0") reject the same way
+    expect(() => parseByMonthDay("1O")).toThrow("Ganzzahlen")
+    // "+5" is not an RFC BYMONTHDAY spelling either
+    expect(() => parseByMonthDay("+5")).toThrow("Ganzzahlen")
+  })
+
+  it("keeps the existing range/duplicate guards", () => {
+    expect(() => parseByMonthDay("0")).toThrow("Ungültige Monatstage")
+    expect(() => parseByMonthDay("32")).toThrow("Ungültige Monatstage")
+    expect(() => parseByMonthDay("1,1")).toThrow("Ungültige Monatstage")
   })
 })
 

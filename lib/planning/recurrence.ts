@@ -271,12 +271,26 @@ export function expandOccurrenceDates(
       forceset: false,
     })
     if (!(parsed instanceof RRule)) return []
+    const after = noonUtc(w.from)
+    const before = noonUtc(w.to)
+    // A rule live at write time expires naturally later (UNTIL passes) —
+    // and every read after that would walk rrule occurrence-by-occurrence
+    // from dtstart to the window for one guaranteed-empty result (rrule has
+    // no seek; a daily plan with a years-old dtstart costs tens of
+    // thousands of iterations per window, several hundred ms for a
+    // 1900-dtstart one). An UNTIL strictly before the window start proves
+    // the same empty result without expanding. Occurrences sit at noon and
+    // normalization keeps every UNTIL at-or-after noon of its own day, so
+    // the instant compare is exact; a window opening ON the end day (or
+    // earlier) still expands below and keeps the final occurrence.
+    const until = (parsed.origOptions as { until?: Date | null }).until
+    if (until instanceof Date && until.getTime() < after.getTime()) {
+      return []
+    }
     const rule = new RRule({
       ...parsed.origOptions,
       dtstart: noonUtc(dtstart),
     } as never)
-    const after = noonUtc(w.from)
-    const before = noonUtc(w.to)
     return rule
       .between(after, before, true)
       .slice(0, cap)

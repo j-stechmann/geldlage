@@ -267,6 +267,41 @@ describe("expandOccurrenceDates", () => {
     expect(dates).toEqual(["2026-06-01", "2026-07-01"])
   })
 
+  it("short-circuits an UNTIL expired before the window (same result, no walk)", () => {
+    // expiry years before the window: the fast path must return exactly
+    // what the slow expansion proves — an empty set. (Without the guard
+    // the read walks occurrence-by-occurrence from dtstart; a
+    // 1900-dtstart daily plan measured ~0.3 s per window on every
+    // list/occurrences/forecast read.)
+    expect(
+      expandOccurrenceDates("1990-03-01", "FREQ=DAILY;UNTIL=19900310T120000Z", {
+        from: "2026-01-01",
+        to: "2026-01-31",
+      })
+    ).toEqual([])
+    // the day AFTER expiry is empty too …
+    expect(
+      expandOccurrenceDates("2026-11-13", "FREQ=DAILY;UNTIL=20261115T120000Z", {
+        from: "2026-11-16",
+        to: "2026-11-20",
+      })
+    ).toEqual([])
+    // … a window opening ON the end day keeps its final occurrence …
+    expect(
+      expandOccurrenceDates("2026-11-13", "FREQ=DAILY;UNTIL=20261115T120000Z", {
+        from: "2026-11-15",
+        to: "2026-11-20",
+      })
+    ).toEqual(["2026-11-15"])
+    // … and rules without UNTIL are untouched by the guard
+    expect(
+      expandOccurrenceDates("2026-11-13", "FREQ=DAILY", {
+        from: "2026-11-16",
+        to: "2026-11-20",
+      })
+    ).toEqual(["2026-11-16", "2026-11-17", "2026-11-18", "2026-11-19", "2026-11-20"])
+  })
+
   it("windows clip both sides", () => {
     const dates = expandOccurrenceDates("2026-01-01", "FREQ=DAILY", {
       from: "2026-01-10",
@@ -314,6 +349,18 @@ describe("nextOccurrenceDate", () => {
       nextOccurrenceDate(
         "2026-03-01",
         "FREQ=MONTHLY;COUNT=2;BYMONTHDAY=1",
+        "2026-10-26"
+      )
+    ).toBeNull()
+  })
+  it("resolves an expired UNTIL rule to null via the short-circuit", () => {
+    // a plan live at write time (daily, dtstart years back) expires later —
+    // every next-date read must answer null cheaply, not scan the ladder
+    // while walking from dtstart
+    expect(
+      nextOccurrenceDate(
+        "2020-01-01",
+        "FREQ=DAILY;UNTIL=20210101T120000Z",
         "2026-10-26"
       )
     ).toBeNull()

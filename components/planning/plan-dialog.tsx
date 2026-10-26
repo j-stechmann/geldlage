@@ -144,13 +144,21 @@ function field(label: string, children: React.ReactNode, hint?: string) {
   )
 }
 
-/** Parse a comma list of month days ("1,15,-1"); throws on garbage. */
-function parseByMonthDay(text: string): number[] {
+/**
+ * Parse a comma list of month days ("1,15,-1"); throws on garbage. Tokens
+ * must be integer literals: Number.parseInt would silently coerce decimal
+ * typos ("1.5" → day 1) into a different recurring plan than the user
+ * typed. Exported for the dialog regression tests.
+ */
+export function parseByMonthDay(text: string): number[] {
   const list = text
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean)
   if (list.length === 0) return []
+  if (list.some((s) => !/^-?\d+$/.test(s))) {
+    throw new Error("Ungültige Monatstage (Ganzzahlen erwartet)")
+  }
   const nums = list.map((s) => Number.parseInt(s, 10))
   if (
     nums.some((n) => !Number.isInteger(n) || n === 0 || Math.abs(n) > 31) ||
