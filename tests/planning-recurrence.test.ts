@@ -299,7 +299,13 @@ describe("expandOccurrenceDates", () => {
         from: "2026-11-16",
         to: "2026-11-20",
       })
-    ).toEqual(["2026-11-16", "2026-11-17", "2026-11-18", "2026-11-19", "2026-11-20"])
+    ).toEqual([
+      "2026-11-16",
+      "2026-11-17",
+      "2026-11-18",
+      "2026-11-19",
+      "2026-11-20",
+    ])
   })
 
   it("windows clip both sides", () => {
@@ -352,6 +358,35 @@ describe("nextOccurrenceDate", () => {
         "2026-10-26"
       )
     ).toBeNull()
+  })
+  it("the closing rung finds live rules whose gap exceeds the early rungs", () => {
+    // YEARLY;INTERVAL=100: ~100-year gaps — beyond the old ladder's
+    // cumulative 34,000 days, the closing rung is what makes this non-null
+    expect(
+      nextOccurrenceDate(
+        "2026-10-26",
+        "FREQ=YEARLY;INTERVAL=100;BYMONTH=12;BYMONTHDAY=31",
+        "2027-01-02"
+      )
+    ).toBe("2126-12-31")
+    // widest gap a storable live rule can have: one Gregorian 400-year
+    // cycle — leap-day yearly on a century-leap sequence (2000 → 2400)
+    expect(
+      nextOccurrenceDate(
+        "2000-02-29",
+        "FREQ=YEARLY;INTERVAL=100;BYMONTH=2;BYMONTHDAY=29",
+        "2026-10-26"
+      )
+    ).toBe("2400-02-29")
+    // and again past that occurrence (2001+100k ≡ 0 mod 100 → only
+    // century-leap years match: 2400 → 2800)
+    expect(
+      nextOccurrenceDate(
+        "2000-02-29",
+        "FREQ=YEARLY;INTERVAL=100;BYMONTH=2;BYMONTHDAY=29",
+        "2401-03-01"
+      )
+    ).toBe("2800-02-29")
   })
   it("resolves an expired UNTIL rule to null via the short-circuit", () => {
     // a plan live at write time (daily, dtstart years back) expires later —

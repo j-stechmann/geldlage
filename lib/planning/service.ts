@@ -31,10 +31,9 @@ import {
   type MatchCandidate,
   type MatchableOccurrence,
 } from "@/lib/planning/matching"
+import { MAX_COUNTERPARTY, MAX_TEXT } from "@/lib/planning/limits"
 import { todayLocal } from "@/lib/analytics/date"
 
-const MAX_TEXT = 500
-const MAX_COUNTERPARTY = 128
 /**
  * dtstart floor (year): occurrence expansion walks forward from dtstart on
  * every read (plan list, occurrences, forecast) and rrule has no internal
@@ -224,10 +223,11 @@ function assertOwnedRef(
 /**
  * A validated rule must produce at least one occurrence at/after dtstart.
  * The check walks the same bounded horizon ladder as nextOccurrenceDate
- * (≈ 70 years) instead of a fixed short window: sparse-but-live rules
- * (leap-day yearly, large INTERVAL) must be creatable even when their
- * first occurrence lies years ahead, while genuinely dead rules (expired
- * UNTIL, exhausted COUNT) still fail all four bounded scans.
+ * (closing rung ≥ the Gregorian 400-year cycle) instead of a fixed short
+ * window: sparse-but-live rules (leap-day yearly, large INTERVAL) must be
+ * creatable even when their first occurrence lies years ahead, while
+ * genuinely dead rules (expired UNTIL, exhausted COUNT) still fail all
+ * five bounded scans.
  */
 function assertRuleProducesOccurrence(
   dtstart: string,
@@ -632,6 +632,15 @@ export interface ForecastResult {
  * (real data, snapshot-anchored like engine.ts) plus planned occurrences
  * from today through `months` months — real bank amounts never enter the
  * projected sums, and projected amounts never enter the real analytics.
+ *
+ * Known limitation, inherited from the anchor math it mirrors: the anchor
+ * is the SINGLE latest snapshot batch, so for an all-accounts projection
+ * of a user whose accounts carry per-account snapshots only that one
+ * account's snapshot money enters the starting balance (the Σ booked term
+ * is all-account, the anchor is not) — like the analytics balance KPI.
+ * Account-scoped forecasts are exact; withoutSnapshot flags the
+ * snapshot-free case. If this matters, anchor per latest snapshot DATE
+ * across the scoped batches.
  */
 export function computeForecast(
   userId: number,

@@ -90,6 +90,11 @@ is left untouched; the forecast endpoint is deliberately separate.
 - **Starting balance** = latest snapshot anchor (date ≤ today) + Σ booked
   `(snapshot, today]`; no snapshot → Σ booked ≤ today, flagged
   `withoutSnapshot`. Account filter respected like the balance timeline.
+  Inherited anchor caveat (same as the analytics balance KPI): the anchor
+  is the single latest snapshot _batch_ — an all-accounts projection of a
+  user whose accounts carry **per-account snapshots** enters only that one
+  account's snapshot money (Σ booked stays all-account), so the starting
+  balance can be understated; account-scoped forecasts are exact.
 - **Planned aggregates use only UNMATCHED occurrences** from today through
   `months` (clamped 1–60, default 12): matched ones are booked money
   already inside the actuals — including them would double-count. One
@@ -112,15 +117,15 @@ All routes `runtime = "nodejs"`, `dynamic = "force-dynamic"`, hand-rolled
 validation (error `{error: "code", message}`), session-scoped, CSRF on
 writes ([api.md](api.md)):
 
-| Route                                              | Purpose                                                                                                                                                                                                                               |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/plans`                                   | list + `nextDueDate` per plan                                                                                                                                                                                                         |
-| `POST /api/plans`                                  | create; validates `amountCents ≠ 0`, `dtstart` ISO (not before 1900), RRULE allowlist + first occurrence within the bounded next-date ladder (~70 y — sparse-but-live rules like leap-day yearly pass), ownership of account/category |
-| `PATCH /api/plans/[id]`                            | partial update; dtstart/rule changes re-check occurrence productivity                                                                                                                                                                 |
-| `DELETE /api/plans/[id]`                           | delete (no other data references plans)                                                                                                                                                                                               |
-| `GET /api/plans/occurrences?from&to&accountId`     | expanded window + match states; window ≤ 400 days _and_ within ±60 months of today (rrule expansion walks from dtstart occurrence-by-occurrence — no seek — so far windows cost CPU linear in that distance)                          |
-| `GET /api/plans/forecast?months&accountId`         | projection envelope                                                                                                                                                                                                                   |
-| `GET /api/transactions/calendar?from&to&accountId` | compact bank rows (Gebucht **and** Nicht gebucht — pending rows carry a Buchungsdatum and show dashed/hollow) for the same window; counterparty = payee (Ausgang) / payer (Eingang)                                                   |
+| Route                                              | Purpose                                                                                                                                                                                                                                                                                 |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/plans`                                   | list + `nextDueDate` per plan                                                                                                                                                                                                                                                           |
+| `POST /api/plans`                                  | create; validates `amountCents ≠ 0`, `dtstart` ISO (not before 1900), RRULE allowlist + first occurrence within the bounded next-date ladder (five rungs, closing rung ≥ one Gregorian 400-year cycle — sparse-but-live rules like leap-day yearly pass), ownership of account/category |
+| `PATCH /api/plans/[id]`                            | partial update; dtstart/rule changes re-check occurrence productivity                                                                                                                                                                                                                   |
+| `DELETE /api/plans/[id]`                           | delete (no other data references plans)                                                                                                                                                                                                                                                 |
+| `GET /api/plans/occurrences?from&to&accountId`     | expanded window + match states; window ≤ 400 days _and_ within ±60 months of today (rrule expansion walks from dtstart occurrence-by-occurrence — no seek — so far windows cost CPU linear in that distance)                                                                            |
+| `GET /api/plans/forecast?months&accountId`         | projection envelope                                                                                                                                                                                                                                                                     |
+| `GET /api/transactions/calendar?from&to&accountId` | compact bank rows (Gebucht **and** Nicht gebucht — pending rows carry a Buchungsdatum and show dashed/hollow) for the same window; counterparty = payee (Ausgang) / payer (Eingang)                                                                                                     |
 
 ## Agent access
 

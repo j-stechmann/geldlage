@@ -262,6 +262,23 @@ describe("POST /api/plans", () => {
     )
   })
 
+  it("accepts a rule whose first occurrence lies beyond the early ladder rungs", async () => {
+    // one Gregorian 400-year cycle between consecutive matches (2000 →
+    // 2400 leap Feb 29): a fixed ~34,000-day ladder used to wrongly reject
+    // this as invalid_rrule and then report "no future dates" for the
+    // stored live rule — the ladder's closing rung makes both truthful
+    const res = await postPlan(`${BASE}/api/plans`, {
+      amountCents: -100,
+      dtstart: "2000-02-29",
+      rrule: "FREQ=YEARLY;INTERVAL=100;BYMONTH=2;BYMONTHDAY=29",
+    })
+    expect(res.status).toBe(201)
+    const id = (await res.json()).plan.id
+    const data = await (await getPlansRow(userId)).json()
+    const plan = data.plans.find((p: { id: string }) => p.id === id)
+    expect(plan.nextDueDate).toBe("2400-02-29")
+  })
+
   it("accepts a dtstart at the 1900 floor", async () => {
     const res = await postPlan(`${BASE}/api/plans`, {
       amountCents: -100,

@@ -171,6 +171,51 @@ describe("plan dialog: invalid builder input must not crash the page", () => {
     expect(saveButton()).toBeEnabled()
   })
 
+  it("a multi-byte text over its byte cap disarms save (bytes ≠ characters)", async () => {
+    // the browser maxLength counts characters; the server counts UTF-8
+    // bytes — 129 'ß' are well inside 128 characters yet 258 bytes. The
+    // dialog's inline pre-check must catch exactly what the server would
+    // reject, instead of surfacing it as a save-time 400 toast.
+    renderWithQuery(
+      <PlanDialog
+        open
+        onOpenChange={() => {}}
+        plan={{ ...BASE_PLAN, rrule: null }}
+      />
+    )
+    const input = await waitFor(() => inputByLabel("Vertragspartner"))
+
+    fireEvent.change(input, { target: { value: "ß".repeat(129) } })
+    await waitFor(() => {
+      expect(document.body.textContent).toContain(
+        "Vertragspartner ist zu lang: 258 Bytes, max. 128"
+      )
+    })
+    expect(saveButton()).toBeDisabled()
+
+    // a repaired, byte-clean name re-enables the dialog — and multi-byte
+    // content exactly AT the cap stays acceptable: 64 × 'ß' = 128 bytes
+    fireEvent.change(input, {
+      target: { value: "ß".repeat(64) },
+    })
+    await waitFor(() => {
+      expect(document.body.textContent).not.toContain(
+        "Vertragspartner ist zu lang"
+      )
+    })
+    expect(saveButton()).toBeEnabled()
+
+    // the sibling caps also disarm: purpose/notes have no smaller maxlength
+    const notes = inputByLabel("Notizen")
+    fireEvent.change(notes, { target: { value: "é".repeat(251) } })
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("Notizen ist zu lang")
+    })
+    expect(saveButton()).toBeDisabled()
+    fireEvent.change(notes, { target: { value: "" } })
+    await waitFor(() => expect(saveButton()).toBeEnabled())
+  })
+
   it("an 'Alle' interval beyond 100 fails inline, not as a save-time 400", async () => {
     // the input handler clamps only the low end; a typed 500 used to leave a
     // green preview while the server capped INTERVAL at 100 — save then

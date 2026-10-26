@@ -24,7 +24,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { parseGermanAmountToCents, formatCentsAsGerman } from "@/lib/money"
+import {
+  parseGermanAmountToCents,
+  formatCentsAsGerman,
+  normalizeWhitespace,
+} from "@/lib/money"
 import { apiFetch } from "@/lib/api-fetch"
 import {
   createPlan,
@@ -40,6 +44,7 @@ import {
   nextOccurrenceDate,
   noonUtc,
 } from "@/lib/planning/recurrence"
+import { MAX_COUNTERPARTY, MAX_TEXT } from "@/lib/planning/limits"
 
 interface AccountOption {
   id: number
@@ -132,7 +137,11 @@ const MONTH_CHIPS = [
   "Dez",
 ]
 
-function field(label: string, children: React.ReactNode, hint?: string) {
+function field(
+  label: string,
+  children: React.ReactNode,
+  hint?: React.ReactNode
+) {
   return (
     <label className="block space-y-1.5">
       <span className="text-sm font-medium">{label}</span>
@@ -168,6 +177,30 @@ export function parseByMonthDay(text: string): number[] {
     throw new Error("Ungültige Monatstage")
   }
   return nums
+}
+
+/** UTF-8 byte length — the unit the server's text caps actually count. */
+function utf8Bytes(s: string): number {
+  return new TextEncoder().encode(s).length
+}
+
+/**
+ * Per-field byte-cap pre-check mirroring the server exactly: service.ts
+ * measures `normalizeWhitespace` (NFC + collapse + trim) of the sent value
+ * against the same constants (lib/planning/limits.ts) — the client must
+ * apply the identical measure, or a browser-accepted 128-character
+ * umlaut/emoji name would only surface as the server's 400.
+ * Returned German message renders under the offending field and disarms
+ * the save button (same inline pattern as the rule errors).
+ */
+export function textLimitError(
+  label: string,
+  value: string,
+  max: number
+): string | null {
+  const n = utf8Bytes(normalizeWhitespace(value))
+  if (n <= max) return null
+  return `${label} ist zu lang: ${n} Bytes, max. ${max} — Zeichen ≠ Bytes (Umlaute/Emoji zählen doppelt)`
 }
 
 /** Compose the RRULE text from the builder fields; null = one-off. */
@@ -532,6 +565,21 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
   }, [form])
   const effectiveRrule = effective.rrule
 
+  // text byte caps (server mirror — see textLimitError): the memo never
+  // throws, each exceeded field gets an inline hint and disarms the save
+  const textErrors = React.useMemo(
+    () => ({
+      counterparty: textLimitError(
+        "Vertragspartner",
+        form.counterparty,
+        MAX_COUNTERPARTY
+      ),
+      purpose: textLimitError("Verwendungszweck", form.purpose, MAX_TEXT),
+      notes: textLimitError("Notizen", form.notes, MAX_TEXT),
+    }),
+    [form.counterparty, form.purpose, form.notes]
+  )
+
   // ── preview: next ≤3 dates, from the effective rule (same engine as the
   // server: the rrule package) ──
   const preview = React.useMemo(() => {
@@ -645,7 +693,10 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
   const canSave =
     isValidIsoDate(form.dtstart) &&
     form.amountText.trim() !== "" &&
-    effective.error === null
+    effective.error === null &&
+    textErrors.counterparty === null &&
+    textErrors.purpose === null &&
+    textErrors.notes === null
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -710,25 +761,42 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
                 onChange={(e) => set({ counterparty: e.target.value })}
                 placeholder="z. B. Mietwerk GmbH"
                 maxLength={128}
+                aria-invalid={textErrors.counterparty !== null || undefined}
                 aria-label="Vertragspartner"
               />,
-              "Pflanzt ein Gegenpartei-Match für die „gebucht“-Erkennung — der Text muss (Groß-/Kleinschreibung egal) im Vertragspartner der Buchungen vorkommen."
+              textErrors.counterparty ? (
+                <span className="text-destructive">
+                  {textErrors.counterparty}
+                </span>
+              ) : (
+                "Pflanzt ein Gegenpartei-Match für die „gebucht“-Erkennung — der Text muss (Groß-/Kleinschreibung egal) im Vertragspartner der Buchungen vorkommen."
+              )
             )}
             {field(
               "Verwendungszweck",
               <Input
                 value={form.purpose}
                 onChange={(e) => set({ purpose: e.target.value })}
+                maxLength={500}
+                aria-invalid={textErrors.purpose !== null || undefined}
                 aria-label="Verwendungszweck"
-              />
+              />,
+              textErrors.purpose ? (
+                <span className="text-destructive">{textErrors.purpose}</span>
+              ) : undefined
             )}
             {field(
               "Notizen",
               <Input
                 value={form.notes}
                 onChange={(e) => set({ notes: e.target.value })}
+                maxLength={500}
+                aria-invalid={textErrors.notes !== null || undefined}
                 aria-label="Notizen"
-              />
+              />,
+              textErrors.notes ? (
+                <span className="text-destructive">{textErrors.notes}</span>
+              ) : undefined
             )}
           </div>
 

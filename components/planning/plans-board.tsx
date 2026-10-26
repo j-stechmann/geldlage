@@ -94,7 +94,6 @@ function PlanRowCard({
           <p className="truncate text-xs text-muted-foreground">
             {germanDate(plan.dtstart)}
             {plan.accountName ? ` · ${plan.accountName}` : ""}
-            {plan.categoryName ? " · " : ""}
           </p>
         </div>
         <span

@@ -26,7 +26,8 @@
   midnight, `06:00Z` …, floating no-Z included — lifted to noon so the
   final day stays included; also at read time, lifting pre-fix stored
   rules), and validated rules must yield an occurrence within the bounded
-  next-date ladder (~70 y — sparse-but-live rules like leap-day yearly are
+  next-date ladder (five rungs, closing rung ≥ the Gregorian 400-year
+  cycle — sparse-but-live rules like leap-day yearly are
   creatable, dead rules rejected). Bank chips deep-link to the transactions table
   (`?tx=<id>`; `GET /api/transactions` gained an `id` param —
   `queryTransactionById`, a user-scoped single-row lookup bypassing filters
@@ -82,7 +83,19 @@
   INTERVAL > 1 is part of the text, BYDAY+BYMONTHDAY intersections fall
   back to the raw rule); an "Alle" (INTERVAL) beyond 100 in the plan dialog
   disarms the dialog with an inline error instead of a green preview
-  followed by a save-time 400.
+  followed by a save-time 400; the next-date ladder gained a closing rung
+  (147,000 d ≥ one Gregorian 400-year cycle) — live rules whose gaps can
+  exceed the early rungs (e.g. `YEARLY;INTERVAL=100`) previously read as
+  "no future dates" after their first occurrence passed (and even failed
+  creation for far-out first occurrences); the plan dialog pre-checks the
+  server's BYTE text caps inline (the browser maxLength counts characters
+  only, so e.g. a 128-character umlaut name hit a save-time 400 —
+  purpose/notes gain their maxLengths, shared constants live in
+  `lib/planning/limits.ts`); the plan card's muted line no longer renders
+  a dangling " · " for the category shown in the chip row; the forecast's
+  all-accounts anchor caveat (single latest snapshot _batch_, inherited
+  from the analytics balance KPI — understates multi-account users, exact
+  when account-scoped) is now documented in planning.md.
 
 ## v1.20.0
 

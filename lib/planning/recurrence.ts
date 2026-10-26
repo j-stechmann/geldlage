@@ -312,9 +312,14 @@ export function expandOccurrenceDates(
  * (large INTERVAL, 5th-weekday ordinals, leap-day rules) still finds its
  * real next date instead of a misleading null. The ladder is bounded: a
  * rule that truly never fires again (expired UNTIL, exhausted COUNT) costs
- * at most four bounded scans.
+ * at most five bounded scans. The closing rung makes "dead" truthful for
+ * every storable unbounded rule — the widest gap between consecutive
+ * occurrences of any live rule is one Gregorian 400-year cycle (146,097
+ * days, e.g. BYMONTH=2;BYMONTHDAY=29 with INTERVAL=100 anchored on a
+ * century-leap sequence: 2000 → 2400); dense rules are found on the first
+ * rung, only the pathological sparse cadences pay the full ladder.
  */
-const NEXT_HORIZON_LADDER = [400, 1600, 6400, 25_600]
+const NEXT_HORIZON_LADDER = [400, 1600, 6400, 25_600, 147_000]
 
 export function nextOccurrenceDate(
   dtstart: string,
