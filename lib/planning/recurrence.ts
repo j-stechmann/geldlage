@@ -247,8 +247,11 @@ export function validateRrule(input: string): string {
 /**
  * Canonical serialization of validated options (used by validateRrule and
  * tests): fresh RRule around exactly those options — drops cache/dtstart
- * noise and yields rrule's canonical uppercase text (UNTIL becomes
- * YYYYMMDDT000000Z-style UTC datetime, date-only input normalized).
+ * noise and yields rrule's canonical uppercase text. UNTIL keeps the exact
+ * instant of the parsed options: date-only / sub-noon inputs are already
+ * lifted to noon by normalizeRuleInput BEFORE parsing, so the stored form
+ * preserves that lifted time verbatim (e.g. T120000Z); expansion re-runs
+ * normalizeRuleInput at read time, which is idempotent on lifted values.
  */
 function ruleToString(opts: Record<string, unknown>): string {
   const rest = { ...opts }

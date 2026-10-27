@@ -370,7 +370,11 @@ export function describeRrule(rruleText: string | null): string {
       return rruleText
     }
     const byDay = describeByWeekday(parts.get("BYDAY"))
-    base = `${interval === 1 ? "wöchentlich" : `alle ${interval} Wochen`}${byDay}`
+    // " am <Tag>" connector like the MONTHLY ordinal branch — concatenating
+    // produced glued reads ("wöchentlichMo/Mi"); a BYDAY-less WEEKLY keeps
+    // the bare cadence ("wöchentlich")
+    const cadence = interval === 1 ? "wöchentlich" : `alle ${interval} Wochen`
+    base = byDay ? `${cadence} am ${byDay}` : cadence
   } else if (freq === "MONTHLY") {
     const byDay = parts.get("BYDAY")
     const byMonthDay = parts.get("BYMONTHDAY")

@@ -44,8 +44,10 @@ EXDATE/RDATE` as well as multi-line/`DTSTART:` pastes (dtstart is a
    noon stay) so the named end day stays included — also applied at
    read time, lifting pre-fix stored rules. The occurrence-productivity
    check on create/update walks the same bounded next-date ladder as
-   `nextOccurrenceDate` (~70 y) — sparse-but-live rules (leap-day yearly,
-   large INTERVAL) are creatable, dead ones are rejected.
+   `nextOccurrenceDate` (five rungs up to 147 000 days — the closing rung
+   spans one Gregorian 400-year cycle, the widest possible gap between
+   consecutive occurrences of any live rule) — sparse-but-live rules
+   (leap-day yearly, large INTERVAL) are creatable, dead ones are rejected.
 
 3. **Read-time matching, zero storage.** Each occurrences request pairs
    planned occurrences with real `Gebucht` rows of the same user (± the

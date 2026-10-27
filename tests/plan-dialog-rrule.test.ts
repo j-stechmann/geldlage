@@ -426,6 +426,21 @@ describe("describeRrule BY* narrowing falls back to the raw rule", () => {
     )
   })
 
+  it("plain WEEKLY keeps the humanized wording (spacing + connector)", () => {
+    // regression: the weekday list used to be glued to the cadence
+    // ("wöchentlichMo/Mi", "alle 2 WochenFr") — the MONTHLY branch's
+    // " am " connector applies here too, and a BYDAY-less rule keeps
+    // the bare cadence
+    expect(describeRrule("FREQ=WEEKLY;BYDAY=MO,WE")).toBe(
+      "wöchentlich am Mo/Mi"
+    )
+    expect(describeRrule("FREQ=WEEKLY;INTERVAL=2;BYDAY=FR")).toBe(
+      "alle 2 Wochen am Fr"
+    )
+    expect(describeRrule("FREQ=WEEKLY")).toBe("wöchentlich")
+    expect(describeRrule("FREQ=WEEKLY;INTERVAL=2")).toBe("alle 2 Wochen")
+  })
+
   it("MONTHLY with BYMONTH is never 'monatlich'", () => {
     // MONTHLY;BYMONTH=2;BYMONTHDAY=1 = once a year (February 1st only)
     expect(describeRrule("FREQ=MONTHLY;BYMONTH=2;BYMONTHDAY=1")).toBe(
