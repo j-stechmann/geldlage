@@ -115,6 +115,24 @@ describe("validateRrule", () => {
     expectRuleError("DTSTART:20260101T120000Z\nRRULE:FREQ=DAILY;COUNT=5")
   })
 
+  it("rejects an inline DTSTART part (dtstart lives in the plan's column)", () => {
+    // a semicolon-inline ";DTSTART=…" parses into origOptions as a real Date
+    // and must fail loudly like every other unsupported part — a rule that
+    // silently dropped it would read back anchored somewhere else (the
+    // line-form is covered by the test above)
+    expectRuleError(
+      "FREQ=DAILY;DTSTART=19970101T000000Z",
+      "unsupported part: dtstart"
+    )
+    expectRuleError("FREQ=DAILY;DTSTART=19970101T000000Z;BYMONTHDAY=1")
+    // prototype defaults (dtstart/tzid absent) never trip the provided-part
+    // check: plain rules stay accepted
+    expect(() => validateRrule("FREQ=DAILY")).not.toThrow()
+    expect(() =>
+      validateRrule("FREQ=DAILY;UNTIL=20270305T120000Z")
+    ).not.toThrow()
+  })
+
   it("rejects oversized rule texts; the maximal legit rule stays accepted", () => {
     // the allowlisted vocabulary tops out at a few hundred chars — beyond
     // the cap the text is payload smuggled through the RRULE parser, not

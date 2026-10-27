@@ -166,7 +166,10 @@ export function validateRrule(input: string): string {
   let rule: RRule
   try {
     const parsed = rrulestr(raw, { forceset: false })
-    // DTSTART/EXDATE lines or multi-rule input parse into a set — reject.
+    // Belt-and-suspenders: the string guards above already reject line-based
+    // RFC texts (DTSTART/EXDATE/RDATE) and multi-rule input; anything that
+    // still parses into a set is rejected here. An inline ";DTSTART=…" part
+    // parses into an RRule and is caught further down as an unsupported part.
     if (!(parsed instanceof RRule)) {
       throw new RuleValidationError("single rule only")
     }
@@ -177,13 +180,17 @@ export function validateRrule(input: string): string {
   }
 
   const opts = rule.origOptions as Record<string, unknown>
-  // origOptions carries prototype defaults (dtstart/tzid/cache, value
-  // undefined) on every instance — only ACTUALLY provided parts count
+  // origOptions carries prototype defaults (cache/tzid, value undefined) on
+  // every instance — only ACTUALLY provided parts count. dtstart is NOT
+  // exempted: rrule parses an inline ";DTSTART=…" into a real Date there, and
+  // it must fail loudly like every other unsupported part — a dropped DTSTART
+  // would otherwise read back as a plan anchored somewhere else (dtstart
+  // lives in the plan's own column).
   const provided = Object.keys(opts).filter(
     (k) =>
       opts[k] !== undefined &&
       opts[k] !== null &&
-      !["cache", "dtstart", "tzid"].includes(k)
+      !["cache", "tzid"].includes(k)
   )
   const unknown = provided.filter((k) => !ALLOWED_PARTS.has(k))
   if (unknown.length > 0) {
