@@ -327,8 +327,10 @@ export function CashflowChart({
  * its anchor overlaps real dates and the merged line would run backwards.
  * With NO history at all (fresh user: no snapshots, no bookings) the dashed
  * projection stands alone from today so planned-only balances still render.
+ * Exported for the balance-merge regression tests (connection-point
+ * semantics).
  */
-function mergeBalance(
+export function mergeBalance(
   hist: AnalyticsResponse["balanceTimeline"],
   forecast: ForecastResult | undefined
 ): Array<{ date: string; balance: number | null; projected: number | null }> {
@@ -345,7 +347,19 @@ function mergeBalance(
   const last = points[points.length - 1]
   if (last && last.date > forecast.today) return points
   if (last) {
-    last.projected = last.balance
+    // connect the dashed series at the history's end. When the history ends
+    // ON today, anchor at the projection's own today point: it already folds
+    // the planned occurrences dated today into its baseline, while
+    // last.balance is booked-only — starting the dashed line at last.balance
+    // would push today's planned movement onto the next plotted date (and,
+    // with no later movement at all, drop it from the line entirely).
+    // last.date < today keeps this untouched: the projection's today point
+    // arrives as its own plotted point there.
+    const todayPoint =
+      last.date === forecast.today
+        ? forecast.projectedBalance.find((p) => p.date === forecast.today)
+        : undefined
+    last.projected = todayPoint ? todayPoint.balanceCents / 100 : last.balance
     for (const p of forecast.projectedBalance) {
       if (p.date <= last.date) continue
       points.push({

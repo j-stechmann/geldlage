@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { waitFor } from "@testing-library/react"
 import { TransactionsTable } from "@/components/transactions-table"
-import { EMPTY_FILTERS } from "@/lib/filters"
+import { EMPTY_FILTERS, type TableFilters } from "@/lib/filters"
 import { renderWithQuery, stubFetch, stubLocalStorage } from "./helpers-dom"
 
 const ROW_A = {
@@ -33,6 +33,9 @@ const ROW_B = {
   amountCents: -100_00,
   purpose: "Sonstiges",
 }
+
+/** A non-default listing context (the deep link almost always clears these). */
+const FILTERED: TableFilters = { ...EMPTY_FILTERS, q: "sonst" }
 
 beforeEach(() => {
   stubLocalStorage()
@@ -186,5 +189,75 @@ describe("TransactionsTable focusTxId (deep link from /planung)", () => {
     )
     expect(header).toBeTruthy()
     expect(header).not.toBeDisabled()
+  })
+
+  it("keeps the focus expansion when the filter mirror lands a commit after the deep link", async () => {
+    // in-place URL transition to ?tx=<id> with the table already mounted: the
+    // page adopts the new URL filters (which the tx param cleared) in an
+    // effect one commit AFTER focusTxId arrives — the listing-context reset
+    // in that trailing commit must not wipe the expansion the focus sync
+    // just applied (the id lookup ignores the listing context entirely)
+    const stub = stubFetch([
+      {
+        url: /\/api\/transactions$/,
+        json: { rows: [ROW_A], total: 1, page: 1, pageCount: 1 },
+      },
+    ])
+    const { rerender, container } = renderWithQuery(
+      <TransactionsTable filters={FILTERED} />
+    )
+    // commit 1: URL switched to ?tx=…, the filter mirror still holds FILTERED
+    rerender(<TransactionsTable filters={FILTERED} focusTxId="tx-1" />)
+    // commit 2: the page's effect adopts the new URL filters
+    rerender(<TransactionsTable filters={EMPTY_FILTERS} focusTxId="tx-1" />)
+    await waitFor(() => {
+      expect(container.textContent).toContain("Mietwerk GmbH")
+    })
+    expect(stub.calls.some((c) => c.url.includes("id=tx-1"))).toBe(true)
+    expect(container.querySelector("tr[data-focus]")).not.toBeNull()
+    expect(document.getElementById("tx-details-tx-1")).not.toBeNull()
+  })
+
+  it("clears the focus expansion when the tx param drops", async () => {
+    stubFetch([
+      {
+        url: /\/api\/transactions$/,
+        json: { rows: [ROW_A], total: 1, page: 1, pageCount: 1 },
+      },
+    ])
+    const { rerender, container } = renderWithQuery(
+      <TransactionsTable filters={EMPTY_FILTERS} focusTxId="tx-1" />
+    )
+    await waitFor(() => {
+      expect(document.getElementById("tx-details-tx-1")).not.toBeNull()
+    })
+    rerender(<TransactionsTable filters={EMPTY_FILTERS} focusTxId={null} />)
+    expect(container.querySelector("tr[data-focus]")).toBeNull()
+    expect(document.getElementById("tx-details-tx-1")).toBeNull()
+  })
+
+  it("leaves no stale expansion when a filter edit exits focus mode across its two commits", async () => {
+    // a filter edit lands in two commits locally: the filter state changes
+    // first (the tx param still on the URL — the reset is gated while
+    // focused), then the URL commit drops the tx param, which must clear the
+    // focused row's expansion so it cannot leak into the following listing
+    stubFetch([
+      {
+        url: /\/api\/transactions$/,
+        json: { rows: [ROW_A], total: 1, page: 1, pageCount: 1 },
+      },
+    ])
+    const { rerender, container } = renderWithQuery(
+      <TransactionsTable filters={EMPTY_FILTERS} focusTxId="tx-1" />
+    )
+    await waitFor(() => {
+      expect(document.getElementById("tx-details-tx-1")).not.toBeNull()
+    })
+    // commit 1: filter state changed, URL (and tx param) not yet committed
+    rerender(<TransactionsTable filters={FILTERED} focusTxId="tx-1" />)
+    // commit 2: the URL commit drops the tx param
+    rerender(<TransactionsTable filters={FILTERED} focusTxId={null} />)
+    expect(container.querySelector("tr[data-focus]")).toBeNull()
+    expect(document.getElementById("tx-details-tx-1")).toBeNull()
   })
 })

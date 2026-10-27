@@ -196,7 +196,13 @@ export function TransactionsTable({
     setPage(1)
   }
 
-  // collapse the detail row when the listing context changes
+  // collapse the detail row when the listing context changes — but NOT while
+  // focus mode is active: the id lookup ignores page/sort/filters entirely,
+  // and a deep link to ?tx=<id> almost always clears the filters, whose
+  // mirrored state the page adopts in an effect one commit AFTER the focus
+  // param arrives (the table stays mounted for in-place URL transitions).
+  // The ungated reset would wipe in that trailing commit the expansion the
+  // focus sync below just applied.
   const expandContext = React.useMemo(
     () => [page, sort.key, sort.desc, filterKey].join("|"),
     [page, sort, filterKey]
@@ -205,17 +211,20 @@ export function TransactionsTable({
     React.useState(expandContext)
   if (lastExpandContext !== expandContext) {
     setLastExpandContext(expandContext)
-    setExpandedId(null)
+    if (!focusId) setExpandedId(null)
   }
 
   // deep-link focus (from the /planung calendar): expand the row during
-  // render — after a concurrent context reset above, so the focus survives
-  // the deep link's own filter change. lastFocus init null so the FIRST
-  // value also fires (mount is a legitimate focus event).
+  // render — after the context reset above (gated off while focused).
+  // lastFocus init null so the FIRST value also fires (mount is a legitimate
+  // focus event); a transition TO null (a filter edit dropping the tx param)
+  // clears the expansion here so the previously focused row cannot leak
+  // into the following listing.
   const [lastFocusTxId, setLastFocusTxId] = React.useState<string | null>(null)
   if (focusId !== lastFocusTxId) {
     setLastFocusTxId(focusId)
     if (focusId) setExpandedId(focusId)
+    else setExpandedId(null)
   }
 
   const { data, isLoading, isFetching, isError, refetch } =
