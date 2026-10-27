@@ -59,7 +59,12 @@ Indexes: `planned_transactions_user_status_idx` `(user_id, status)` and
   walks a five-rung horizon ladder (400 → 147 000 days — the closing rung
   spans one Gregorian 400-year cycle) so unbounded rules can never scan
   forever while sparse live rules (large INTERVAL, 5th-weekday ordinals,
-  leap-day yearly) still report their real next date.
+  leap-day yearly) still report their real next date. Rung window ends
+  clamp at `9999-12-31` (the last storable ISO date) — an unclamped end
+  would cross into toISOString's extended-year form, truncate into an
+  Invalid Date and make every rung answer "no occurrences"; occurrences
+  beyond that bound are unrepresentable as ISO dates and honestly read as
+  none.
 
 ## Occurrence matching (`lib/planning/matching.ts`)
 
@@ -121,7 +126,7 @@ writes ([api.md](api.md)):
 | Route                                              | Purpose                                                                                                                                                                                                                                                                                                                                                                |
 | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET /api/plans`                                   | list + `nextDueDate` per plan                                                                                                                                                                                                                                                                                                                                          |
-| `POST /api/plans`                                  | create; validates `amountCents ≠ 0`, `dtstart` ISO (not before 1900), RRULE allowlist + first occurrence within the bounded next-date ladder (five rungs, closing rung ≥ one Gregorian 400-year cycle — sparse-but-live rules like leap-day yearly pass), ownership of account/category                                                                                |
+| `POST /api/plans`                                  | create; validates `amountCents ≠ 0`, `dtstart` ISO (not before 1900), RRULE allowlist + first occurrence within the bounded next-date ladder (five rungs, closing rung ≥ one Gregorian 400-year cycle — sparse-but-live rules like leap-day yearly pass; rung ends clamp at the last storable ISO date `9999-12-31`), ownership of account/category                    |
 | `PATCH /api/plans/[id]`                            | partial update; dtstart/rule changes re-check occurrence productivity                                                                                                                                                                                                                                                                                                  |
 | `DELETE /api/plans/[id]`                           | delete (no other data references plans)                                                                                                                                                                                                                                                                                                                                |
 | `GET /api/plans/occurrences?from&to&accountId`     | expanded window + match states; window ≤ 400 days apart _and_ within ±60 months of today (rrule expansion walks from dtstart occurrence-by-occurrence — no seek — so far windows cost CPU linear in that distance)                                                                                                                                                     |

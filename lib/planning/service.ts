@@ -503,12 +503,17 @@ export function listOccurrences(
   occurrences.sort(
     (a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id)
   )
-  enrichWithCategories(occurrences)
+  enrichWithCategories(occurrences, userId)
   enrichWithMatches(occurrences, userId, accountId, w)
   return occurrences
 }
 
-function enrichWithCategories(occurrences: PlanOccurrence[]) {
+/**
+ * Resolve occurrence category names/colors — user-scoped like every other
+ * read: category ids are globally unique, but scoping keeps the
+ * enrichment dependent on the write-path ownership guarantees alone.
+ */
+function enrichWithCategories(occurrences: PlanOccurrence[], userId: number) {
   const db = getDb()
   const ids = [
     ...new Set(
@@ -525,7 +530,7 @@ function enrichWithCategories(occurrences: PlanOccurrence[]) {
       color: categories.color,
     })
     .from(categories)
-    .where(inArray(categories.id, ids))
+    .where(and(inArray(categories.id, ids), eq(categories.userId, userId)))
     .all()
   const byId = new Map(rows.map((r) => [r.id, r]))
   for (const o of occurrences) {
@@ -823,7 +828,9 @@ export function computeForecast(
           color: categories.color,
         })
         .from(categories)
-        .where(inArray(categories.id, catIds))
+        .where(
+          and(inArray(categories.id, catIds), eq(categories.userId, userId))
+        )
         .all()
     : []
   const catById = new Map(catRows.map((r) => [r.id, r]))

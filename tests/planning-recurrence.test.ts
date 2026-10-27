@@ -400,6 +400,38 @@ describe("nextOccurrenceDate", () => {
       )
     ).toBeNull()
   })
+  it("clamps the ladder at the last storable ISO date (year-10000 truncation)", () => {
+    // toISOString() switches to the extended six-digit form at year ≥ 10000
+    // ("+010001-…"); the old slice(0,10) rung ends truncated into strings
+    // whose parsed Date is invalid — rrule.between threw, every rung
+    // answered "no occurrences", and a LIVE plan on a late-9999 dtstart
+    // read as dead (and failed creation via the occurrence check)
+    expect(nextOccurrenceDate("9999-06-15", "FREQ=DAILY", "9999-06-15")).toBe(
+      "9999-06-15"
+    )
+    expect(nextOccurrenceDate("9999-12-31", "FREQ=DAILY", "2026-10-26")).toBe(
+      "9999-12-31"
+    )
+    expect(
+      nextOccurrenceDate(
+        "9999-01-01",
+        "FREQ=MONTHLY;BYMONTHDAY=15",
+        "9999-06-16"
+      )
+    ).toBe("9999-07-15")
+  })
+  it("answers null when the only occurrences lie beyond the storable range", () => {
+    // the real next occurrence (10000-06-14) cannot be handed back as a
+    // 4-digit ISO date; the clamped rungs must stop widening instead of
+    // re-scanning the identical window for the remaining rungs
+    expect(
+      nextOccurrenceDate(
+        "9999-06-15",
+        "FREQ=YEARLY;BYMONTH=6;BYMONTHDAY=14",
+        "9999-06-15"
+      )
+    ).toBeNull()
+  })
 })
 
 describe("isEmptyRule", () => {

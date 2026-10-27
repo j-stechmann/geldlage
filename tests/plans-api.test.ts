@@ -288,6 +288,23 @@ describe("POST /api/plans", () => {
     expect(getStored((await res.json()).plan.id)!.dtstart).toBe("1900-01-01")
   })
 
+  it("accepts a dtstart at the top of the storable range (year-9999 ladder clamp)", async () => {
+    // before the clamp the ladder's window ends crossed into year 10000:
+    // toISOString()'s extended form ("+010001-…") truncated into Invalid
+    // Dates, every rung answered "no occurrence", and a LIVE daily rule on
+    // a 9999-06 dtstart was falsely rejected with invalid_rrule
+    const res = await postPlan(`${BASE}/api/plans`, {
+      amountCents: -100,
+      dtstart: "9999-06-15",
+      rrule: "FREQ=DAILY;COUNT=3",
+    })
+    expect(res.status).toBe(201)
+    const data = (await (await getPlansRow()).json()) as {
+      plans: Array<{ nextDueDate: string | null }>
+    }
+    expect(data.plans[0].nextDueDate).toBe("9999-06-15")
+  })
+
   it("creates a plan (201) with a canonicalized rrule", async () => {
     const res = await postPlan(`${BASE}/api/plans`, {
       amountCents: -950_00,
@@ -518,6 +535,48 @@ describe("GET /api/plans/occurrences", () => {
       otherUserId
     )
     expect((await res.json()).occurrences).toHaveLength(0)
+  })
+
+  it("resolves occurrence categories user-scoped (does not leak foreign names)", async () => {
+    // Enrichment looks categories up with the caller's scope on top of the
+    // id — a plan row referencing a FOREIGN category id (only insertable
+    // directly against the write-path ownership checks) must not render
+    // that foreign category's name/color, but stay "ohne Kategorie"
+    const foreignCategoryId = db
+      .insert(categories)
+      .values({
+        userId: otherUserId,
+        name: "Fremd-Kategorie",
+        nameKey: "fremd-kategorie",
+        language: "de",
+        origin: "manual",
+        color: "#00ff00",
+      })
+      .returning()
+      .get().id
+    // direct insert: the service's ownership check would refuse to create
+    // this plan (category_not_found) — the row models a pre-existing state
+    // the enrichment must not leak through
+    db.insert(plannedTransactions)
+      .values({
+        id: "plan-foreign-category",
+        userId,
+        amountCents: -100,
+        dtstart: "2026-10-02",
+        categoryId: foreignCategoryId,
+      })
+      .run()
+    const res = await getOccurrences("from=2026-10-01&to=2026-10-31")
+    expect(res.status).toBe(200)
+    const { occurrences } = (await res.json()) as {
+      occurrences: Array<{
+        categoryName: string | null
+        categoryColor: string | null
+      }>
+    }
+    expect(occurrences).toHaveLength(1)
+    expect(occurrences[0]!.categoryName).toBeNull()
+    expect(occurrences[0]!.categoryColor).toBeNull()
   })
 })
 

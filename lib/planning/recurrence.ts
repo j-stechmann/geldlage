@@ -49,6 +49,27 @@ function isoOf(date: Date): string {
   return date.toISOString().slice(0, 10)
 }
 
+/**
+ * Highest storable ISO date. All dates (dtstart, windows, expansion output)
+ * are plain 4-digit-year "YYYY-MM-DD"; for instants at/after year 10000
+ * toISOString() switches to the extended six-digit form ("+010001-…"),
+ * whose slice-based day extraction truncates into strings noonUtc cannot
+ * parse (Invalid Date → rrule.between throws). dtstart above this bound
+ * is already rejected by validation, so occurrence horizons clamp here.
+ */
+const MAX_ISO_DATE = "9999-12-31"
+
+/** Rung window end, clamped at the last storable ISO date. */
+function ladderWindowEnd(
+  y: number,
+  m: number,
+  d: number,
+  days: number
+): string {
+  const end = new Date(Date.UTC(y, m - 1, d + days, 12))
+  return end.getUTCFullYear() > 9999 ? MAX_ISO_DATE : isoOf(end)
+}
+
 /** rrule's numeric freq constants, allowlisted (SECONDLY/MINUTELY rejected). */
 const ALLOWED_FREQ: Record<string, number> = {
   DAILY: RRule.DAILY,
@@ -318,6 +339,15 @@ export function expandOccurrenceDates(
  * days, e.g. BYMONTH=2;BYMONTHDAY=29 with INTERVAL=100 anchored on a
  * century-leap sequence: 2000 → 2400); dense rules are found on the first
  * rung, only the pathological sparse cadences pay the full ladder.
+ *
+ * Rung ends clamp at MAX_ISO_DATE: an unclamped end would cross into the
+ * extended-year form and truncate into an Invalid Date (between throws →
+ * every rung answers "no occurrences" — a live late-9999 plan would read
+ * as dead). Once clamped, rungs cannot widen the window anymore, so a
+ * repeated end short-circuits to null instead of re-scanning the same
+ * span for the remaining rungs; an occurrence beyond the storable range
+ * cannot be handed back as a 4-digit ISO date, making null the honest
+ * answer there.
  */
 const NEXT_HORIZON_LADDER = [400, 1600, 6400, 25_600, 147_000]
 
@@ -328,8 +358,11 @@ export function nextOccurrenceDate(
 ): string | null {
   const from = dtstart > afterIso ? dtstart : afterIso
   const [y, m, d] = from.split("-").map(Number)
+  let prevTo: string | null = null
   for (const horizonDays of NEXT_HORIZON_LADDER) {
-    const to = isoOf(new Date(Date.UTC(y, m - 1, d + horizonDays, 12)))
+    const to = ladderWindowEnd(y, m, d, horizonDays)
+    if (to === prevTo) return null
+    prevTo = to
     const dates = expandOccurrenceDates(dtstart, rruleText, { from, to }, 1)
     if (dates.length > 0) return dates[0]
   }

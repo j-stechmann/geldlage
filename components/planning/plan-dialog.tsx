@@ -764,7 +764,11 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
       let cursor = dtstart
       for (let i = 0; i < 3; i++) {
         const next = nextOccurrenceDate(dtstart, effective.rrule, cursor)
-        if (next === null) break
+        // A repeat can only mean the cursor left the storable 4-digit year
+        // range (next at 9999-12-31 → isoDatePlus crosses into the extended
+        // "+010001-…" form): the ladder clamps at the same boundary and
+        // re-answers the unchanged date — stop instead of printing it again
+        if (next === null || next === dates[dates.length - 1]) break
         dates.push(next)
         cursor = isoDatePlus(next, 1)
       }

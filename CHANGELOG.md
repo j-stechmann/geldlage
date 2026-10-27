@@ -121,7 +121,20 @@
   rendering an empty pattern select, and "5." (5th weekday) became a
   picker item so stored 5FR plans display their pattern (round-trip and
   faithfulness-gate tested); planning.md's next-date ladder description
-  matches the shipped five rungs (400 → 147 000 days).
+  matches the shipped five rungs (400 → 147 000 days); the next-date
+  ladder clamps its rung ends at the last storable ISO date (`9999-12-31`)
+  — for late-9999 dtstarts the unclamped ends crossed into toISOString's
+  extended-year form (`+010001-…`), truncated into Invalid Dates and made
+  every rung answer "no occurrences" (live rules were falsely rejected at
+  creation; occurrences beyond the storable range now honestly read as
+  none, and the rungs stop widening once clamped — regression-tested),
+  and the plan dialog's next-dates preview stops on an unchanged date
+  instead of repeating the same chip when its cursor leaves the storable
+  range; occurrence category enrichment (occurrences route + forecast
+  planned categories) is user-scoped like every other planning read —
+  category ids are globally unique so today's rows are unaffected, but the
+  name/color resolution no longer leans solely on the write-path
+  ownership checks.
 
 ## v1.20.0
 
