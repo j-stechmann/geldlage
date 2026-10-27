@@ -171,6 +171,26 @@ export function assertArgsObject(args: unknown): Record<string, unknown> {
 }
 
 /**
+ * list_plans takes NO arguments (its schema's properties is empty) — but the
+ * model may still pass a key ({"status": "active"} is plausible given how
+ * prominent status is across the other plan tools). Silent acceptance would
+ * return the UNFILTERED list, which reads back as "your active plans" — the
+ * same silently-ignored-field failure planInputFromArgs rejects loudly on
+ * the write side. Plain calls stay valid: the executor folds a missing args
+ * JSON into {}, and null/undefined count as no args as well.
+ */
+export function assertNoArgs(args: unknown): void {
+  if (args === null || args === undefined) return
+  assertArgsObject(args)
+  const keys = Object.keys(args)
+  if (keys.length > 0) {
+    throw new Error(
+      `unknown field${keys.length > 1 ? "s" : ""}: ${keys.join(", ")} (list_plans takes no arguments)`
+    )
+  }
+}
+
+/**
  * Extracts and validates the plan id from update/delete args — presence
  * and stringness only (the service resolves anything else as not_found,
  * which the tool surfaces with the id-lookup hint).

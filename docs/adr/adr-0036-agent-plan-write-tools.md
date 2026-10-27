@@ -60,7 +60,10 @@ domain: no other table references them, and occurrences never enter
    `PLAN_LIST_MAX = 15`, newest first, free texts clipped, notes omitted)
    plus `next_due_date`, sized to stay inside the ~4000-char tool-result
    cap (truncateToolResult) with `limited`/`total` flags pointing the
-   model at `query_data` for anything wider.
+   model at `query_data` for anything wider. Unknown args are rejected
+   like on the writers: it takes no arguments, and a silently accepted
+   filter attempt (e.g. `{"status": "active"}`) would hand back the
+   unfiltered list, which the model could report as a filtered result.
 
 6. **Deletes stay prompt-guarded, not token-guarded.** The system prompt
    gains a plan block (registry-gated on `list_plans`, so the rules load

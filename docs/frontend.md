@@ -317,7 +317,12 @@ bars. The toggle row shows the projected horizon balance. Content filters
 (q/type/category/…) stay out of the money anchored on snapshots — same
 rationale as the balance ([analytics.md](analytics.md)). A failed forecast
 read under an active toggle surfaces the ErrorState + retry pattern
-instead of reading as silently "no plans".
+instead of reading as silently "no plans". The forecast hook serves no
+cross-account placeholder data: switching the account filter blanks the
+projection figures and chart overlay until the differently scoped read
+lands, instead of briefly attributing the previous account's numbers to
+the new account (the calendar's stale-while-loading visibility is
+unaffected).
 
 ## Import lifecycle components
 

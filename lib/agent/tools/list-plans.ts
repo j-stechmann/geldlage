@@ -1,6 +1,6 @@
 import type { AgentTool } from "@/lib/agent/types"
 import { listPlans } from "@/lib/planning/service"
-import { planSummaries } from "./plan-shared"
+import { assertNoArgs, planSummaries } from "./plan-shared"
 
 /**
  * The `list_plans` tool (ADR-0036): the R of the plan quartet where the
@@ -23,6 +23,7 @@ export const list_plans = {
     additionalProperties: false,
   },
   async execute(args: unknown, ctx): Promise<unknown> {
+    assertNoArgs(args)
     return planSummaries(listPlans(ctx.uid))
   },
 } satisfies AgentTool

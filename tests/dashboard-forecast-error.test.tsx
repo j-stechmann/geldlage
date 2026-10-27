@@ -8,6 +8,7 @@ vi.mock("next/navigation", () => ({
 }))
 
 import DashboardPage from "@/app/page"
+import { useForecast } from "@/components/planning/api"
 import {
   renderWithQuery,
   stubFetch,
@@ -20,6 +21,10 @@ import {
  * forecast read (/planung's ErrorState + retry pattern). A failed toggle
  * once rendered as charts silently without the overlay — visually
  * identical to "no plans exist".
+ *
+ * The forecast hook additionally re-keys on the account filter; it must
+ * NOT serve cross-account placeholder data — the previous account's
+ * projection figures must never flash briefly under another account.
  */
 
 const OK_ANALYTICS = {
@@ -122,5 +127,56 @@ describe("dashboard forecast toggle failure surface", () => {
     expect(
       stub.calls.filter((c) => c.url.split("?")[0] === "/api/plans/forecast")
     ).toHaveLength(1)
+  })
+})
+
+describe("useForecast account switch (no cross-account placeholder)", () => {
+  // distinguished by startingBalanceCents (all-accounts vs. account 1)
+  const FORECAST_A = { ...OK_FORECAST.forecast, startingBalanceCents: 0 }
+  const FORECAST_B = { ...OK_FORECAST.forecast, startingBalanceCents: 42_000 }
+
+  function Probe({
+    accountId,
+    log,
+  }: {
+    accountId: number | null
+    log: Array<unknown>
+  }) {
+    const query = useForecast(true, 12, accountId)
+    log.push(query.data ?? null)
+    return null
+  }
+
+  it("an account-filter switch never shows the previous account's projection while the new one loads", async () => {
+    // FIFO script: the first forecast call (no accountId) serves A; the
+    // re-keyed call (accountId=1) serves B
+    const stub = stubFetch([
+      {
+        url: /\/api\/plans\/forecast$/,
+        json: { forecast: FORECAST_A },
+        once: true,
+      },
+      { url: /\/api\/plans\/forecast$/, json: { forecast: FORECAST_B } },
+    ])
+    const log: Array<unknown> = []
+    const { rerender } = renderWithQuery(<Probe accountId={null} log={log} />)
+
+    await waitFor(() => {
+      expect(log.at(-1)).toEqual(FORECAST_A)
+    })
+
+    const switchIndex = log.length
+    rerender(<Probe accountId={1} log={log} />)
+
+    // the re-keyed query has no own data yet — every render between the
+    // switch and B's arrival must carry NO projection (especially not A)
+    await waitFor(() => {
+      expect(log.at(-1)).toEqual(FORECAST_B)
+    })
+    expect(log.slice(switchIndex)).not.toContainEqual(FORECAST_A)
+    // B really was fetched for the new account scope
+    expect(
+      stub.calls.some((c) => c.url.split("?")[1]?.includes("accountId=1"))
+    ).toBe(true)
   })
 })

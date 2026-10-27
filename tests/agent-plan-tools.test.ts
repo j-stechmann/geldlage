@@ -173,6 +173,37 @@ describe("list_plans", () => {
     expect(res.plans[0]).not.toHaveProperty("notes")
     expect(res.plans[0]).not.toHaveProperty("created_at")
   })
+
+  it("rejects unknown args instead of silently answering the unfiltered list", async () => {
+    // a {"status": "active"} filter attempt must NOT come back as "these
+    // are your active plans" over ALL plans (same loud unknown-field rule
+    // as the write tools)
+    seedPlan({ userId })
+    await expect(
+      list_plans.execute({ status: "active" }, ctx(userId))
+    ).rejects.toThrow(/unknown field: status \(list_plans takes no arguments\)/)
+    // the rejected call must not have produced a result payload
+    expect(db.select().from(plannedTransactions).all().length).toBe(1)
+  })
+
+  it("rejects non-object args payloads", async () => {
+    await expect(list_plans.execute("active", ctx(userId))).rejects.toThrow(
+      "invalid args"
+    )
+    await expect(list_plans.execute(["active"], ctx(userId))).rejects.toThrow(
+      "invalid args"
+    )
+  })
+
+  it("plain no-args calls stay valid ({}, null, undefined)", async () => {
+    seedPlan({ userId })
+    for (const args of [{}, null, undefined]) {
+      const res = (await list_plans.execute(args, ctx(userId))) as {
+        total: number
+      }
+      expect(res.total).toBe(1)
+    }
+  })
 })
 
 describe("create_plan", () => {

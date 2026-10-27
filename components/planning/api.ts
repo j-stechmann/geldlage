@@ -224,7 +224,13 @@ export function useForecast(
       return (await res.json()).forecast as ForecastResult
     },
     enabled,
-    placeholderData: (prev) => prev,
+    // NO placeholderData, unlike the calendar hooks: this query re-keys on
+    // the account filter, and a placeholder would keep the PREVIOUS
+    // account's projection on screen (header figure, chart overlay) while
+    // the differently scoped one loads — concrete money figures must never
+    // briefly belong to another account. Same-key refetches (plan mutations
+    // → invalidatePlans) already keep the query's own data, and the
+    // calendar's stale-while-loading visibility is unaffected.
   })
 }
 

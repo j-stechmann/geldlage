@@ -151,7 +151,15 @@
   mutated the sort that applies again after leaving focus mode; the owned
   `components/ui/calendar.tsx` + `ui/popover.tsx` copies import `cn` from
   `@/lib/utils` like the rest of the owned code (the `cn` dependency
-  remains for the lint-ignored vendored reui tree).
+  remains for the lint-ignored vendored reui tree); `list_plans` rejects
+  unknown arguments loudly like the write tools instead of silently
+  answering the unfiltered list (a `{"status": "active"}` attempt would
+  have read back as "your active plans" — plain no-args calls stay valid);
+  the forecast hook serves no cross-account placeholder data — with "Geplant
+  einblenden" on, an account-filter switch now blanks the projection
+  figures/overlay until the differently scoped read lands instead of
+  keeping the previous account's numbers on screen (regression-tested; the
+  calendar's stale-while-loading visibility is unchanged).
 
 ## v1.20.0
 

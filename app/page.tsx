@@ -40,7 +40,10 @@ export default function DashboardPage() {
 
   // the planned-vs-actual overlay (ADR-0035): honors the account filter the
   // same way the balance does — content filters are out of scope for money
-  // anchored on absolute snapshots
+  // anchored on absolute snapshots. useForecast serves no cross-key
+  // placeholder, so the figures/overlay stay blank while a differently
+  // scoped projection loads instead of showing the previous account's
+  // numbers.
   const forecastQuery = useForecast(
     forecastOn,
     FORECAST_MONTHS,
