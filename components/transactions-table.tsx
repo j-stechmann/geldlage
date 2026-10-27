@@ -80,17 +80,21 @@ function SortHeader({
   sortKey,
   sort,
   onToggle,
+  disabled = false,
 }: {
   label: string
   sortKey: SortKey
   sort: { key: SortKey; desc: boolean }
   onToggle: (key: SortKey) => void
+  /** deep-link focus mode: the id lookup ignores every sort — dead control */
+  disabled?: boolean
 }) {
   const active = sort.key === sortKey
   return (
     <button
-      className={`flex items-center gap-1 font-medium ${active ? "text-foreground" : "hover:text-foreground"}`}
+      className={`flex items-center gap-1 font-medium disabled:cursor-not-allowed disabled:opacity-50 ${active ? "text-foreground" : "hover:text-foreground"}`}
       onClick={() => onToggle(sortKey)}
+      disabled={disabled}
     >
       {label}
       {active ? (
@@ -319,6 +323,7 @@ export function TransactionsTable({
                     sortKey="bookingDate"
                     sort={sort}
                     onToggle={toggleSort}
+                    disabled={focusMode}
                   />
                 </TableHead>
               )}
@@ -329,6 +334,7 @@ export function TransactionsTable({
                     sortKey="valueDate"
                     sort={sort}
                     onToggle={toggleSort}
+                    disabled={focusMode}
                   />
                 </TableHead>
               )}
@@ -339,6 +345,7 @@ export function TransactionsTable({
                     sortKey="status"
                     sort={sort}
                     onToggle={toggleSort}
+                    disabled={focusMode}
                   />
                 </TableHead>
               )}
@@ -349,6 +356,7 @@ export function TransactionsTable({
                     sortKey="payee"
                     sort={sort}
                     onToggle={toggleSort}
+                    disabled={focusMode}
                   />
                 </TableHead>
               )}
@@ -368,6 +376,7 @@ export function TransactionsTable({
                     sortKey="amountCents"
                     sort={sort}
                     onToggle={toggleSort}
+                    disabled={focusMode}
                   />
                 </TableHead>
               )}

@@ -203,8 +203,11 @@ user-scoped, ignores every other filter/pagination state, a miss is an
 empty page, never a leak) and shows exactly that row — expanded,
 highlighted (`data-focus` outline) and scrolled to on first sight
 (render-time state adjustment with the value-based reset preserved; the
-mount count fires too). Any filter edit drops the `tx` param and returns
-the table to normal browsing. Regression-tested in
+mount count fires too). The state's dead controls stay visibly off: the
+sort dropdown, the pager (reading "Fokus" instead of a stale "N / 1") and
+the column-header sort buttons — a header click would only mutate the sort
+that resumes after leaving focus mode. Any filter edit drops the `tx`
+param and returns the table to normal browsing. Regression-tested in
 [tests/transactions-table-focus.test.tsx](../tests/transactions-table-focus.test.tsx)
 (asserts the id query itself is what fetched the row).
 

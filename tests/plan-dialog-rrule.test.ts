@@ -334,3 +334,71 @@ describe("describeRrule plain weekday + BYMONTH (yearly)", () => {
     )
   })
 })
+
+describe("describeRrule BY* narrowing falls back to the raw rule", () => {
+  // All shapes below are only reachable via the raw "RRULE (erweitert)"
+  // field (the builder cannot produce them), but validation accepts them —
+  // so a stored plan can exist and its Wiederholung badge must describe
+  // what the engine actually fires, never a bare frequency word.
+
+  it("DAILY with BYDAY/BYMONTHDAY/BYMONTH is never 'täglich'", () => {
+    // engine-verified: DAILY;BYDAY=MO,WE fires Weds+Mons only (werktags)
+    expect(describeRrule("FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR")).toBe(
+      "FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR"
+    )
+    // DAILY;BYMONTHDAY=1 = the 1st of every month, not every day
+    expect(describeRrule("FREQ=DAILY;BYMONTHDAY=1")).toBe(
+      "FREQ=DAILY;BYMONTHDAY=1"
+    )
+    // DAILY;BYMONTH=7 fires only in July — in a leap-from-1900 table this
+    // plan stays silent for 11 months of every year
+    expect(describeRrule("FREQ=DAILY;BYMONTH=7")).toBe("FREQ=DAILY;BYMONTH=7")
+    expect(describeRrule("FREQ=DAILY;INTERVAL=2;BYDAY=MO")).toBe(
+      "FREQ=DAILY;INTERVAL=2;BYDAY=MO"
+    )
+  })
+
+  it("plain DAILY keeps the compact wording", () => {
+    // the escape must not swallow the builder-producible shapes
+    expect(describeRrule("FREQ=DAILY")).toBe("täglich")
+    expect(describeRrule("FREQ=DAILY;INTERVAL=3")).toBe("alle 3 Tage")
+  })
+
+  it("WEEKLY with BYMONTHDAY/BYMONTH is never 'wöchentlich'", () => {
+    // engine-honored despite being RFC-forbidden on WEEKLY: fires on the
+    // 15th of EVERY month — the raw rule is the only truthful badge
+    expect(describeRrule("FREQ=WEEKLY;BYMONTHDAY=15")).toBe(
+      "FREQ=WEEKLY;BYMONTHDAY=15"
+    )
+    // FREQ=WEEKLY;BYMONTH=2 fires on Feb-weekdays only (engine-verified)
+    expect(describeRrule("FREQ=WEEKLY;BYMONTH=2;BYDAY=MO,WE")).toBe(
+      "FREQ=WEEKLY;BYMONTH=2;BYDAY=MO,WE"
+    )
+  })
+
+  it("MONTHLY with BYMONTH is never 'monatlich'", () => {
+    // MONTHLY;BYMONTH=2;BYMONTHDAY=1 = once a year (February 1st only)
+    expect(describeRrule("FREQ=MONTHLY;BYMONTH=2;BYMONTHDAY=1")).toBe(
+      "FREQ=MONTHLY;BYMONTH=2;BYMONTHDAY=1"
+    )
+    expect(describeRrule("FREQ=MONTHLY;BYMONTH=7")).toBe(
+      "FREQ=MONTHLY;BYMONTH=7"
+    )
+    // month filter + weekday pattern also exceeds the compact wording
+    expect(describeRrule("FREQ=MONTHLY;BYMONTH=2,3;BYDAY=MO")).toBe(
+      "FREQ=MONTHLY;BYMONTH=2,3;BYDAY=MO"
+    )
+  })
+
+  it("BYSETPOS escapes BEFORE the COUNT/UNTIL suffix", () => {
+    // the ordinal wording of the BYDAY branches ignores BYSETPOS, which
+    // re-selects from the expanded set: with COUNT=5 the old tail order
+    // returned "am 1. Mo, 5×" for a rule that fires the LAST Monday
+    expect(describeRrule("FREQ=MONTHLY;BYSETPOS=-1;BYDAY=MO;COUNT=5")).toBe(
+      "FREQ=MONTHLY;BYSETPOS=-1;BYDAY=MO;COUNT=5"
+    )
+    expect(describeRrule("FREQ=MONTHLY;BYSETPOS=1;BYMONTHDAY=1,15")).toBe(
+      "FREQ=MONTHLY;BYSETPOS=1;BYMONTHDAY=1,15"
+    )
+  })
+})

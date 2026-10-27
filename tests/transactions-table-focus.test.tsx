@@ -113,4 +113,50 @@ describe("TransactionsTable focusTxId (deep link from /planung)", () => {
     expect(pagerText).toContain("Fokus")
     expect(pagerText).not.toContain("/")
   })
+
+  it("disables the column-header sort buttons in focus mode (dead like the sort dropdown)", async () => {
+    stubFetch([
+      {
+        url: /\/api\/transactions$/,
+        json: { rows: [ROW_A], total: 1, page: 1, pageCount: 1 },
+      },
+    ])
+    const { container } = renderWithQuery(
+      <TransactionsTable filters={EMPTY_FILTERS} focusTxId="tx-1" />
+    )
+    await waitFor(() => {
+      expect(container.textContent).toContain("Mietwerk GmbH")
+    })
+    // header buttons read the visible default columns; the id lookup ignores
+    // every sort, so a header click would silently mutate the sort that only
+    // applies again after leaving focus mode — same dead-control rule as the
+    // disabled sort dropdown
+    for (const label of ["Buchung", "Betrag"]) {
+      const header = Array.from(
+        container.querySelectorAll("thead button")
+      ).find((b) => b.textContent?.trim() === label)
+      expect(header).toBeTruthy()
+      expect(header).toBeDisabled()
+    }
+  })
+
+  it("keeps the column-header sort buttons clickable without a focus param", async () => {
+    stubFetch([
+      {
+        url: /\/api\/transactions$/,
+        json: { rows: [ROW_A, ROW_B], total: 2, page: 1, pageCount: 1 },
+      },
+    ])
+    const { container } = renderWithQuery(
+      <TransactionsTable filters={EMPTY_FILTERS} />
+    )
+    await waitFor(() => {
+      expect(container.textContent).toContain("Mietwerk GmbH")
+    })
+    const header = Array.from(container.querySelectorAll("thead button")).find(
+      (b) => b.textContent?.trim() === "Buchung"
+    )
+    expect(header).toBeTruthy()
+    expect(header).not.toBeDisabled()
+  })
 })

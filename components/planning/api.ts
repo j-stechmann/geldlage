@@ -340,13 +340,41 @@ export function describeRrule(rruleText: string | null): string {
   if (!freq) return rruleText
   let base: string
   if (freq === "DAILY") {
+    // BYDAY/BYMONTHDAY/BYMONTH narrow the daily cadence down to specific
+    // days or months (DAILY;BYDAY=MO,TU,WE,TH,FR fires werktags,
+    // DAILY;BYMONTHDAY=1 fires am 1. jedes Monats — engine-verified) — a
+    // bare "täglich" would hide that narrowing; no compact truthful text:
+    // keep the full raw rule (same escape hatch as BYSETPOS)
+    if (
+      parts.get("BYDAY") !== undefined ||
+      parts.get("BYMONTHDAY") !== undefined ||
+      parts.get("BYMONTH") !== undefined
+    ) {
+      return rruleText
+    }
     base = interval === 1 ? "täglich" : `alle ${interval} Tage`
   } else if (freq === "WEEKLY") {
+    // BYMONTHDAY (honored by the engine despite being RFC-forbidden on
+    // WEEKLY) and BYMONTH shrink the weekly cadence to specific days or
+    // months — "wöchentlich" would hide that; raw rule (same hatch)
+    if (
+      parts.get("BYMONTHDAY") !== undefined ||
+      parts.get("BYMONTH") !== undefined
+    ) {
+      return rruleText
+    }
     const byDay = describeByWeekday(parts.get("BYDAY"))
     base = `${interval === 1 ? "wöchentlich" : `alle ${interval} Wochen`}${byDay}`
   } else if (freq === "MONTHLY") {
     const byDay = parts.get("BYDAY")
     const byMonthDay = parts.get("BYMONTHDAY")
+    const byMonth = parts.get("BYMONTH")
+    // a BYMONTH filter shrinks the monthly cadence to those months only
+    // (MONTHLY;BYMONTH=2;BYMONTHDAY=1 = once a year) — "monatlich am 1."
+    // would hide it; no compact truthful text: keep the full raw rule
+    if (byMonth !== undefined) {
+      return rruleText
+    }
     // BYDAY + BYMONTHDAY intersect per RFC 5545 — no compact truthful text:
     // keep the full raw rule (same escape hatch as the YEARLY branch)
     if (byDay !== undefined && byMonthDay !== undefined) return rruleText
@@ -435,10 +463,14 @@ export function describeRrule(rruleText: string | null): string {
   } else {
     return rruleText
   }
+  // BYSETPOS re-selects from the BY*-expanded set — none of the branches
+  // above account for it, so nothing they composed can be trusted with it
+  // (MONTHLY;BYSETPOS=-1;BYDAY=MO;COUNT=5 must not read "am 1. Mo, 5×"):
+  // escape BEFORE the COUNT/UNTIL suffixing, not after it
+  if (parts.get("BYSETPOS")) return rruleText
   if (parts.get("COUNT")) return `${base}, ${parts.get("COUNT")}×`
   const until = describeUntil(parts.get("UNTIL"))
   if (until) return `${base}, bis ${until}`
-  if (parts.get("BYSETPOS")) return rruleText
   return base
 }
 

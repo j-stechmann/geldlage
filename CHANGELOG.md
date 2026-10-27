@@ -134,7 +134,24 @@
   planned categories) is user-scoped like every other planning read —
   category ids are globally unique so today's rows are unaffected, but the
   name/color resolution no longer leans solely on the write-path
-  ownership checks.
+  ownership checks; the Wiederholung badge stays truthful for
+  raw-RRULE-only shapes where a bare frequency word would hide a narrowing
+  BY\* part — DAILY with BYDAY/BYMONTHDAY/BYMONTH (e.g.
+  `FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR` = werktags, `DAILY;BYMONTHDAY=1` =
+  am 1. jedes Monats — the engine honors both verification-tested, the
+  badge used to read "täglich"), WEEKLY with BYMONTHDAY/BYMONTH
+  (`BYMONTHDAY` is RFC-forbidden on WEEKLY yet engine-honored),
+  MONTHLY with BYMONTH (`MONTHLY;BYMONTH=2;BYMONTHDAY=1` = once a year,
+  badge used to read "monatlich"), and BYSETPOS now escapes before the
+  COUNT/UNTIL suffix is composed onto wording that ignored it
+  (`MONTHLY;BYSETPOS=-1;BYDAY=MO;COUNT=5` must not read "am 1. Mo, 5×") —
+  all verified shapes fall back to the raw rule (regression-tested); the
+  deep-linked transactions focus view also disables its column-header sort
+  buttons — only the sort dropdown was disabled, so a header click silently
+  mutated the sort that applies again after leaving focus mode; the owned
+  `components/ui/calendar.tsx` + `ui/popover.tsx` copies import `cn` from
+  `@/lib/utils` like the rest of the owned code (the `cn` dependency
+  remains for the lint-ignored vendored reui tree).
 
 ## v1.20.0
 
