@@ -1,5 +1,5 @@
 import type { AgentTool } from "@/lib/agent/types"
-import { updatePlan } from "@/lib/planning/service"
+import { updatePlan, type PlanRow } from "@/lib/planning/service"
 import {
   assertArgsObject,
   planIdFromArgs,
@@ -84,16 +84,22 @@ export const update_plan = {
     if (Object.keys(rest).length === 0) {
       throw new Error("invalid args: provide at least one field to update")
     }
+    let plan: PlanRow | null
     try {
-      const plan = updatePlan(ctx.uid, id, planInputFromArgs(rest))
-      if (!plan) {
-        throw new Error(
-          "not_found: no plan with this id (look up ids via list_plans or query_data first)"
-        )
-      }
-      return { plan: planView(plan) }
+      plan = updatePlan(ctx.uid, id, planInputFromArgs(rest))
     } catch (err) {
       rethrowPlanError(err)
     }
+    // not_found is a TOOL-level outcome, decided OUTSIDE the plan-error
+    // normalizer: rethrowPlanError is only for the PlanValidationErrors the
+    // service throws. Throwing the sentinel inside the try would reach that
+    // catch and be re-passed unchanged — correct, but reads like an accident
+    // (a foreign/error path silently routed through the wrong normalizer).
+    if (!plan) {
+      throw new Error(
+        "not_found: no plan with this id (look up ids via list_plans or query_data first)"
+      )
+    }
+    return { plan: planView(plan) }
   },
 } satisfies AgentTool

@@ -352,7 +352,8 @@ export function expandOccurrenceDates(
 }
 
 /**
- * Next occurrence date strictly at-or-after `afterIso`, or null. Scans a
+ * Next occurrence date at-or-after `afterIso` (inclusive — `afterIso` itself
+ * counts), or null. Scans a
  * growing window (first attempt the default horizon, then wider) so an
  * unbounded daily rule cannot scan forever — while a live but *sparse* rule
  * (large INTERVAL, 5th-weekday ordinals, leap-day rules) still finds its

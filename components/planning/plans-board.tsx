@@ -200,6 +200,10 @@ function PlanRowCard({
 
 export function PlansBoard() {
   const plansQuery = usePlans()
+  // unconditional on purpose: the projection card has no toggle here (the
+  // dashboard gates the same query behind "Geplant einblenden") — the board
+  // always shows it, so the fetch is a fixed one-request cost per visit
+  // (months capped at 60 server-side, occurrences bounded by the ladder)
   const forecastQuery = useForecast(true, 12, null)
   const queryClient = useQueryClient()
   const [dialogOpen, setDialogOpen] = React.useState(false)
