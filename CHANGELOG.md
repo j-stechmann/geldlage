@@ -159,7 +159,18 @@
   einblenden" on, an account-filter switch now blanks the projection
   figures/overlay until the differently scoped read lands instead of
   keeping the previous account's numbers on screen (regression-tested; the
-  calendar's stale-while-loading visibility is unchanged).
+  calendar's stale-while-loading visibility is unchanged); the
+  Top-Ausgabenkategorien tooltip no longer prints a noise "0,00 € geplant"
+  line under every row while the forecast toggle is off — the planned bar
+  series now stays unmounted then, because recharts keeps tooltip entries
+  with `value != null` and the rows' 0-value planned field passed that
+  filter (the toggle-on path already normalized 0 → undefined; same
+  series-visibility gate as the cashflow and balance overlays); the
+  deep-linked focus mode trims its `tx` param before the id lookup and the
+  row match — a hand-edited URL with padded whitespace fetched the right
+  row (the server trims) but failed the row.id comparison, leaving the
+  highlight and expansion silently dead (whitespace-only params now fall
+  back to the filter pipeline exactly like the server; regression-tested).
 
 ## v1.20.0
 

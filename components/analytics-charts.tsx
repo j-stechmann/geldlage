@@ -548,6 +548,10 @@ export function TopCategoriesChart({
         categoryId: c.categoryId,
         name: c.name,
         value: c.totalCents / 100,
+        /** 0 = merge-owned field while the forecast is idle; the planned
+         * series below stays gated OFF then (recharts keeps 0-value tooltip
+         * entries — `value != null` — so an un-gated series would print a
+         * noise "0,00 € geplant" line under every row) */
         planned: 0,
         share: c.share,
         fill: resolveCategoryColor(c.categoryId, c.color),
@@ -605,19 +609,28 @@ export function TopCategoriesChart({
                 }
               />
               <Bar dataKey="value" stackId="cat" radius={4} />
-              <Bar
-                dataKey="planned"
-                stackId="cat"
-                fillOpacity={0.35}
-                radius={4}
-              >
-                {merged.map((d) => (
-                  <Cell
-                    key={d.name}
-                    fill={d.planned ? d.fill : "transparent"}
-                  />
-                ))}
-              </Bar>
+              {forecast !== undefined && (
+                /* the planned series must NOT register when the forecast is
+                   off: recharts keeps tooltip entries with `value != null`,
+                   so the rows' 0-value planned field would print a noise
+                   "0,00 € geplant" line under every Ist row (the data-side
+                   0 → undefined normalization in topCategoriesMerge only
+                   runs while the forecast is on). Same series-visibility
+                   gate as the cashflow and balance overlays. */
+                <Bar
+                  dataKey="planned"
+                  stackId="cat"
+                  fillOpacity={0.35}
+                  radius={4}
+                >
+                  {merged.map((d) => (
+                    <Cell
+                      key={d.name}
+                      fill={d.planned ? d.fill : "transparent"}
+                    />
+                  ))}
+                </Bar>
+              )}
             </BarChart>
           </ChartContainer>
         )}

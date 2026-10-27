@@ -157,15 +157,25 @@ export function TransactionsTable({
   }, [])
   const activation = useRowActivation()
 
+  // normalize ONCE, mirroring the server's id lookup (`sp.get("id")?.trim()`
+  // — app/api/transactions/route.ts): a hand-edited URL with padded
+  // whitespace ("?tx=<id>%20") would otherwise still fetch the right row
+  // (the server trims) but fail the row.id match further below, leaving the
+  // highlight/expansion silently dead. Generated deep links
+  // (transactionDeepLink) never carry whitespace; the trim also keeps a
+  // whitespace-only param falling back to the filter pipeline exactly as
+  // the server does.
+  const focusId = focusTxId?.trim() || null
+
   // deep-link focus mode: the id lookup intentionally ignores filters, sort
   // and pagination — keep the dead controls visibly off and label the state
-  const focusMode = Boolean(focusTxId)
+  const focusMode = Boolean(focusId)
 
   const params = React.useMemo(() => {
     // deep-linked focus (from /planung): the query fetches exactly the one
     // row via the id lookup, independent of any filter state
-    if (focusTxId) {
-      return new URLSearchParams({ id: focusTxId, page: "1", pageSize: "25" })
+    if (focusId) {
+      return new URLSearchParams({ id: focusId, page: "1", pageSize: "25" })
     }
     const sp = filtersToParams(filters)
     sp.set("page", String(page))
@@ -173,7 +183,7 @@ export function TransactionsTable({
     sp.set("sort", SORT_TO_FIELD[sort.key])
     sp.set("dir", sort.desc ? "desc" : "asc")
     return sp
-  }, [filters, page, sort, focusTxId])
+  }, [filters, page, sort, focusId])
 
   // value-based identity: page/reset must not fire on page changes
   const filterKey = React.useMemo(
@@ -203,9 +213,9 @@ export function TransactionsTable({
   // the deep link's own filter change. lastFocus init null so the FIRST
   // value also fires (mount is a legitimate focus event).
   const [lastFocusTxId, setLastFocusTxId] = React.useState<string | null>(null)
-  if ((focusTxId ?? null) !== lastFocusTxId) {
-    setLastFocusTxId(focusTxId ?? null)
-    if (focusTxId) setExpandedId(focusTxId)
+  if (focusId !== lastFocusTxId) {
+    setLastFocusTxId(focusId)
+    if (focusId) setExpandedId(focusId)
   }
 
   const { data, isLoading, isFetching, isError, refetch } =
@@ -424,7 +434,7 @@ export function TransactionsTable({
                       activation={activation}
                       onToggle={toggleExpandedRow}
                       onAssign={openAssignDialog}
-                      focus={focusTxId != null && row.id === focusTxId}
+                      focus={focusId != null && row.id === focusId}
                     />
                     {isExpanded && (
                       <TransactionDetailRow row={row} colSpan={totalColumns} />

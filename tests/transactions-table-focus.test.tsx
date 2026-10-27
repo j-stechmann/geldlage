@@ -66,6 +66,34 @@ describe("TransactionsTable focusTxId (deep link from /planung)", () => {
     expect(document.getElementById("tx-details-tx-1")).not.toBeNull()
   })
 
+  it("trims a whitespace-padded focus param before lookup and row match", async () => {
+    // the server trims the id before lookup (app/api/transactions/route.ts);
+    // the client must trim the focus param too, or the fetch succeeds (server
+    // trims) while the row.id match fails — highlight/expansion silently dead
+    const stub = stubFetch([
+      {
+        url: /\/api\/transactions$/,
+        json: { rows: [ROW_A], total: 1, page: 1, pageCount: 1 },
+      },
+    ])
+    const { container } = renderWithQuery(
+      <TransactionsTable filters={EMPTY_FILTERS} focusTxId="  tx-1  " />
+    )
+    await waitFor(() => {
+      expect(container.textContent).toContain("Mietwerk GmbH")
+    })
+    // the wire form is the trimmed id — padded input would encode as
+    // "id=+tx-1+" (URLSearchParams) — and the trimmed value matches row.id
+    expect(stub.calls.some((c) => c.url.includes("id=tx-1"))).toBe(true)
+    expect(
+      stub.calls.some(
+        (c) => c.url.includes("%20tx-1") || c.url.includes("+tx-1")
+      )
+    ).toBe(false)
+    expect(container.querySelector("tr[data-focus]")).not.toBeNull()
+    expect(document.getElementById("tx-details-tx-1")).not.toBeNull()
+  })
+
   it("leaves rows collapsed/unhighlighted without a focus param", async () => {
     const stub = stubFetch([
       {
