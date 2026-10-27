@@ -157,7 +157,9 @@ function clipText(s: string | null): string | null {
 /**
  * Tool args (snake_case) → planning-service input keys (camelCase, the
  * key-presence- driven patch semantics of validatePlanInput). Unknown keys
- * throw loudly: the service would silently ignore them, and a silently
+ * throw loudly at both layers — here (snake_case vocabulary, the model's
+ * naming reality) and in validatePlanInput (the REST callers' boundary,
+ * where a typo'd camelCase key must not silent-drop either): a silently
  * ignored field (e.g. a typo'd amount) could read back as a successful
  * mutation the model trusts.
  */

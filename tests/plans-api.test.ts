@@ -218,6 +218,17 @@ describe("POST /api/plans", () => {
         },
         "category_not_found",
       ],
+      [
+        // a typo'd key must not silently vanish (the PATCH/POST contract says
+        // unknown fields are 400 unknown_field, mirroring the agent tools)
+        {
+          amountCents: -100,
+          dtstart: "2026-01-01",
+          rrule: null,
+          accountid: accountId,
+        },
+        "unknown_field",
+      ],
     ]
     for (const [body, code] of cases) {
       const res = await postPlan(`${BASE}/api/plans`, body)
@@ -402,6 +413,20 @@ describe("PATCH /api/plans/[id]", () => {
     expect(res.status).toBe(400)
     expect((await res.json()).error).toBe("invalid_dtstart")
     expect(getStored(id)!.dtstart).toBe("2026-01-01")
+  })
+
+  it("400 on unknown fields (typo'd key) instead of a silent partial patch", async () => {
+    const id = await seedSimplePlan()
+    const res = await patchPlan(id, { status: "paused", accountid: accountId })
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toBe("unknown_field")
+    // the message names the offender and the allowed vocabulary
+    expect(body.message).toContain("accountid")
+    expect(body.message).toContain("accountId")
+    // nothing was written
+    expect(getStored(id)!.status).toBe("active")
+    expect(getStored(id)!.updatedAt).toBe(getStored(id)!.createdAt)
   })
 
   it("validates rrule updates; accepts nulling the rule with a moved dtstart", async () => {

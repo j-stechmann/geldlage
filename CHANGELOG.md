@@ -171,6 +171,12 @@
   row (the server trims) but failed the row.id comparison, leaving the
   highlight and expansion silently dead (whitespace-only params now fall
   back to the filter pipeline exactly like the server; regression-tested).
+- **plan routes reject unknown body fields** (`unknown_field`, service-level
+  in `validatePlanInput`): a typo'd key ("accountid", "amountCent") in a
+  POST/PATCH body was silently dropped — the plan was created/updated
+  without exactly that field and read back as a successful mutation. The
+  agent tools enforced this at their snake_case arg boundary already; the
+  REST boundary now fails the same way (regression-tested).
 
 ## v1.20.0
 

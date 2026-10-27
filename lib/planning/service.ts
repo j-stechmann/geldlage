@@ -94,10 +94,36 @@ function monthOffset(baseIso: string, offset: number): string {
   return `${String(ny).padStart(4, "0")}-${String(nm).padStart(2, "0")}`
 }
 
-/** Validate every provided field; returns exactly the keys that were provided. */
+/** Createable/updatable field names — validatePlanInput's whole vocabulary. */
+const KNOWN_INPUT_KEYS = new Set([
+  "amountCents",
+  "dtstart",
+  "rrule",
+  "status",
+  "counterparty",
+  "purpose",
+  "notes",
+  "accountId",
+  "categoryId",
+])
+
+/**
+ * Validate every provided field; returns exactly the keys that were provided.
+ * Unknown keys fail loudly (same contract the agent tools enforce at their
+ * arg boundary, plan-shared planInputFromArgs): a typo'd field
+ * ("accountid", "amountCent") would otherwise be silently dropped, and the
+ * created/updated plan reads back as a mutation missing exactly that field.
+ */
 export function validatePlanInput(
   input: Record<string, unknown>
 ): Partial<PlanInput> {
+  const unknown = Object.keys(input).filter((k) => !KNOWN_INPUT_KEYS.has(k))
+  if (unknown.length > 0) {
+    throw new PlanValidationError(
+      `unknown field${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")} (allowed fields: ${[...KNOWN_INPUT_KEYS].join(", ")})`,
+      "unknown_field"
+    )
+  }
   const out: Partial<PlanInput> = {}
 
   if ("amountCents" in input) {

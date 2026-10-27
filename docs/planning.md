@@ -149,7 +149,9 @@ expand RRULEs), `create_plan`, `update_plan` (single-field patches incl.
 pause/finish via `status`) and `delete_plan`. The tool surface is
 snake_case in both directions (args and results, matching the
 [ADR-0034](adr/adr-0034-agent-read-query-dsl.md) catalog naming); unknown
-arg keys are rejected, and `PlanValidationError` codes surface as
+arg keys are rejected at the tool layer and unknown body keys at the
+service layer (`unknown_field` — shared by the REST routes), and
+`PlanValidationError` codes surface as
 `code: message` tool errors the model can self-correct from. Deletes carry
 no mechanical confirmation token — the system prompt makes the model
 resolve ids via `list_plans`/`query_data` first, confirm in chat before
