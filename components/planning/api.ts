@@ -347,12 +347,32 @@ export function describeRrule(rruleText: string | null): string {
   } else if (freq === "MONTHLY") {
     const byDay = parts.get("BYDAY")
     const byMonthDay = parts.get("BYMONTHDAY")
+    // BYDAY + BYMONTHDAY intersect per RFC 5545 — no compact truthful text:
+    // keep the full raw rule (same escape hatch as the YEARLY branch)
+    if (byDay !== undefined && byMonthDay !== undefined) return rruleText
+    const dayTokens = (byDay ?? "").trim().split(",").filter(Boolean)
+    const allOrdinalByDay =
+      dayTokens.length > 0 &&
+      dayTokens.every((t) => /^(-?\d+)(MO|TU|WE|TH|FR|SA|SU)$/.test(t))
+    const allPlainByDay =
+      dayTokens.length > 0 &&
+      dayTokens.every((t) => /^(MO|TU|WE|TH|FR|SA|SU)$/.test(t))
+    if (byDay !== undefined && !allOrdinalByDay && !allPlainByDay) {
+      // mixed ordinal + plain weekday list — no truthful compression:
+      // keep the full raw rule (same escape hatch as BYSETPOS)
+      return rruleText
+    }
     // ordinal BYDAY of any width — validation accepts every RFC ordinal
     // (e.g. 5FR), so the badge must describe it, not degrade to a bare
     // "monatlich"
-    if (byDay && /^(-?\d+)(MO|TU|WE|TH|FR|SA|SU)(,.+)*$/.exec(byDay.trim())) {
+    if (allOrdinalByDay) {
       const ordinals = describeByWeekday(byDay)
       base = `${interval === 1 ? "am" : `alle ${interval} Monate am`} ${ordinals}`
+    } else if (allPlainByDay) {
+      // plain weekday (no ordinal) repeats on EVERY matching weekday of the
+      // month (~4–5×/month) — "monatlich" would hide that cadence
+      const weekdays = describeByWeekday(byDay)
+      base = `jeden ${weekdays} im Monat${interval === 1 ? "" : ` (alle ${interval} Monate)`}`
     } else if (byMonthDay) {
       base = `${interval === 1 ? "am" : `alle ${interval} Monate am`} ${ordinalizeMonthDays(byMonthDay)}`
     } else {
@@ -368,9 +388,17 @@ export function describeRrule(rruleText: string | null): string {
     const allOrdinalByDay =
       byDayTokens.length > 0 &&
       byDayTokens.every((t) => /^(-?\d+)(MO|TU|WE|TH|FR|SA|SU)$/.test(t))
+    const allPlainByDay =
+      byDayTokens.length > 0 &&
+      byDayTokens.every((t) => /^(MO|TU|WE|TH|FR|SA|SU)$/.test(t))
     // BYDAY + BYMONTHDAY intersect per RFC 5545 — no compact truthful text:
     // keep the full raw rule (same escape hatch as BYSETPOS)
     if (byDayRaw !== undefined && byMonthDay !== undefined) return rruleText
+    if (byDayRaw !== undefined && !allOrdinalByDay && !allPlainByDay) {
+      // mixed ordinal + plain weekday list — no truthful compression:
+      // keep the full raw rule (same escape hatch as BYSETPOS)
+      return rruleText
+    }
     if (byMonthRaw === undefined && byMonthDay !== undefined) {
       // yearless BYMONTHDAY repeats the day in EVERY month (12×/year —
       // engine-verified; the dialog warns at creation): the badge must say
@@ -391,10 +419,18 @@ export function describeRrule(rruleText: string | null): string {
           ? `jeden ${weekdays}`
           : `jeden ${weekdays} (alle ${interval} Jahre)`
     } else {
-      // genuinely annual: any BYMONTH, or a yearless ordinal BYDAY
-      // ("1MO" counts across the whole year → once per interval-year)
+      // genuinely annual: a yearless ordinal BYDAY ("1MO" counts across the
+      // whole year → once per interval-year), BYMONTH + ordinal BYDAY, or
+      // BYMONTH + BYMONTHDAY
       const byMonth = describeByMonth(byMonthRaw)
-      base = `${years}${byMonth ? ` in ${byMonth}` : ""}${byMonthDay ? ` am ${ordinalizeMonthDays(byMonthDay)}` : byDayRaw ? ` am ${describeByWeekday(byDayRaw)}` : ""}`
+      if (byDayRaw !== undefined && !allOrdinalByDay) {
+        // plain weekday + BYMONTH repeats on every matching weekday within
+        // the listed months (~8–9×/year) — "jährlich … am Mo" would hide
+        // that cadence
+        base = `in ${byMonth} jeden ${describeByWeekday(byDayRaw)}${interval === 1 ? "" : ` (alle ${interval} Jahre)`}`
+      } else {
+        base = `${years}${byMonth ? ` in ${byMonth}` : ""}${byMonthDay ? ` am ${ordinalizeMonthDays(byMonthDay)}` : byDayRaw ? ` am ${describeByWeekday(byDayRaw)}` : ""}`
+      }
     }
   } else {
     return rruleText

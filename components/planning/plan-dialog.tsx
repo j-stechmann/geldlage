@@ -266,14 +266,123 @@ function sameOccurrenceSets(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((d, i) => d === b[i])
 }
 
+/** MO..SU letters at the RRULE weekday numbers 0..6. */
+const WEEKDAY_LETTERS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"]
+
+/** Tokens ("MO", "1FR", "-1SU") of a byweekday part; "?" for unusable entries. */
+function weekdayTokens(v: unknown): string[] {
+  const arr = Array.isArray(v) ? v : v === undefined || v === null ? [] : [v]
+  return arr.map((wd): string => {
+    const weekday: number =
+      typeof wd === "number"
+        ? wd
+        : typeof wd === "object" && wd !== null
+          ? ((wd as { weekday?: number }).weekday ?? -1)
+          : -1
+    const n: number | undefined =
+      typeof wd === "object" && wd !== null
+        ? ((wd as { n?: number }).n ?? undefined)
+        : undefined
+    const letter = WEEKDAY_LETTERS[weekday]
+    if (!letter) return "?"
+    return n !== undefined ? `${n}${letter}` : letter
+  })
+}
+
+/** Order-insensitive signature of a byweekday part (parity/loss compare). */
+function byWeekdaySignature(v: unknown): string {
+  return weekdayTokens(v).sort().join(",")
+}
+
+/** Order-insensitive signature of a number-list part (bymonthday/bymonth). */
+function numberListSignature(v: unknown): string {
+  const arr = Array.isArray(v) ? v : v === undefined || v === null ? [] : [v]
+  return arr
+    .map((n) => String(n))
+    .sort()
+    .join(",")
+}
+
+/**
+ * Part parity between a stored rule's parsed options and the builder's
+ * rebuild: every part the builder vocabulary could silently drop
+ * (WKST ≠ MO, BYMONTH on WEEKLY/MONTHLY, multi-ordinal or mixed BYDAY,
+ * BYDAY+BYMONTHDAY mixes) must re-appear in the rebuild with the same
+ * semantics.
+ *
+ * The occurrence-set gate alone misses these when a rule is so sparse that
+ * BOTH rules expand to the empty set over the compare window (e.g.
+ * INTERVAL=100 yearly — the first occurrence is ~100 years out): stored
+ * [] == mis-rebuilt [] would read "faithful" and the next save would
+ * silently rewrite the cadence. Parity fails such rebuilds structurally
+ * instead. Lists compare order-insensitively; interval/count normalize
+ * over their defaults (explicit INTERVAL=1 vs omitted is parity, not
+ * loss); UNTIL compares at DAY granularity (the builder re-anchors the
+ * end date at noon — the same effective bound for noon-anchored
+ * occurrences; a shifted end DATE still mismatches). Exported for the
+ * dialog regression tests.
+ */
+export function rebuildParity(
+  stored: Record<string, unknown>,
+  rebuiltText: string
+): boolean {
+  let rebuilt: Record<string, unknown>
+  try {
+    const parsed = rrulestr(rebuiltText, { forceset: false })
+    if (!(parsed instanceof RRule)) return false
+    rebuilt = parsed.origOptions as Record<string, unknown>
+  } catch {
+    return false
+  }
+  if (stored.freq !== rebuilt.freq) return false
+  const int = (v: unknown): number => (typeof v === "number" ? v : 1)
+  const interval = int(stored.interval)
+  if (interval !== int(rebuilt.interval)) return false
+  // WKST only bends week-grouped expansions (INTERVAL ≥ 2): with interval
+  // 1 it is semantics-free, so an explicit WKST there must not demote a
+  // builder-representable rule to raw
+  const wkst = (v: unknown): number | null => {
+    if (v === undefined || v === null) return null
+    if (typeof v === "number") return v
+    if (typeof v === "object") {
+      const weekday = (v as { weekday?: number }).weekday
+      if (typeof weekday === "number") return weekday
+    }
+    return null
+  }
+  if (interval > 1 && (wkst(stored.wkst) ?? 0) !== (wkst(rebuilt.wkst) ?? 0)) {
+    return false
+  }
+  const countOf = (v: unknown): number | null =>
+    typeof v === "number" ? v : null
+  if (countOf(stored.count) !== countOf(rebuilt.count)) return false
+  const dayOf = (v: unknown): string | null =>
+    v instanceof Date ? v.toISOString().slice(0, 10) : null
+  if (dayOf(stored.until) !== dayOf(rebuilt.until)) return false
+  if (
+    byWeekdaySignature(stored.byweekday) !==
+      byWeekdaySignature(rebuilt.byweekday) ||
+    numberListSignature(stored.bymonthday) !==
+      numberListSignature(rebuilt.bymonthday) ||
+    numberListSignature(stored.bymonth) !== numberListSignature(rebuilt.bymonth)
+  ) {
+    return false
+  }
+  return true
+}
+
 /**
  * Map a stored RRULE back into the builder fields; returns the overrides to
  * apply. The result is gated on faithfulness: whenever the builder fields
- * (EMPTY_FORM + overrides) cannot reproduce the stored rule's occurrences
- * 1:1, `rawDirty=true` and the raw text stays authoritative — an untouched
+ * (EMPTY_FORM + overrides) cannot reproduce the stored rule 1:1,
+ * `rawDirty=true` and the raw text stays authoritative — an untouched
  * edit-save must never silently rewrite a recurrence the builder can't
  * represent (2+ month-chips with a weekday pattern, multi-ordinal BYDAY,
  * weekday-yearly without BYMONTH, BYDAY+BYMONTHDAY mixes, WKST variants).
+ * The gate is part parity (rebuildParity — every stored part must
+ * re-appear in the rebuild; the occurrence-set compare alone fails for
+ * ultra-sparse rules, where both sides of the compare window expand to
+ * the empty set), part occurrence-set equality over an 800-day window.
  * Exported for the dialog round-trip regression tests.
  */
 export function parseRruleToForm(
@@ -298,6 +407,7 @@ export function parseRruleToForm(
       bymonthday?: number | number[]
       bymonth?: number | number[]
       bysetpos?: unknown
+      wkst?: unknown
     }
     // freq: YEARLY=0, MONTHLY=1, WEEKLY=2, DAILY=3
     const freq =
@@ -331,7 +441,6 @@ export function parseRruleToForm(
 
     const collect = (v: unknown): unknown[] =>
       Array.isArray(v) ? v : v !== undefined ? [v] : []
-    const LETTERS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"]
     const byDayTokens = collect(o.byweekday)
       .map((wd): string => {
         const weekday: number =
@@ -344,7 +453,7 @@ export function parseRruleToForm(
           typeof wd === "object" && wd !== null
             ? ((wd as { n?: number }).n ?? undefined)
             : undefined
-        const letter = LETTERS[weekday]
+        const letter = WEEKDAY_LETTERS[weekday]
         if (!letter) return ""
         return nth !== undefined ? `${nth}${letter}` : letter
       })
@@ -424,6 +533,11 @@ export function parseRruleToForm(
       }
       faithful =
         rebuilt !== null &&
+        // parity FIRST: a rule the builder vocabulary drops must route raw
+        // even when the set compare below sees [] == [] (ultra-sparse
+        // stored and mis-rebuilt rules are both empty over the window —
+        // see rebuildParity's doc)
+        rebuildParity(o, rebuilt) &&
         sameOccurrenceSets(
           expandOccurrenceDates(dtstart, rruleText, w),
           expandOccurrenceDates(dtstart, rebuilt, w)

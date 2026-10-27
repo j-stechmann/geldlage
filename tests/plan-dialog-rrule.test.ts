@@ -125,6 +125,54 @@ describe("parseRruleToForm faithfulness gate", () => {
   })
 })
 
+describe("parseRruleToForm part parity (sparse-rule hardening)", () => {
+  // Probe-verified against the rrule engine: for both rules below, stored
+  // AND mis-rebuilt rule expand to [] over the 800-day window — two equal
+  // empty sets would wrongly read "faithful"; part parity is what keeps
+  // the raw text authoritative.
+  it("dropped BYDAY caught even when both window sets are empty", () => {
+    // first occurrence 2100-02-26 (~100y out): the mis-rebuilt rule
+    // (FREQ=YEARLY;INTERVAL=100;BYMONTH=2,3) silently drops BYDAY=-1FR
+    const o = parseRruleToForm(
+      "FREQ=YEARLY;INTERVAL=100;BYMONTH=2,3;BYDAY=-1FR",
+      "2000-04-01"
+    )
+    expect(o.rawDirty).toBe(true)
+    expect(o.rawRrule).toBe("FREQ=YEARLY;INTERVAL=100;BYMONTH=2,3;BYDAY=-1FR")
+  })
+
+  it("BYMONTH dropped on MONTHLY routes raw on the same empty-window trap", () => {
+    // first occurrence 2036-02-01: the mis-rebuilt rule
+    // (FREQ=MONTHLY;INTERVAL=120;BYMONTHDAY=1) silently drops BYMONTH=2
+    const o = parseRruleToForm(
+      "FREQ=MONTHLY;INTERVAL=120;BYMONTH=2;BYMONTHDAY=1",
+      "2026-02-15"
+    )
+    expect(o.rawDirty).toBe(true)
+    expect(o.rawRrule).toBe("FREQ=MONTHLY;INTERVAL=120;BYMONTH=2;BYMONTHDAY=1")
+  })
+
+  it("representable ultra-sparse rules stay builder-owned", () => {
+    // leap-day on a century cadence (first occurrence 2400-02-29): both
+    // window sets are empty AND every part round-trips — parity equal →
+    // the builder may own the rule (untouched edit-save keeps the rule)
+    const o = parseRruleToForm(
+      "FREQ=YEARLY;INTERVAL=100;BYMONTH=2;BYMONTHDAY=29",
+      "2000-03-01"
+    )
+    expect(o.rawDirty).toBe(false)
+  })
+
+  it("WKST does not demote semantics-free cases (interval 1 stays editable)", () => {
+    // with interval 1, WKST cannot change any occurrence; the builder
+    // drops it by design and that stays faithful — only INTERVAL ≥ 2
+    // rules with a non-default WKST route raw
+    expect(
+      parseRruleToForm("FREQ=WEEKLY;BYDAY=MO;WKST=SU", DTSTART).rawDirty
+    ).toBe(false)
+  })
+})
+
 describe("parseByMonthDay token strictness", () => {
   it("accepts clean integer lists (whitespace, negatives, empty)", () => {
     expect(parseByMonthDay("1,15")).toEqual([1, 15])
@@ -246,7 +294,43 @@ describe("describeRrule ordinal BYDAY", () => {
     expect(describeRrule("FREQ=MONTHLY;BYDAY=1FR,-1FR")).toBe(
       "am 1. Fr/letzten Fr"
     )
-    // plain-BYDAY rules keep the previous fallback text
-    expect(describeRrule("FREQ=MONTHLY;BYDAY=MO")).toBe("monatlich")
+    // plain weekday (no ordinal) repeats on EVERY matching weekday of the
+    // month — the badge must say so instead of a bare "monatlich"
+    expect(describeRrule("FREQ=MONTHLY;BYDAY=MO")).toBe("jeden Mo im Monat")
+    expect(describeRrule("FREQ=MONTHLY;BYDAY=SA,SU")).toBe(
+      "jeden Sa/So im Monat"
+    )
+    expect(describeRrule("FREQ=MONTHLY;INTERVAL=3;BYDAY=MO")).toBe(
+      "jeden Mo im Monat (alle 3 Monate)"
+    )
+    // mixed ordinal + plain lists have no truthful compression → raw rule
+    // ("am 1. Fr/Mo" would hide that the plain Mo is NOT the first one)
+    expect(describeRrule("FREQ=MONTHLY;BYDAY=1FR,MO")).toBe(
+      "FREQ=MONTHLY;BYDAY=1FR,MO"
+    )
+    // plain weekday + mday intersect → raw (the weekday limiter must not
+    // vanish, same as the YEARLY BYDAY+BYMONTHDAY case)
+    expect(describeRrule("FREQ=MONTHLY;BYDAY=MO;BYMONTHDAY=1")).toBe(
+      "FREQ=MONTHLY;BYDAY=MO;BYMONTHDAY=1"
+    )
+  })
+})
+
+describe("describeRrule plain weekday + BYMONTH (yearly)", () => {
+  it("weekday-repeats-within-month cadence is never 'jährlich'", () => {
+    // FREQ=YEARLY;BYMONTH=1,2;BYDAY=MO fires on every Monday of Jan/Feb
+    // (~8–9×/year) — "jährlich in Januar/Februar am Mo" would lie
+    expect(describeRrule("FREQ=YEARLY;BYMONTH=1,2;BYDAY=MO")).toBe(
+      "in Januar/Februar jeden Mo"
+    )
+    expect(describeRrule("FREQ=YEARLY;INTERVAL=2;BYMONTH=3;BYDAY=WE")).toBe(
+      "in März jeden Mi (alle 2 Jahre)"
+    )
+  })
+
+  it("mixed ordinal + plain lists fall back to the raw rule", () => {
+    expect(describeRrule("FREQ=YEARLY;BYMONTH=3;BYDAY=1FR,MO")).toBe(
+      "FREQ=YEARLY;BYMONTH=3;BYDAY=1FR,MO"
+    )
   })
 })
