@@ -109,7 +109,19 @@
   pattern instead of silently dropping the overlay;
   `GET /api/transactions/calendar` gained the same ±60-month window
   distance cap as `GET /api/plans/occurrences`, so the two /planung window
-  reads fail together under their shared ErrorState (regression-tested).
+  reads fail together under their shared ErrorState (regression-tested);
+  the plan dialog's create/update fan the mutation out to the planning
+  caches (`invalidatePlans`) — the dialog path was the one mutation entry
+  point without the fan-out, and with the app's `staleTime` +
+  no-refetch-on-window-focus the board, calendar chips, forecast card and
+  dashboard overlay kept showing pre-mutation data until the affected
+  queries remounted (regression-tested); a stored ordinal BYDAY the
+  Wiederholung picker can't display ("−2SU" … — beyond the picker's
+  1–5/"letzte") routes to the raw-authoritative RRULE field instead of
+  rendering an empty pattern select, and "5." (5th weekday) became a
+  picker item so stored 5FR plans display their pattern (round-trip and
+  faithfulness-gate tested); planning.md's next-date ladder description
+  matches the shipped five rungs (400 → 147 000 days).
 
 ## v1.20.0
 

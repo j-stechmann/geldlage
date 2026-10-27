@@ -56,9 +56,10 @@ Indexes: `planned_transactions_user_status_idx` `(user_id, status)` and
   hint when day ≥ 29 is chosen for monthly rules.
 - `nextOccurrenceDate` powers the list's "Nächster Termin"; both are
   bounded: window expansion caps at 2000 occurrences, the next-date scan
-  walks a small horizon ladder (400 → 25 600 days) so unbounded rules can
-  never scan forever while sparse live rules (large INTERVAL, 5th-weekday
-  ordinals, leap-day yearly) still report their real next date.
+  walks a five-rung horizon ladder (400 → 147 000 days — the closing rung
+  spans one Gregorian 400-year cycle) so unbounded rules can never scan
+  forever while sparse live rules (large INTERVAL, 5th-weekday ordinals,
+  leap-day yearly) still report their real next date.
 
 ## Occurrence matching (`lib/planning/matching.ts`)
 

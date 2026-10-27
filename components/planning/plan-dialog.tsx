@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { RRule, rrulestr } from "rrule"
 import { normalizeRuleInput } from "@/lib/planning/recurrence"
@@ -33,6 +33,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import {
   createPlan,
   updatePlan,
+  invalidatePlans,
   ApiError,
   type PlanFormValues,
   type PlanRow,
@@ -364,24 +365,33 @@ export function parseRruleToForm(
         .map((n) => Number.parseInt(String(n), 10))
         .filter((n) => Number.isInteger(n))
       const ordinal = ordinals.length === 1 ? ordinals[0] : null
+      // single ordinal token split into ordinal prefix + weekday letter
+      // ("5FR" → "5" + "FR")
+      const ordinalMatch =
+        ordinal === null
+          ? null
+          : /^(-?\d+)(MO|TU|WE|TH|FR|SA|SU)$/.exec(ordinal)
+      // the picker items cover 1–5 and "letzte" (-1). An ordinal outside
+      // that set ("-2SU" …) would render an empty pattern field despite
+      // round-tripping the same rule — route it raw instead (the raw text
+      // stays authoritative, the same escape hatch as multi-ordinal BYDAY)
+      const PICKER_ORDINALS = new Set(["1", "2", "3", "4", "5", "-1"])
       if (
-        ordinal !== null &&
+        ordinalMatch !== null &&
+        PICKER_ORDINALS.has(ordinalMatch[1]) &&
         (freq === "MONTHLY"
           ? monthDays.length === 0
           : months.length === 1 && monthDays.length === 0)
       ) {
-        const parts = /^(-?\d)(MO|TU|WE|TH|FR|SA|SU)$/.exec(ordinal)
-        if (parts) {
-          if (freq === "MONTHLY") {
-            overrides.monthlyMode = "wday"
-            overrides.ordinal = parts[1]
-            overrides.ordinalDay = parts[2]
-          } else {
-            overrides.yearlyMode = "wday"
-            overrides.byMonth = months.map(String)
-            overrides.ordinal = parts[1]
-            overrides.ordinalDay = parts[2]
-          }
+        if (freq === "MONTHLY") {
+          overrides.monthlyMode = "wday"
+          overrides.ordinal = ordinalMatch[1]
+          overrides.ordinalDay = ordinalMatch[2]
+        } else {
+          overrides.yearlyMode = "wday"
+          overrides.byMonth = months.map(String)
+          overrides.ordinal = ordinalMatch[1]
+          overrides.ordinalDay = ordinalMatch[2]
         }
       } else {
         overrides.monthlyMode = "mday"
@@ -500,6 +510,7 @@ export interface PlanDialogProps {
 export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
   const isEdit = plan !== null && plan !== undefined
   const [busy, setBusy] = React.useState(false)
+  const queryClient = useQueryClient()
 
   // initial state is derived per dialog open (plan/new); adjusting state
   // during render ("adjusting state when a prop change", react.dev) avoids
@@ -702,6 +713,12 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
         await createPlan(values)
       }
       toast.success(isEdit ? "Plan aktualisiert" : "Plan erstellt")
+      // the app runs staleTime 5s + refetchOnWindowFocus:false — without
+      // this fan-out the board, calendar chips, forecast card and the
+      // dashboard overlay keep showing pre-mutation data until the
+      // affected queries remount (navigate away and back). The board's own
+      // status-toggle/delete paths already fan out the same way.
+      invalidatePlans(queryClient)
       onOpenChange(false)
     } catch (err) {
       if (
@@ -1079,6 +1096,7 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
                         "2": "2.",
                         "3": "3.",
                         "4": "4.",
+                        "5": "5.",
                         "-1": "letzte",
                       }}
                     >
@@ -1090,6 +1108,7 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
                         <SelectItem value="2">2.</SelectItem>
                         <SelectItem value="3">3.</SelectItem>
                         <SelectItem value="4">4.</SelectItem>
+                        <SelectItem value="5">5.</SelectItem>
                         <SelectItem value="-1">letzte</SelectItem>
                       </SelectContent>
                     </Select>
@@ -1197,6 +1216,7 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
                           "2": "2.",
                           "3": "3.",
                           "4": "4.",
+                          "5": "5.",
                           "-1": "letzte",
                         }}
                       >
@@ -1208,6 +1228,7 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
                           <SelectItem value="2">2.</SelectItem>
                           <SelectItem value="3">3.</SelectItem>
                           <SelectItem value="4">4.</SelectItem>
+                          <SelectItem value="5">5.</SelectItem>
                           <SelectItem value="-1">letzte</SelectItem>
                         </SelectContent>
                       </Select>

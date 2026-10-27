@@ -3,6 +3,11 @@ import React from "react"
 import { describe, it, expect, beforeEach } from "vitest"
 import { fireEvent, waitFor } from "@testing-library/react"
 import { PlanDialog } from "@/components/planning/plan-dialog"
+import {
+  calendarTransactionsKey,
+  forecastKey,
+  planOccurrencesKey,
+} from "@/components/planning/api"
 import { renderWithQuery, stubFetch, stubLocalStorage } from "./helpers-dom"
 
 /**
@@ -382,5 +387,52 @@ describe("plan dialog: raw RRULE mode validates exactly like the server", () => 
     })
     // one-off with valid amount/dtstart stays saveable
     expect(saveButton()).toBeEnabled()
+  })
+})
+
+describe("plan dialog: saving fans the mutation out to the planning caches", () => {
+  /**
+   * invalidatePlans (["plans"], ["plan-occurrences"], ["forecast"],
+   * ["transactions-calendar"]) used to run only for the board's own
+   * status-toggle/delete paths — the dialog's create/update left every
+   * planning cache stale. The app runs staleTime 5s +
+   * refetchOnWindowFocus:false, so board, calendar chips and forecast kept
+   * showing pre-mutation data until the affected queries remounted
+   * (navigate away and back).
+   */
+  const EDITABLE_PLAN = {
+    ...BASE_PLAN,
+    rrule: "FREQ=MONTHLY;BYMONTHDAY=1",
+  }
+
+  it("edit save invalidates all four planning cache families", async () => {
+    const { queryClient } = renderWithQuery(
+      <PlanDialog open onOpenChange={() => {}} plan={EDITABLE_PLAN} />
+    )
+
+    // pre-seed every affected cache: with no subscribers,
+    // invalidateQueries marks each query invalidated and nothing refetches
+    // — exactly the observable state we assert
+    queryClient.setQueryData(["plans"], { plans: [] })
+    const occKey = planOccurrencesKey("2026-01-01", "2026-03-31", null)
+    queryClient.setQueryData(occKey, { occurrences: [] })
+    const calKey = calendarTransactionsKey("2026-01-01", "2026-03-31", null)
+    queryClient.setQueryData(calKey, { transactions: [] })
+    const fcKey = forecastKey(12, null)
+    queryClient.setQueryData(fcKey, {})
+
+    stubFetch([
+      { url: /\/api\/plans\/plan-1$/, method: "PATCH", json: { plan: {} } },
+    ])
+
+    // happy-path save: EDITABLE_PLAN has pre-filled amount/dtstart/rrule
+    fireEvent.click(saveButton())
+
+    await waitFor(() => {
+      expect(queryClient.getQueryState(["plans"])?.isInvalidated).toBe(true)
+    })
+    expect(queryClient.getQueryState(occKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(calKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(fcKey)?.isInvalidated).toBe(true)
   })
 })

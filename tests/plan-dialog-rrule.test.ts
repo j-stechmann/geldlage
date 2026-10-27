@@ -31,6 +31,7 @@ describe("parseRruleToForm faithfulness gate", () => {
       "FREQ=MONTHLY;BYMONTHDAY=1,15",
       "FREQ=MONTHLY;BYDAY=1FR",
       "FREQ=MONTHLY;BYDAY=-1FR",
+      "FREQ=MONTHLY;BYDAY=5FR",
       "FREQ=MONTHLY;INTERVAL=2;BYDAY=-1MO",
       "FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=15",
       "FREQ=YEARLY;BYMONTH=3;BYDAY=1FR",
@@ -52,6 +53,11 @@ describe("parseRruleToForm faithfulness gate", () => {
     const last = parseRruleToForm("FREQ=MONTHLY;BYDAY=-1FR", DTSTART)
     expect(last.ordinal).toBe("-1")
     expect(last.ordinalDay).toBe("FR")
+    // 5th-weekday rules stay builder-renderable: the picker offers "5."
+    const fifth = parseRruleToForm("FREQ=MONTHLY;BYDAY=5FR", DTSTART)
+    expect(fifth.rawDirty).toBe(false)
+    expect(fifth.ordinal).toBe("5")
+    expect(fifth.ordinalDay).toBe("FR")
   })
 
   it("compares semantics, not spelling (explicit INTERVAL=1 stays editable)", () => {
@@ -68,6 +74,9 @@ describe("parseRruleToForm faithfulness gate", () => {
       "FREQ=YEARLY;BYMONTH=3,6;BYDAY=1FR",
       // multi-ordinal BYDAY (raw field / API / agent)
       "FREQ=MONTHLY;BYDAY=1FR,-1FR",
+      // ordinal beyond the picker (1–5, "letzte") — would render an empty
+      // pattern select despite round-tripping the same rule
+      "FREQ=MONTHLY;BYDAY=-2SU",
       // weekday-yearly without BYMONTH
       "FREQ=YEARLY;BYDAY=MO",
       // monthly plain-BYDAY + mday combos the builder can't express
@@ -224,10 +233,10 @@ describe("describeRrule YEARLY cadence (engine-accurate)", () => {
 })
 
 describe("describeRrule ordinal BYDAY", () => {
-  it("describes ordinals the builder itself never offers (e.g. 5FR)", () => {
+  it("describes every RFC ordinal (5FR is pickable, 10MO stays beyond the picker)", () => {
     // validation accepts every RFC ordinal on MONTHLY rules, so a stored
-    // 5FR plan exists — the Wiederholung badge must say "5. Fr" instead of
-    // silently degrading to a bare "monatlich"
+    // 5FR/10MO plan can exist — the Wiederholung badge must say "5. Fr"/
+    // "10. Mo" instead of silently degrading to a bare "monatlich"
     expect(describeRrule("FREQ=MONTHLY;BYDAY=5FR")).toBe("am 5. Fr")
     expect(describeRrule("FREQ=MONTHLY;BYDAY=10MO")).toBe("am 10. Mo")
     // unchanged neighbours: the builder's own ordinals and multi-ordinal
