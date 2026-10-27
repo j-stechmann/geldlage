@@ -307,7 +307,13 @@ export function getPlan(userId: number, planId: string): PlanRow | null {
   )
 }
 
-/** Next occurrence strictly in the future (today included), null for finished plans. */
+/**
+ * Next occurrence strictly in the future (today included), null for finished
+ * plans. Expanding per call is the deliberate cost model for now (one expansion
+ * per plan per list read, bounded by the ladder) — if plan counts grow, persist
+ * next_due_date at write time and refresh drifted rows in a worker-tick
+ * trickle (docs/planning.md, cost note).
+ */
 export function nextDueDate(
   plan: Pick<PlanRow, "dtstart" | "rrule" | "status">,
   today: string

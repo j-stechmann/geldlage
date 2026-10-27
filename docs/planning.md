@@ -64,7 +64,11 @@ Indexes: `planned_transactions_user_status_idx` `(user_id, status)` and
   would cross into toISOString's extended-year form, truncate into an
   Invalid Date and make every rung answer "no occurrences"; occurrences
   beyond that bound are unrepresentable as ISO dates and honestly read as
-  none.
+  none. **Cost note (deliberate for now):** `GET /api/plans` and agent
+  `list_plans` pay one expansion per plan on every list read — bounded by
+  the ladder, negligible at expected plan counts. If plan counts grow:
+  persist `next_due_date` at write time and refresh drifted rows in a
+  bounded worker-tick trickle, instead of expanding per read.
 
 ## Occurrence matching (`lib/planning/matching.ts`)
 
