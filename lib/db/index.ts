@@ -388,9 +388,11 @@ function adoptLegacyIssuer(db: Db) {
     )
     return
   }
-  // Every table with a users(id) FK MUST be listed here (no ON DELETE
+  // Every table with a users(id) FK must be listed here (no ON DELETE
   // action exists): a missed table keeps the duplicate's FK alive and the
-  // DELETE FROM users below fails the whole startup migration.
+  // DELETE FROM users below fails the whole startup migration. The agent
+  // chat tables (ADR-0033) carry the FK too; chat_thread_members'
+  // (thread_id, user_id) uniqueness gets the pre-merge cleanup below.
   const childTables = [
     "accounts",
     "categories",
@@ -398,6 +400,9 @@ function adoptLegacyIssuer(db: Db) {
     "import_batches",
     "planned_transactions",
     "transactions",
+    "chat_threads",
+    "chat_thread_members",
+    "chat_messages",
   ]
   for (const legacyUser of legacyUsers) {
     // A JIT-created duplicate (same subject, already on the new issuer) is
@@ -412,6 +417,22 @@ function adoptLegacyIssuer(db: Db) {
       .get()
     db.transaction((tx) => {
       if (duplicate) {
+        // chat_thread_members re-points can clash with the merged user's
+        // own (thread_id, user_id) row: both ids may hold explicit
+        // memberships on one thread (owner rows are never stored, but
+        // invites can bind memberships to both). Drop the duplicate's
+        // conflicting row FIRST so the generic re-point below cannot hit
+        // the unique index — the surviving row belongs to the identity
+        // that keeps its id, state and all (dropping one of two rows
+        // representing the same human's membership loses only its state).
+        tx.run(
+          sql`DELETE FROM chat_thread_members WHERE user_id = ${duplicate.id}
+              AND EXISTS (
+                SELECT 1 FROM chat_thread_members AS other
+                WHERE other.thread_id = chat_thread_members.thread_id
+                  AND other.user_id = ${legacyUser.id}
+              )`
+        )
         for (const table of childTables) {
           tx.run(
             sql`UPDATE ${sql.raw(table)} SET user_id = ${legacyUser.id} WHERE user_id = ${duplicate.id}`

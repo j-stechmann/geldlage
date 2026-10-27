@@ -363,6 +363,27 @@ describe("plan dialog: raw RRULE mode validates exactly like the server", () => 
     expect(saveButton()).toBeDisabled()
   })
 
+  it("a valid but unproductive rule (UNTIL before dtstart) disarms save too", async () => {
+    // validateRrule passes (correct — it validates the rule's SHAPE, not
+    // its productivity); the rule produces no occurrence at/after dtstart.
+    // Only the preview's no-occurrence error knows — save must follow it,
+    // not just effective.error, or the dialog reads green and the first
+    // feedback is the server's generic invalid_rrule 400 toast.
+    renderWithQuery(
+      <PlanDialog open onOpenChange={() => {}} plan={EDITABLE_PLAN} />
+    )
+    const raw = await waitFor(() => inputByLabel("RRULE"))
+    fireEvent.change(raw, {
+      target: { value: "FREQ=DAILY;UNTIL=20200101T120000Z" },
+    })
+    // NOT "Wiederholungsregel ist ungültig" — the rule shape is valid; the
+    // preview carries the honest "keinen Termin" error instead
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("erzeugt keinen Termin")
+    })
+    expect(saveButton()).toBeDisabled()
+  })
+
   it("clearing the raw text reads as 'Einmalig', not the stale FREQ", async () => {
     // clearing the raw RRULE saves rrule: null → the plan becomes one-off.
     // The dormant builder select must not keep displaying "Monatlich"

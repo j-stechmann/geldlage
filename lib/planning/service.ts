@@ -477,9 +477,7 @@ export function listOccurrences(
     .all()
 
   const occurrences: PlanOccurrence[] = []
-  const rowsById = new Map<string, (typeof plans)[number]>()
   for (const plan of plans) {
-    rowsById.set(plan.id, plan)
     const dates = expandOccurrenceDates(plan.dtstart, plan.rrule, w)
     for (const date of dates) {
       occurrences.push({

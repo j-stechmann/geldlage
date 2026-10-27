@@ -57,10 +57,12 @@ domain: no other table references them, and occurrences never enter
 5. **`list_plans` because `query_data` cannot compute "next due".** The
    DSL is a readonly SELECT — RRULE expansion against today is out of its
    reach. `list_plans` returns compact summaries (capped at
-   `PLAN_LIST_MAX = 15`, newest first, free texts clipped, notes omitted)
-   plus `next_due_date`, sized to stay inside the ~4000-char tool-result
-   cap (truncateToolResult) with `limited`/`total` flags pointing the
-   model at `query_data` for anything wider. Unknown args are rejected
+   `PLAN_LIST_MAX = 15` rows plus a serialized-char budget that stops
+   adding rows before the payload would exceed the ~4000-char
+   tool-result cap (truncateToolResult cuts mid-JSON) — long free texts
+   can legitimately shrink the list; `limited`/`total` flags point the
+   model at `query_data` for anything wider)
+   plus `next_due_date`. Unknown args are rejected
    like on the writers: it takes no arguments, and a silently accepted
    filter attempt (e.g. `{"status": "active"}`) would hand back the
    unfiltered list, which the model could report as a filtered result.

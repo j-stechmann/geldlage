@@ -3,6 +3,7 @@ import {
   PlanValidationError,
   type PlanRow,
 } from "@/lib/planning/service"
+import { TOOL_RESULT_MAX_CHARS } from "@/lib/agent/window"
 import { todayLocal } from "@/lib/analytics/date"
 
 /**
@@ -13,8 +14,9 @@ import { todayLocal } from "@/lib/analytics/date"
  * names), so a camelCase tool surface would force the model to track two
  * spellings of the same fact; every tool maps its snake_case args to the
  * service's camelCase input keys instead. Mutations return the full view
- * of the affected plan; the list returns compact summaries bounded for the
- * ~4000-char tool-result cap (truncateToolResult).
+ * of the affected plan; the list returns compact summaries bounded by row
+ * count AND serialized size (see planSummaries) so the ~4000-char
+ * tool-result cap (truncateToolResult) holds uncut.
  */
 
 /** Full model-facing plan view (single-row results: create/update). */
@@ -59,13 +61,16 @@ export interface AgentPlanSummary {
 }
 
 /**
- * list_plans entry cap: a summary is ≈250 chars, so 15 stay inside the
- * tool-result cap even with padded texts; more plans arrive as
- * `limited: true` + `total` and the model narrows via query_data.
+ * list_plans row-count cap: hard ceiling EVEN when every row stays tiny.
+ * The list payload must fit the tool-result cap COMPLETELY (a cut would
+ * hand the model a broken JSON payload), and rows that cost more chars
+ * consume more of the char budget — so a text-heavy plan set legitimately
+ * emits fewer rows than a sparse one, with `limited: true` + `total`
+ * telling the model there is more and query_data covering the gap.
  */
 export const PLAN_LIST_MAX = 15
 
-/** Char cap per free-text summary cell (counterparty, purpose). */
+/** Char cap per free-text summary cell (counterparty, purpose, account name). */
 const SUMMARY_TEXT_CHARS = 60
 
 export function planView(plan: PlanRow): AgentPlanView {
@@ -88,30 +93,52 @@ export function planView(plan: PlanRow): AgentPlanView {
   }
 }
 
+/**
+ * Whole-payload char budget for the list: the executor serializes the
+ * result object and truncateToolResult cuts anything beyond
+ * TOOL_RESULT_MAX_CHARS mid-JSON, so the payload must fit UNCUT. Rows
+ * cost their serialized length + one separator; 64 chars reserve the
+ * `{"plans":[…"total":N,"limited":X]}` wrapper (≤ ~48 incl. a 4-digit
+ * total) so the per-row accounting stays approximate-but-safe.
+ */
+const PLAN_LIST_CHAR_BUDGET = TOOL_RESULT_MAX_CHARS - 64
+
 /** Newest-first capped summaries + counting flags for the capped rest. */
 export function planSummaries(rows: PlanRow[]): {
   plans: AgentPlanSummary[]
   total: number
   limited: boolean
 } {
-  const sliced = rows.slice(0, PLAN_LIST_MAX)
-  return {
-    plans: sliced.map((plan) => ({
+  const plans: AgentPlanSummary[] = []
+  let serialized = 0
+  for (const plan of rows) {
+    if (plans.length >= PLAN_LIST_MAX) break
+    const summary: AgentPlanSummary = {
       id: plan.id,
       account_id: plan.accountId,
-      account_name: plan.accountName,
+      account_name: clipText(plan.accountName),
       counterparty: clipText(plan.counterparty),
       purpose: clipText(plan.purpose),
       amount_cents: plan.amountCents,
       category_id: plan.categoryId,
-      category_name: plan.categoryName,
+      category_name: clipText(plan.categoryName),
       dtstart: plan.dtstart,
       rrule: plan.rrule,
       status: plan.status,
       next_due_date: nextDueDate(plan, todayLocal()),
-    })),
+    }
+    const cost = JSON.stringify(summary).length + 1
+    // the first row is unconditional: for a budget-sized single plan an
+    // empty list would misread as "no plans" (better one broken-ish row
+    // than a wrong answer — and store-side caps keep even that row small)
+    if (plans.length > 0 && serialized + cost > PLAN_LIST_CHAR_BUDGET) break
+    plans.push(summary)
+    serialized += cost
+  }
+  return {
+    plans,
     total: rows.length,
-    limited: rows.length > PLAN_LIST_MAX,
+    limited: rows.length > plans.length,
   }
 }
 

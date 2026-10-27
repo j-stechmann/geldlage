@@ -15,6 +15,7 @@ import {
   update_plan,
   toolByName,
 } from "@/lib/agent/tools"
+import { TOOL_RESULT_MAX_CHARS } from "@/lib/agent/window"
 import { getPlan } from "@/lib/planning/service"
 import { setupTestDb, seedUser } from "./helpers"
 
@@ -75,6 +76,7 @@ function seedPlan(opts: {
   rrule?: string | null
   status?: "active" | "paused" | "finished"
   counterparty?: string | null
+  purpose?: string | null
   createdAt?: string
 }): PlannedTransaction {
   return db
@@ -86,6 +88,7 @@ function seedPlan(opts: {
       rrule: "rrule" in opts ? opts.rrule : "FREQ=MONTHLY;BYMONTHDAY=1",
       status: opts.status ?? "active",
       counterparty: opts.counterparty ?? "Mietwerk GmbH",
+      purpose: opts.purpose ?? null,
       accountId: null,
       categoryId: null,
       createdAt: opts.createdAt ?? "2026-01-01T00:00:00.000Z",
@@ -140,7 +143,7 @@ describe("list_plans", () => {
     expect(byId.get(lapsedOneOff.id)!.next_due_date).toBeNull()
   })
 
-  it("caps summaries and flags the cut", async () => {
+  it("caps summaries and flags the cut — inside the tool-result cap", async () => {
     const ids: string[] = []
     for (let i = 0; i < PLAN_LIST_MAX + 1; i++) {
       ids.push(
@@ -158,11 +161,47 @@ describe("list_plans", () => {
     }
     expect(res.total).toBe(PLAN_LIST_MAX + 1)
     expect(res.limited).toBe(true)
-    expect(res.plans).toHaveLength(PLAN_LIST_MAX)
+    expect(res.plans.length).toBeGreaterThan(0)
+    expect(res.plans.length).toBeLessThanOrEqual(PLAN_LIST_MAX)
+    // The row cap alone is not the bound — the WHOLE payload the executor
+    // serializes must fit the per-tool-result cap uncut (a cut would hand
+    // the model a broken JSON payload).
+    expect(JSON.stringify(res).length).toBeLessThanOrEqual(
+      TOOL_RESULT_MAX_CHARS
+    )
     // The cap keeps the NEWEST plans: the last-seeded (newest) leads and
-    // the first-seeded (oldest, March 1) falls off — the only one dropped.
+    // the first-seeded (oldest, March 1) falls off.
     expect(res.plans[0].id).toBe(ids[ids.length - 1])
     expect(res.plans.map((p) => p.id)).not.toContain(ids[0])
+  })
+
+  it("padded 60-char texts shrink the list; the payload still fits the cap", async () => {
+    const padded =
+      "Lorem ipsum dolor sit amet consectetur adipiscing elit sed do ei"
+    for (let i = 0; i < PLAN_LIST_MAX; i++) {
+      seedPlan({
+        userId,
+        counterparty: padded,
+        purpose: padded,
+        createdAt: `2026-03-${String(i + 1).padStart(2, "0")}T00:00:00.000Z`,
+      })
+    }
+    const res = (await list_plans.execute({}, ctx(userId))) as {
+      plans: Array<{ counterparty: string; purpose: string | null }>
+      total: number
+      limited: boolean
+    }
+    expect(res.total).toBe(PLAN_LIST_MAX)
+    expect(res.limited).toBe(true)
+    // fewer rows than the row cap (the texts consume the char budget), but
+    // the payload stays within the uncut tool result either way
+    expect(res.plans.length).toBeLessThan(PLAN_LIST_MAX)
+    expect(res.plans.length).toBeGreaterThan(0)
+    // the clip keeps surrogate pairs intact, so …≤ 60 chars per cell
+    expect(res.plans[0].counterparty).toHaveLength(60)
+    expect(JSON.stringify(res).length).toBeLessThanOrEqual(
+      TOOL_RESULT_MAX_CHARS
+    )
   })
 
   it("omits notes from summaries (details go through query_data)", async () => {

@@ -16,7 +16,7 @@ import { assertNoArgs, planSummaries } from "./plan-shared"
 export const list_plans = {
   name: "list_plans" as const,
   description:
-    "Listet alle Pläne (geplante Transaktionen) des Sitzungsbenutzers auf, neueste zuerst, als kompakte Zusammenfassungen inkl. next_due_date (nächster Termin heute oder später; null für finished bzw. abgelaufene Einmalpläne) — genau das kann query_data nicht berechnen. Maximal 15 Einträge (limited: true + total, falls es mehr sind). Für Filter, Aggregation oder vollständige Felder (notes, purpose) nutze query_data mit der Tabelle planned_transactions.",
+    "Listet alle Pläne (geplante Transaktionen) des Sitzungsbenutzers auf, neueste zuerst, als kompakte Zusammenfassungen inkl. next_due_date (nächster Termin heute oder später; null für finished bzw. abgelaufene Einmalpläne) — genau das kann query_data nicht berechnen. Maximal 15 Einträge (langlebige Freitexte können die Zahl weiter senken; limited: true + total, falls es mehr sind). Für Filter, Aggregation oder vollständige Felder (notes, purpose) nutze query_data mit der Tabelle planned_transactions.",
   parameters: {
     type: "object",
     properties: {},

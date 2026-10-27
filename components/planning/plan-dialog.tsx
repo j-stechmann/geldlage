@@ -814,12 +814,13 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
   }, [form.freq, form.monthlyMode, form.byMonthDayText])
 
   const save = async () => {
-    // defense in depth: the button is already disabled on a rule error (in
-    // builder mode via buildRrule's throws, in raw mode via the
-    // validateRrule pre-check) — saving would otherwise send rrule: null
-    // and silently strip a recurrence the failed builder simply couldn't
-    // render
-    if (effective.error !== null) return
+    // defense in depth: the button is already disabled — in builder mode
+    // via buildRrule's throws, in raw mode via the validateRrule
+    // pre-check — AND on an unproductive rule (valid syntax, but e.g.
+    // UNTIL before dtstart: preview.error carries it, and canSave folds
+    // it in). Saving would otherwise send rrule: null and silently strip
+    // a recurrence the failed builder simply couldn't render.
+    if (preview.error !== null) return
     setBusy(true)
     try {
       const amountText = form.amountText.trim()
@@ -874,10 +875,15 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
     }
   }
 
+  // preview.error is a SUPERSET of effective.error (the preview memo
+  // re-returns it first) and additionally covers syntactically valid but
+  // unproductive rules ("keinen Termin …"): without it, a rule with e.g.
+  // UNTIL before dtstart showed a red preview while save stayed armed and
+  // only the server's 400 (generic "ungültig" toast) pushed back.
   const canSave =
     isValidIsoDate(form.dtstart) &&
     form.amountText.trim() !== "" &&
-    effective.error === null &&
+    preview.error === null &&
     textErrors.counterparty === null &&
     textErrors.purpose === null &&
     textErrors.notes === null

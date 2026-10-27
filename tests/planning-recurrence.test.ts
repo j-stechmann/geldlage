@@ -4,6 +4,7 @@ import {
   isValidIsoDate,
   isoDatePlus,
   isEmptyRule,
+  MAX_RULE_LENGTH,
   nextOccurrenceDate,
   RuleValidationError,
   validateRrule,
@@ -112,6 +113,25 @@ describe("validateRrule", () => {
 
   it("rejects rule sets / multiple lines", () => {
     expectRuleError("DTSTART:20260101T120000Z\nRRULE:FREQ=DAILY;COUNT=5")
+  })
+
+  it("rejects oversized rule texts; the maximal legit rule stays accepted", () => {
+    // the allowlisted vocabulary tops out at a few hundred chars — beyond
+    // the cap the text is payload smuggled through the RRULE parser, not
+    // a recurrence
+    const legit =
+      "FREQ=YEARLY;INTERVAL=100;" +
+      "BYMONTH=1,2,3,4,5,6,7,8,9,10,11,12;" +
+      "BYMONTHDAY=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,-31"
+    expect(legit.length).toBeGreaterThan(100)
+    expect(legit.length).toBeLessThan(MAX_RULE_LENGTH)
+    expect(validateRrule(legit)).not.toBe("") // accepted below the cap
+
+    const oversized =
+      "FREQ=MONTHLY;BYMONTHDAY=" +
+      Array.from({ length: MAX_RULE_LENGTH }, () => "1").join(",")
+    expect(oversized.length).toBeGreaterThan(MAX_RULE_LENGTH)
+    expectRuleError(oversized, "rule too long")
   })
 })
 

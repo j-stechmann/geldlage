@@ -78,6 +78,16 @@ const ALLOWED_FREQ: Record<string, number> = {
   YEARLY: RRule.YEARLY,
 }
 
+/**
+ * Stored-rule length cap (chars, checked on the normalized text). The
+ * allowlisted vocabulary tops out at a few hundred chars (all 62 signed
+ * BYMONTHDAY tokens + all 12 BYMONTH tokens + base parts ≈ 350), while the
+ * rrule column feeds size-bounded surfaces: the agent's list summaries
+ * share one ~4000-char tool-result cap and plan JSON views/badges render
+ * the rule verbatim. Anything longer is not a recurrence — reject.
+ */
+export const MAX_RULE_LENGTH = 1000
+
 /** BY* parts a stored rule may use; anything else is rejected. */
 const ALLOWED_PARTS = new Set([
   "freq",
@@ -136,6 +146,11 @@ export function validateRrule(input: string): string {
   const raw = normalizeRuleInput(input)
   if (raw === "") {
     throw new RuleValidationError("empty rule")
+  }
+  if (raw.length > MAX_RULE_LENGTH) {
+    throw new RuleValidationError(
+      `rule too long (max ${MAX_RULE_LENGTH} chars)`
+    )
   }
   // Full RFC texts (DTSTART/EXDATE lines, multi-line) are rejected — dtstart
   // lives in its own column; a pasted "DTSTART:…" line must never
