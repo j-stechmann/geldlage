@@ -437,6 +437,59 @@ export function BalanceChart({
   )
 }
 
+/** One row of the Top-Ausgabenkategorien chart (Ist value + planned stack). */
+export interface TopCategoryRow {
+  categoryId: number | null
+  name: string
+  value: number
+  planned: number
+  share: number
+  fill: string
+}
+
+/**
+ * Merged rows of the planned-vs-actual categories chart (exported for the
+ * merge-identity regression tests). Rows are FRESH COPIES: mutating the
+ * memoized Ist rows in place leaked the planned sums into `chartData` —
+ * with the toggle off (merged === chartData) that stale planned value kept
+ * printing " + X € geplant" in tooltips until the next analytics refetch.
+ * Merge by CATEGORY ID, not name: the engine labels actual uncategorized
+ * spending "Unlabeled" while plannedCategories calls the same bucket
+ * "ohne Kategorie" — keyed on the id (null == null) the planned money
+ * stacks onto its true bucket instead of a twin row.
+ */
+export function topCategoriesMerge(
+  chartData: TopCategoryRow[],
+  forecast: ForecastResult | undefined
+): TopCategoryRow[] {
+  if (!forecast) return chartData
+  const rows = chartData.map((r) => ({ ...r }))
+  const byId = new Map(rows.map((r) => [r.categoryId, r]))
+  for (const p of forecast.plannedCategories) {
+    const planned = p.totalCents / 100
+    const existing = byId.get(p.categoryId)
+    if (existing) {
+      existing.planned = planned
+    } else {
+      rows.push({
+        categoryId: p.categoryId,
+        name: p.name,
+        value: 0,
+        planned,
+        share: p.share,
+        fill: resolveCategoryColor(p.categoryId, p.color),
+      })
+    }
+  }
+  return rows
+    .sort(
+      (a, b) =>
+        b.value + b.planned - (a.value + a.planned) ||
+        a.name.localeCompare(b.name)
+    )
+    .slice(0, 12)
+}
+
 export function TopCategoriesChart({
   data,
   forecast,
@@ -459,38 +512,10 @@ export function TopCategoriesChart({
       })),
     [data]
   )
-  const merged = React.useMemo(() => {
-    if (!forecast) return chartData
-    const rows = [...chartData]
-    // merge by CATEGORY ID, not name: the engine labels actual
-    // uncategorized spending "Unlabeled" while plannedCategories calls the
-    // same bucket "ohne Kategorie" — keyed on the id (null == null) the
-    // planned money stacks onto its true bucket instead of a twin row
-    const byId = new Map(rows.map((r) => [r.categoryId, r]))
-    for (const p of forecast.plannedCategories) {
-      const planned = p.totalCents / 100
-      const existing = byId.get(p.categoryId)
-      if (existing) {
-        existing.planned = planned
-      } else {
-        rows.push({
-          categoryId: p.categoryId,
-          name: p.name,
-          value: 0,
-          planned,
-          share: p.share,
-          fill: resolveCategoryColor(p.categoryId, p.color),
-        })
-      }
-    }
-    return rows
-      .sort(
-        (a, b) =>
-          b.value + b.planned - (a.value + a.planned) ||
-          a.name.localeCompare(b.name)
-      )
-      .slice(0, 12)
-  }, [chartData, forecast])
+  const merged = React.useMemo(
+    () => topCategoriesMerge(chartData, forecast),
+    [chartData, forecast]
+  )
   const config = React.useMemo<ChartConfig>(() => {
     const cfg: ChartConfig = {}
     for (const d of merged) {
