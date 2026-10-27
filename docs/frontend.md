@@ -308,7 +308,10 @@ occurrences so Ist + Geplant never double-count; planned expenses carry the
 Ist outflow's negative sign so the `stackOffset: "sign"` stack places them
 below the Ist expenses, planned income above the Ist income; the current
 month stacks the real partial with the remaining plans, future months are
-plan-only with the net line running through; with the toggle **off** the
+plan-only with the net line running through — note the net line's unit
+changes with the toggle: months within the forecast window (current month
+onward) count booked **and** planned money, where the toggle-off line stays
+booked-only; with the toggle **off** the
 Ist bars keep the pre-planning grouped layout, and segments with zero
 planned money are omitted instead of rendering 0-value bars/tooltip rows),
 and the categories chart stacks
