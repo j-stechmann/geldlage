@@ -43,6 +43,7 @@ import {
   isoDatePlus,
   nextOccurrenceDate,
   noonUtc,
+  validateRrule,
 } from "@/lib/planning/recurrence"
 import { MAX_COUNTERPARTY, MAX_TEXT } from "@/lib/planning/limits"
 
@@ -546,10 +547,19 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
     error: string | null
   }>(() => {
     if (form.rawDirty) {
-      return {
-        rrule: form.rawRrule.trim() === "" ? null : form.rawRrule.trim(),
-        error: null,
+      const raw = form.rawRrule.trim()
+      if (raw === "") return { rrule: null, error: null }
+      // the raw text is authoritative and must satisfy exactly what the
+      // server validates (validateRrule): previously the raw mode checked
+      // nothing, so an invalid raw rule stayed saveable until the request
+      // 400'd (toast) — now it disarms the dialog like a builder error,
+      // with the same inline message that save would have surfaced
+      try {
+        validateRrule(raw)
+      } catch {
+        return { rrule: null, error: "Wiederholungsregel ist ungültig" }
       }
+      return { rrule: raw, error: null }
     }
     try {
       return { rrule: buildRrule(form), error: null }
@@ -564,6 +574,28 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
     }
   }, [form])
   const effectiveRrule = effective.rrule
+
+  // While the raw text is authoritative (rawDirty) the "Wiederholung"
+  // select displays the FREQ of the EFFECTIVE rule, never the dormant
+  // builder state — clearing the raw text (→ one-off) must read as
+  // "Einmalig" and a raw FREQ=DAILY as "Täglich", instead of the stale
+  // pre-edit frequency. Unmatched raw text (no FREQ / invalid rule) keeps
+  // the last builder value; the preview error + disarmed save carry the
+  // invalidity. Any select interaction leaves raw mode (rawDirty: false)
+  // and resumes the builder.
+  const freqDisplay = React.useMemo<"once" | FormState["freq"]>(() => {
+    if (!form.rawDirty) return form.freq === "" ? "once" : form.freq
+    const raw = form.rawRrule.trim()
+    // a cleared raw text IS the one-off effective rule (rrule: null) —
+    // never fall back to the dormant builder frequency here
+    if (raw === "") return "once"
+    const m = /FREQ=(DAILY|WEEKLY|MONTHLY|YEARLY)/i.exec(raw)
+    return m
+      ? (m[1].toUpperCase() as FormState["freq"])
+      : form.freq === ""
+        ? "once"
+        : form.freq
+  }, [form.rawDirty, form.rawRrule, form.freq])
 
   // text byte caps (server mirror — see textLimitError): the memo never
   // throws, each exceeded field gets an inline hint and disarms the save
@@ -638,9 +670,11 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
   }, [form.freq, form.monthlyMode, form.byMonthDayText])
 
   const save = async () => {
-    // defense in depth: the button is already disabled on a rule error —
-    // saving would otherwise send rrule: null and silently strip a
-    // recurrence the failed builder simply couldn't render
+    // defense in depth: the button is already disabled on a rule error (in
+    // builder mode via buildRrule's throws, in raw mode via the
+    // validateRrule pre-check) — saving would otherwise send rrule: null
+    // and silently strip a recurrence the failed builder simply couldn't
+    // render
     if (effective.error !== null) return
     setBusy(true)
     try {
@@ -861,7 +895,7 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
               {field(
                 "Wiederholung",
                 <Select
-                  value={form.freq === "" ? "once" : form.freq}
+                  value={freqDisplay}
                   onValueChange={(v) =>
                     set({
                       freq:

@@ -95,7 +95,21 @@
   a dangling " · " for the category shown in the chip row; the forecast's
   all-accounts anchor caveat (single latest snapshot _batch_, inherited
   from the analytics balance KPI — understates multi-account users, exact
-  when account-scoped) is now documented in planning.md.
+  when account-scoped) is now documented in planning.md; raw-RRULE edits
+  in the plan dialog are validated with the exact server-side
+  `validateRrule` pass — an invalid raw rule disarms the dialog inline
+  (same surface as a builder-mode error) instead of staying saveable until
+  the save-time 400 toast, and the Wiederholung select tracks the raw
+  text's FREQ, so clearing the raw RRULE (→ one-off plan) reads as
+  "Einmalig" instead of the stale pre-edit frequency; the deep-linked
+  transactions focus view (`?tx=<id>`) disables its pager — the id lookup
+  ignores page state, so the controls were clickable no-ops around a stale
+  "N / 1" indicator that now reads "Fokus"; the dashboard's "Geplant
+  einblenden" surfaces a failed forecast read with the ErrorState + retry
+  pattern instead of silently dropping the overlay;
+  `GET /api/transactions/calendar` gained the same ±60-month window
+  distance cap as `GET /api/plans/occurrences`, so the two /planung window
+  reads fail together under their shared ErrorState (regression-tested).
 
 ## v1.20.0
 

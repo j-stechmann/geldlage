@@ -85,4 +85,32 @@ describe("TransactionsTable focusTxId (deep link from /planung)", () => {
     expect(document.getElementById("tx-details-tx-1")).toBeNull()
     expect(document.getElementById("tx-details-tx-2")).toBeNull()
   })
+
+  it("disables the dead pager in focus mode (the id lookup ignores page state)", async () => {
+    stubFetch([
+      {
+        url: /\/api\/transactions$/,
+        json: { rows: [ROW_A], total: 1, page: 1, pageCount: 1 },
+      },
+    ])
+    const { container } = renderWithQuery(
+      <TransactionsTable filters={EMPTY_FILTERS} focusTxId="tx-1" />
+    )
+    await waitFor(() => {
+      expect(container.textContent).toContain("Mietwerk GmbH")
+    })
+    const buttons = Array.from(container.querySelectorAll("button"))
+    const back = buttons.find((b) => b.textContent?.trim() === "Zurück")
+    const next = buttons.find((b) => b.textContent?.trim() === "Weiter")
+    expect(back).toBeTruthy()
+    expect(next).toBeTruthy()
+    // the query params in focus mode never read `page`, so the controls
+    // would be clickable no-ops around a stale "N / 1" — they disable and
+    // the indicator reads "Fokus" instead
+    expect(back).toBeDisabled()
+    expect(next).toBeDisabled()
+    const pagerText = back!.parentElement!.textContent ?? ""
+    expect(pagerText).toContain("Fokus")
+    expect(pagerText).not.toContain("/")
+  })
 })

@@ -604,6 +604,16 @@ describe("GET /api/transactions/calendar", () => {
     expect(
       (await getCalendar("from=2026-01-01&to=2026-02-01&accountId=0")).status
     ).toBe(400)
+    // same far-window contract as GET /api/plans/occurrences: the two
+    // /planung window reads must fail together (the calendar pair shares
+    // one ErrorState — a far navigation would otherwise 400 occurrences
+    // while bank chips still served beneath it)
+    const farFuture = await getCalendar("from=2999-01-01&to=2999-02-10")
+    expect(farFuture.status).toBe(400)
+    expect((await farFuture.json()).error).toBe("window_too_far")
+    const farPast = await getCalendar("from=1900-01-01&to=1900-02-01")
+    expect(farPast.status).toBe(400)
+    expect((await farPast.json()).error).toBe("window_too_far")
   })
 
   it("returns booked + pending rows (status verbatim), scoped per user", async () => {

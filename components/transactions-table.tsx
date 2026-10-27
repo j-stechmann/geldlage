@@ -436,18 +436,21 @@ export function TransactionsTable({
           <Button
             variant="outline"
             size="sm"
-            disabled={page <= 1}
+            disabled={focusMode || page <= 1}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
           >
             <ChevronLeft className="size-4" /> Zurück
           </Button>
           <span className="text-sm text-muted-foreground tabular-nums">
-            {page} / {data?.pageCount ?? 1}
+            {/* focus mode ignores the page state entirely (the id lookup is a
+                single row): the pager must not offer dead controls — the
+                buttons disable and the stale "N / 1" indicator reads "Fokus" */}
+            {focusMode ? "Fokus" : `${page} / ${data?.pageCount ?? 1}`}
           </span>
           <Button
             variant="outline"
             size="sm"
-            disabled={page >= (data?.pageCount ?? 1)}
+            disabled={focusMode || page >= (data?.pageCount ?? 1)}
             onClick={() => setPage((p) => p + 1)}
           >
             Weiter <ChevronRight className="size-4" />

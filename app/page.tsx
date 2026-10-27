@@ -97,6 +97,11 @@ export default function DashboardPage() {
                 : ""}
             </span>
           )}
+          {forecastOn && !forecast && forecastQuery.isError && (
+            /* a failed projection must not read as "no plans" (or worse, as
+               an inert toggle): /planung's ErrorState + retry pattern */
+            <ErrorState onRetry={() => void forecastQuery.refetch()} />
+          )}
           {forecastOn && hasContentFilters(filters) && (
             <span className="text-xs text-muted-foreground">
               Geplante Beträge reagieren nur auf den Kontofilter, nicht auf die

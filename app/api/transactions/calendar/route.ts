@@ -4,7 +4,11 @@ import type { SQL } from "drizzle-orm"
 import { getDb } from "@/lib/db"
 import { categories, transactions } from "@/lib/db/schema"
 import { isValidIsoDate, isoDatePlus } from "@/lib/planning/recurrence"
-import { MAX_OCCURRENCE_WINDOW_DAYS } from "@/lib/planning/service"
+import {
+  MAX_OCCURRENCE_WINDOW_DAYS,
+  MAX_WINDOW_DISTANCE_DAYS,
+} from "@/lib/planning/service"
+import { todayLocal } from "@/lib/analytics/date"
 import { requireSession, unauthorized } from "@/lib/auth/guard"
 
 export const runtime = "nodejs"
@@ -31,6 +35,25 @@ export async function GET(request: NextRequest) {
   if (from > to) {
     return NextResponse.json(
       { error: "invalid_window", message: "from must not be after to" },
+      { status: 400 }
+    )
+  }
+  // Distance cap BEFORE the width cap — the same input contract as GET
+  // /api/plans/occurrences: the /planung calendar navigates month-sized
+  // windows near today, and the two window reads must fail TOGETHER (the
+  // calendar pair shares one ErrorState, so a far-enough navigation would
+  // otherwise 400 the occurrences endpoint while the calendar still served
+  // bank chips under an error banner). This check also runs before the
+  // width cap's isoDatePlus, which overflows 4-digit ISO near year 9999.
+  const today = todayLocal()
+  const lowerBound = isoDatePlus(today, -MAX_WINDOW_DISTANCE_DAYS)
+  const upperBound = isoDatePlus(today, MAX_WINDOW_DISTANCE_DAYS)
+  if (from < lowerBound || to > upperBound) {
+    return NextResponse.json(
+      {
+        error: "window_too_far",
+        message: `window must lie within ${MAX_WINDOW_DISTANCE_DAYS} days of today`,
+      },
       { status: 400 }
     )
   }

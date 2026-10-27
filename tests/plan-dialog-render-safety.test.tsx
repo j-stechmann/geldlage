@@ -293,3 +293,94 @@ describe("plan dialog: invalid builder input must not crash the page", () => {
     expect(document.body.textContent).not.toContain("nur im Januar")
   })
 })
+
+describe("plan dialog: raw RRULE mode validates exactly like the server", () => {
+  /**
+   * The raw text is authoritative — an invalid raw rule used to stay
+   * saveable until the request 400'd (toast). It must disarm the dialog
+   * (inline preview error + disabled save) like every builder-mode rule
+   * error, because save() only guards on effective.error.
+   */
+  const EDITABLE_PLAN = {
+    ...BASE_PLAN,
+    rrule: "FREQ=MONTHLY;BYMONTHDAY=1",
+  }
+
+  function selectTriggerText(label: string): string {
+    const labelEl = Array.from(document.body.querySelectorAll("label")).find(
+      (el) => el.textContent?.startsWith(label)
+    )
+    expect(labelEl, `${label} field should be rendered`).toBeTruthy()
+    const trigger = labelEl!.querySelector('[data-slot="select-trigger"]')
+    expect(trigger).toBeTruthy()
+    return trigger!.textContent ?? ""
+  }
+
+  it("unparseable raw text disarms save; a repaired raw rule re-arms", async () => {
+    renderWithQuery(
+      <PlanDialog open onOpenChange={() => {}} plan={EDITABLE_PLAN} />
+    )
+    const raw = await waitFor(() => inputByLabel("RRULE"))
+
+    fireEvent.change(raw, { target: { value: "garbage" } })
+    await waitFor(() => {
+      expect(document.body.textContent).toContain(
+        "Wiederholungsregel ist ungültig"
+      )
+    })
+    expect(saveButton()).toBeDisabled()
+
+    // a raw rule the server would accept re-arms the dialog
+    fireEvent.change(raw, { target: { value: "FREQ=DAILY" } })
+    await waitFor(() => {
+      expect(document.body.textContent).not.toContain(
+        "Wiederholungsregel ist ungültig"
+      )
+    })
+    expect(saveButton()).toBeEnabled()
+  })
+
+  it("a parseable but disallowed rule (BYWEEKNO) disarms save the same way", async () => {
+    // full validateRrule parity, not just parseability: rrule parses
+    // BYWEEKNO fine, the server allowlist rejects it
+    renderWithQuery(
+      <PlanDialog open onOpenChange={() => {}} plan={EDITABLE_PLAN} />
+    )
+    const raw = await waitFor(() => inputByLabel("RRULE"))
+    fireEvent.change(raw, {
+      target: { value: "FREQ=MONTHLY;BYWEEKNO=10" },
+    })
+    await waitFor(() => {
+      expect(document.body.textContent).toContain(
+        "Wiederholungsregel ist ungültig"
+      )
+    })
+    expect(saveButton()).toBeDisabled()
+  })
+
+  it("clearing the raw text reads as 'Einmalig', not the stale FREQ", async () => {
+    // clearing the raw RRULE saves rrule: null → the plan becomes one-off.
+    // The dormant builder select must not keep displaying "Monatlich"
+    // while the effective rule is once — the display follows the raw text.
+    renderWithQuery(
+      <PlanDialog open onOpenChange={() => {}} plan={EDITABLE_PLAN} />
+    )
+    const raw = await waitFor(() => inputByLabel("RRULE"))
+
+    // while raw mode is active the select shows the raw rule's FREQ…
+    fireEvent.change(raw, { target: { value: "freq=daily" } })
+    await waitFor(() => {
+      expect(selectTriggerText("Wiederholung")).toContain("Täglich")
+    })
+
+    // …and an empty raw text is a one-off plan, displayed as such
+    fireEvent.change(raw, { target: { value: "" } })
+    await waitFor(() => {
+      const text = selectTriggerText("Wiederholung")
+      expect(text).toContain("Einmalig")
+      expect(text).not.toContain("Monatlich")
+    })
+    // one-off with valid amount/dtstart stays saveable
+    expect(saveButton()).toBeEnabled()
+  })
+})
