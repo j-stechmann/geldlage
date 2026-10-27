@@ -115,4 +115,17 @@ describe("topCategoriesMerge", () => {
     )
     expect(topCategoriesMerge([], forecast(planned))).toHaveLength(12)
   })
+
+  it("carries planned: undefined on rows without planned money (0,00 € geplant rows omitted)", () => {
+    const merged = topCategoriesMerge(
+      [istRow()],
+      forecast([plannedEntry({ categoryId: 2, name: "Andere" })])
+    )
+    const ohnePlan = merged.find((r) => r.name === "Miete")
+    expect(ohnePlan?.planned).toBeUndefined()
+    // unchanged Ist readout — no planned supplement, Ist share intact
+    expect(topCategoriesTooltip(100, "value", { payload: ohnePlan })).toBe(
+      "100,00 € (50 %)"
+    )
+  })
 })

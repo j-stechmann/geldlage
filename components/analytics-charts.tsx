@@ -127,53 +127,70 @@ function ZoomResetButton({
  * Merged monthly rows when the forecast toggle is on. Planned sums already
  * exclude matched occurrences (booked money lives in the actual bars), so
  * per month: actual + planned never double-count. The net line adds both —
- * for past months planned is 0, for the current month it covers the
- * remaining dated-from-today plans, for future months it is the whole row.
+ * for past months planned contributes 0, for the current month it covers
+ * the remaining dated-from-today plans, for future months it is the whole
+ * row.
+ *
+ * Zero segments become `undefined` instead of 0: recharts keeps tooltip
+ * items with `value != null`, so a 0 planned segment would print a
+ * "0,00 € geplant" row under every history month (and a "Einnahmen
+ * 0,00 €" row under plan-only months). Exported for the zero-row
+ * regression tests.
+ *
+ * PLANNED EXPENSES KEEP THE EXPENSE SIGN: the wire's `expensesCents` is
+ * positive, but this chart renders the Ist expense bar negated (downward,
+ * the app's original cashflow convention) — `plannedExpenses` mirrors that
+ * so the forecast-mode stack (stackOffset "sign") stacks the remaining
+ * planned outflow BELOW the actual outflow instead of into the income pile.
  */
-function mergeCashflow(
+export function mergeCashflow(
   history: AnalyticsResponse["monthlyCashflow"],
   forecast: ForecastResult | undefined
 ): Array<{
   month: string
-  income: number
-  expenses: number
+  income: number | undefined
+  expenses: number | undefined
   net: number
-  plannedIncome: number
-  plannedExpenses: number
+  plannedIncome: number | undefined
+  plannedExpenses: number | undefined
 }> {
   const rows = (history ?? []).map((d) => ({
     month: d.month,
     income: d.incomeCents / 100,
     expenses: -d.expensesCents / 100,
     net: d.netCents / 100,
-    plannedIncome: 0,
-    plannedExpenses: 0,
+    // only the forecast merge below fills these; undefined keeps months
+    // without planned money out of the tooltip
+    plannedIncome: undefined as number | undefined,
+    plannedExpenses: undefined as number | undefined,
   }))
   if (!forecast) return rows
   const byMonth = new Map(rows.map((r) => [r.month, r]))
   const extra: Array<{
     month: string
-    income: number
-    expenses: number
+    income: number | undefined
+    expenses: number | undefined
     net: number
-    plannedIncome: number
-    plannedExpenses: number
+    plannedIncome: number | undefined
+    plannedExpenses: number | undefined
   }> = []
   for (const p of forecast.monthlyPlanned) {
     const row = byMonth.get(p.month)
     const plannedNet = (p.incomeCents - p.expensesCents) / 100
     if (row) {
-      row.plannedIncome = p.incomeCents / 100
-      row.plannedExpenses = p.expensesCents / 100
+      row.plannedIncome = p.incomeCents !== 0 ? p.incomeCents / 100 : undefined
+      row.plannedExpenses =
+        p.expensesCents !== 0 ? -(p.expensesCents / 100) : undefined
       row.net += plannedNet
     } else {
       extra.push({
         month: p.month,
-        income: 0,
-        expenses: 0,
+        income: undefined,
+        expenses: undefined,
         net: plannedNet,
-        plannedIncome: p.incomeCents / 100,
-        plannedExpenses: p.expensesCents / 100,
+        plannedIncome: p.incomeCents !== 0 ? p.incomeCents / 100 : undefined,
+        plannedExpenses:
+          p.expensesCents !== 0 ? -(p.expensesCents / 100) : undefined,
       })
     }
   }
@@ -202,6 +219,13 @@ export function CashflowChart({
   const { wrapRef, handlers } = zoom
   const visible = zoom.slice(chartData)
 
+  // stacked ONLY while the overlay is on: the translucent planned segments
+  // must land on top of the real bars in one column; with the toggle off the
+  // bars keep the pre-planning grouped layout (income/expenses side by side,
+  // heights individually comparable) instead of silently changing the
+  // dashboard's default chart
+  const flowStackId = forecast !== undefined ? "flow" : undefined
+
   // @min-[1024px] (container query on <main>, same threshold as the grid
   // in app/page.tsx): a col-span keyed off the viewport would still span 2
   // when the dock squeezes main below 1024px on a wide window — the card
@@ -222,7 +246,15 @@ export function CashflowChart({
         ) : (
           <div ref={wrapRef} className="h-72 w-full touch-none" {...handlers}>
             <ChartContainer config={cashflowConfig} className="h-72 w-full">
-              <ComposedChart data={visible} accessibilityLayer>
+              <ComposedChart
+                data={visible}
+                accessibilityLayer
+                /* the flow stack mixes signs (Ist Ausgaben render downward)
+                   — "sign" is what makes the stacked segments accumulate
+                   upward/downward per sign instead of carving inward over
+                   the income bar; all-positive bars behave identically */
+                stackOffset="sign"
+              >
                 <CartesianGrid vertical={false} />
                 <XAxis dataKey="month" tickLine={false} axisLine={false} />
                 <YAxis
@@ -243,13 +275,13 @@ export function CashflowChart({
                 />
                 <Bar
                   dataKey="income"
-                  stackId="flow"
+                  stackId={flowStackId}
                   fill="var(--color-income)"
                   radius={4}
                 />
                 <Bar
                   dataKey="expenses"
-                  stackId="flow"
+                  stackId={flowStackId}
                   fill="var(--color-expenses)"
                   radius={4}
                 />
@@ -442,7 +474,8 @@ export interface TopCategoryRow {
   categoryId: number | null
   name: string
   value: number
-  planned: number
+  /** undefined = no planned money: the merged/tooltip segment must vanish, never print as a 0-value bar */
+  planned: number | undefined
   share: number
   fill: string
 }
@@ -457,6 +490,12 @@ export interface TopCategoryRow {
  * spending "Unlabeled" while plannedCategories calls the same bucket
  * "ohne Kategorie" — keyed on the id (null == null) the planned money
  * stacks onto its true bucket instead of a twin row.
+ *
+ * Rows WITHOUT planned money carry `planned: undefined` (not 0): recharts
+ * keeps tooltip items with `value != null`, so a 0-value planned segment
+ * under a purely-Ist category would print a noise "0,00 € geplant" row.
+ * Planned-only rows keep `value: 0` — their Ist segment intentionally
+ * prints "0,00 € + X € geplant".
  */
 export function topCategoriesMerge(
   chartData: TopCategoryRow[],
@@ -484,10 +523,13 @@ export function topCategoriesMerge(
   return rows
     .sort(
       (a, b) =>
-        b.value + b.planned - (a.value + a.planned) ||
+        // planned is number here (0 = never planned); zeroing to undefined
+        // happens only after the combined-total sort below
+        b.value + (b.planned ?? 0) - (a.value + (a.planned ?? 0)) ||
         a.name.localeCompare(b.name)
     )
     .slice(0, 12)
+    .map((r) => (r.planned === 0 ? { ...r, planned: undefined } : r))
 }
 
 export function TopCategoriesChart({
@@ -572,7 +614,7 @@ export function TopCategoriesChart({
                 {merged.map((d) => (
                   <Cell
                     key={d.name}
-                    fill={d.planned > 0 ? d.fill : "transparent"}
+                    fill={d.planned ? d.fill : "transparent"}
                   />
                 ))}
               </Bar>
