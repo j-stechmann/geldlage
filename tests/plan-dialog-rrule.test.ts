@@ -18,8 +18,11 @@ const DTSTART = "2026-01-01"
  *
  * Regression context: rawDirty used to be a hand-written allowlist that
  * missed several builder-unrenderable shapes — including one the builder
- * itself produces (YEARLY with 2+ month chips + weekday pattern) — so a
- * routine edit-save silently rewrote those plans' recurrences.
+ * itself produces (YEARLY with 2+ month chips + weekday pattern, whose
+ * mday-mapped rebuild silently dropped BYDAY) — so a routine edit-save
+ * silently rewrote those plans' recurrences. That shape now maps into the
+ * wday fields faithfully (parity + set compare prove the rebuild); parity
+ * keeps any OTHER dropped part from reading as faithful.
  */
 describe("parseRruleToForm faithfulness gate", () => {
   it("keeps builder-renderable rules editable (rawDirty=false)", () => {
@@ -35,6 +38,12 @@ describe("parseRruleToForm faithfulness gate", () => {
       "FREQ=MONTHLY;INTERVAL=2;BYDAY=-1MO",
       "FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=15",
       "FREQ=YEARLY;BYMONTH=3;BYDAY=1FR",
+      // 2+ month chips beside the weekday pattern: buildRrule writes
+      // BYMONTH=<list> next to BYDAY, the wday mapping carries every part
+      "FREQ=YEARLY;BYMONTH=3,6;BYDAY=1FR",
+      // ordinal weekday-yearly without BYMONTH (ordinal counts across the
+      // year — the dialog's hint documents exactly that semantics)
+      "FREQ=YEARLY;BYDAY=1MO",
     ]) {
       const o = parseRruleToForm(text, DTSTART)
       expect(o.rawDirty, text).toBe(false)
@@ -68,16 +77,29 @@ describe("parseRruleToForm faithfulness gate", () => {
     expect(o.byDay).toEqual(["MO"])
   })
 
+  it("maps the 2+-month-chip weekday-yearly shape into the wday fields", () => {
+    // THE historical silent-rewrite shape: the mday mapping rebuilt
+    // FREQ=YEARLY;BYMONTH=3,6 — silently dropping BYDAY=1FR — so an
+    // untouched edit-save changed the recurrence. The faithful wday
+    // mapping carries the chips + ordinal; rawDirty=false is the gate's
+    // certificate (rebuildParity + occurrence-set equality passed).
+    const o = parseRruleToForm("FREQ=YEARLY;BYMONTH=3,6;BYDAY=1FR", DTSTART)
+    expect(o.rawDirty).toBe(false)
+    expect(o.yearlyMode).toBe("wday")
+    expect(o.byMonth).toEqual(["3", "6"])
+    expect(o.ordinal).toBe("1")
+    expect(o.ordinalDay).toBe("FR")
+  })
+
   it("keeps the raw text authoritative for shapes the builder can't render", () => {
     const cases = [
-      // 2+ month chips + weekday pattern — buildable in the UI itself
-      "FREQ=YEARLY;BYMONTH=3,6;BYDAY=1FR",
       // multi-ordinal BYDAY (raw field / API / agent)
       "FREQ=MONTHLY;BYDAY=1FR,-1FR",
       // ordinal beyond the picker (1–5, "letzte") — would render an empty
       // pattern select despite round-tripping the same rule
       "FREQ=MONTHLY;BYDAY=-2SU",
-      // weekday-yearly without BYMONTH
+      // yearless PLAIN weekday: yearly wday mode always writes an ordinal,
+      // mday mode writes no BYDAY — every-Monday-yearly is inexpressible
       "FREQ=YEARLY;BYDAY=MO",
       // monthly plain-BYDAY + mday combos the builder can't express
       "FREQ=MONTHLY;BYDAY=MO;BYMONTHDAY=1",
@@ -89,13 +111,19 @@ describe("parseRruleToForm faithfulness gate", () => {
     }
   })
 
-  it("uses an 800-day comparison window (two annual cycles)", () => {
+  it("maps 1MO yearly anchored on the first Monday into the wday fields", () => {
     // first Monday of 2026 IS Jan 5 — a plain-yearly rule anchored there
-    // coincides with "1MO yearly" through all of 2026 and must still not be
-    // declared builder-renderable (2027 drifts: Jan 4 vs Jan 5)
+    // coincides with "1MO yearly" through all of 2026 (2027 drifts: Jan 4
+    // vs Jan 5). The OLD mday-mapped rebuild was exactly that plain yearly
+    // — the alias the 800-day window existed to catch. The faithful wday
+    // mapping rebuilds FREQ=YEARLY;BYDAY=1MO itself, so the alias cannot
+    // arise; the window compare stays as defense in depth.
     const o = parseRruleToForm("FREQ=YEARLY;BYDAY=1MO", "2026-01-05")
-    expect(o.rawDirty).toBe(true)
-    expect(o.rawRrule).toBe("FREQ=YEARLY;BYDAY=1MO")
+    expect(o.rawDirty).toBe(false)
+    expect(o.yearlyMode).toBe("wday")
+    expect(o.ordinal).toBe("1")
+    expect(o.ordinalDay).toBe("MO")
+    expect(o.byMonth).toEqual([])
   })
 
   it("bysetpos rules stay raw (unchanged behavior)", () => {
@@ -131,14 +159,18 @@ describe("parseRruleToForm part parity (sparse-rule hardening)", () => {
   // empty sets would wrongly read "faithful"; part parity is what keeps
   // the raw text authoritative.
   it("dropped BYDAY caught even when both window sets are empty", () => {
-    // first occurrence 2100-02-26 (~100y out): the mis-rebuilt rule
-    // (FREQ=YEARLY;INTERVAL=100;BYMONTH=2,3) silently drops BYDAY=-1FR
+    // first occurrence 2100-02-05 (~100y out): the mis-rebuilt rule
+    // (FREQ=YEARLY;INTERVAL=100;BYMONTH=2,3) silently drops BYDAY —
+    // multi-ordinal BYDAY has no builder field, so the mday mapping drops
+    // the whole part and parity is the ONLY guard (both window sets empty)
     const o = parseRruleToForm(
-      "FREQ=YEARLY;INTERVAL=100;BYMONTH=2,3;BYDAY=-1FR",
+      "FREQ=YEARLY;INTERVAL=100;BYMONTH=2,3;BYDAY=1FR,-1FR",
       "2000-04-01"
     )
     expect(o.rawDirty).toBe(true)
-    expect(o.rawRrule).toBe("FREQ=YEARLY;INTERVAL=100;BYMONTH=2,3;BYDAY=-1FR")
+    expect(o.rawRrule).toBe(
+      "FREQ=YEARLY;INTERVAL=100;BYMONTH=2,3;BYDAY=1FR,-1FR"
+    )
   })
 
   it("BYMONTH dropped on MONTHLY routes raw on the same empty-window trap", () => {
@@ -161,6 +193,24 @@ describe("parseRruleToForm part parity (sparse-rule hardening)", () => {
       "2000-03-01"
     )
     expect(o.rawDirty).toBe(false)
+  })
+
+  it("representable ultra-sparse wday rules stay builder-owned", () => {
+    // 2 month chips + last-Friday on a century cadence (first occurrence
+    // 2100-02-26): the wday mapping carries INTERVAL, BYMONTH=2,3 AND
+    // BYDAY=-1FR — the rebuild is the stored rule itself, both window sets
+    // empty, parity equal → builder-owned (the -1FR drop this shape used to
+    // suffer only befalls rules the mapping genuinely can't carry)
+    const o = parseRruleToForm(
+      "FREQ=YEARLY;INTERVAL=100;BYMONTH=2,3;BYDAY=-1FR",
+      "2000-04-01"
+    )
+    expect(o.rawDirty).toBe(false)
+    expect(o.yearlyMode).toBe("wday")
+    expect(o.byMonth).toEqual(["2", "3"])
+    expect(o.ordinal).toBe("-1")
+    expect(o.ordinalDay).toBe("FR")
+    expect(o.interval).toBe(100)
   })
 
   it("WKST does not demote semantics-free cases (interval 1 stays editable)", () => {

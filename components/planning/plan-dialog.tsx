@@ -377,8 +377,15 @@ export function rebuildParity(
  * (EMPTY_FORM + overrides) cannot reproduce the stored rule 1:1,
  * `rawDirty=true` and the raw text stays authoritative — an untouched
  * edit-save must never silently rewrite a recurrence the builder can't
- * represent (2+ month-chips with a weekday pattern, multi-ordinal BYDAY,
- * weekday-yearly without BYMONTH, BYDAY+BYMONTHDAY mixes, WKST variants).
+ * represent (multi-ordinal BYDAY, picker ordinals beyond 1–5/−1, yearless
+ * plain-weekday rules, plain-weekday+BYMONTH, BYDAY+BYMONTHDAY mixes, WKST
+ * variants). Multi-month-chip weekday YEARLY rules DO map into the wday
+ * fields — buildRrule reproduces them exactly; the historical silent
+ * rewrite of that shape (the mday mapping dropping BYDAY) is closed
+ * structurally by rebuildParity catching the dropped part. Ordinal
+ * weekday-yearly without BYMONTH maps too (the ordinal counts across the
+ * whole year — the dialog's own hint documents exactly that semantics);
+ * only its PLAIN-weekday sibling stays raw.
  * The gate is part parity (rebuildParity — every stored part must
  * re-appear in the rebuild; the occurrence-set compare alone fails for
  * ultra-sparse rules, where both sides of the compare window expand to
@@ -483,20 +490,28 @@ export function parseRruleToForm(
       // the picker items cover 1–5 and "letzte" (-1). An ordinal outside
       // that set ("-2SU" …) would render an empty pattern field despite
       // round-tripping the same rule — route it raw instead (the raw text
-      // stays authoritative, the same escape hatch as multi-ordinal BYDAY)
+      // stays authoritative, the same escape hatch as multi-ordinal BYDAY).
+      // BYMONTHDAY must be absent in both modes: the builder writes exactly
+      // one of BYMONTHDAY/BYDAY per mode, and MONTHLY has no month-chip
+      // concept — a stored intersection must not lose its BY* half (parity
+      // would route raw anyway, but the field mapping stays honest).
       const PICKER_ORDINALS = new Set(["1", "2", "3", "4", "5", "-1"])
       if (
         ordinalMatch !== null &&
         PICKER_ORDINALS.has(ordinalMatch[1]) &&
-        (freq === "MONTHLY"
-          ? monthDays.length === 0
-          : months.length === 1 && monthDays.length === 0)
+        monthDays.length === 0
       ) {
         if (freq === "MONTHLY") {
           overrides.monthlyMode = "wday"
           overrides.ordinal = ordinalMatch[1]
           overrides.ordinalDay = ordinalMatch[2]
         } else {
+          // ANY number of month chips is builder-representable: buildRrule
+          // writes BYMONTH=<list> beside the BYDAY ordinal, so the rebuild
+          // reproduces the stored rule exactly. The historical trap (the
+          // mday mapping silently dropping BYDAY on a routine edit-save) is
+          // closed structurally by rebuildParity catching the dropped part,
+          // not by routing the shape raw.
           overrides.yearlyMode = "wday"
           overrides.byMonth = months.map(String)
           overrides.ordinal = ordinalMatch[1]
