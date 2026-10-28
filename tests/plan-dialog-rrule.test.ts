@@ -466,4 +466,22 @@ describe("describeRrule BY* narrowing falls back to the raw rule", () => {
       "FREQ=MONTHLY;BYSETPOS=1;BYMONTHDAY=1,15"
     )
   })
+
+  it("an UNTIL the humanizer cannot parse falls back to the raw rule", () => {
+    // describeUntil parses the compact UNTIL every validateRrule-stored rule
+    // carries; an UNTIL it cannot (a dashed hand-written row) must not
+    // silently lose its end condition in the badge — that would read as an
+    // unbounded rule. The honest fallback is the full raw rule (the same
+    // escape hatch as BYSETPOS).
+    expect(describeRrule("FREQ=MONTHLY;BYMONTHDAY=1;UNTIL=2026-01-01")).toBe(
+      "FREQ=MONTHLY;BYMONTHDAY=1;UNTIL=2026-01-01"
+    )
+    // compact date-only / datetime forms keep the composed badge
+    expect(describeRrule("FREQ=MONTHLY;BYMONTHDAY=1;UNTIL=20261231")).toBe(
+      "am 1., bis 31.12.2026"
+    )
+    expect(
+      describeRrule("FREQ=MONTHLY;BYMONTHDAY=1;UNTIL=20261231T120000Z")
+    ).toBe("am 1., bis 31.12.2026")
+  })
 })

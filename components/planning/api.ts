@@ -480,8 +480,18 @@ export function describeRrule(rruleText: string | null): string {
   // escape BEFORE the COUNT/UNTIL suffixing, not after it
   if (parts.get("BYSETPOS")) return rruleText
   if (parts.get("COUNT")) return `${base}, ${parts.get("COUNT")}×`
-  const until = describeUntil(parts.get("UNTIL"))
-  if (until) return `${base}, bis ${until}`
+  const untilRaw = parts.get("UNTIL")
+  if (untilRaw !== undefined) {
+    // the end condition must never silently vanish from the badge (it would
+    // read as an unbounded rule): every rule stored through validateRrule
+    // carries the compact UNTIL describeUntil parses, so an unparseable
+    // UNTIL can only come from a non-canonical source (hand-written row) —
+    // the honest fallback is the full raw rule, same escape hatch as
+    // BYSETPOS above
+    const until = describeUntil(untilRaw)
+    if (!until) return rruleText
+    return `${base}, bis ${until}`
+  }
   return base
 }
 
