@@ -6,10 +6,11 @@ _Status: Accepted · Date: 2026-10-26_
 
 [ADR-0033] shipped the agent's tool registry with one standing rule: **all
 tools are read-only**. [ADR-0034] then built the broad read surface
-(`query_data`) — its catalog already exposes `planned_transactions`, so
-the chat can _report_ what a user planned, but it cannot _do_ anything:
-"lege eine monatliche Miete von 850 € an" dead-ends in advice to open the
-form by hand. Meanwhile the planning feature ([ADR-0035]) introduced a
+(`query_data`) — this feature extends its catalog with
+`planned_transactions`, so the chat can _report_ what a user planned, but
+it cannot _do_ anything: "lege eine monatliche Miete von 850 € an"
+dead-ends in advice to open the form by hand. Meanwhile the planning
+feature ([ADR-0035]) introduced a
 clean write boundary that the HTTP routes are thin wrappers around:
 user-scoped `createPlan / updatePlan / deletePlan` in
 [lib/planning/service.ts](../../lib/planning/service.ts) with
