@@ -18,10 +18,14 @@ export async function GET(request: NextRequest) {
   let months = 12
   const monthsRaw = sp.get("months")
   if (monthsRaw !== null) {
-    const n = Number.parseInt(monthsRaw, 10)
-    if (!Number.isInteger(n)) {
+    // digits-only, like every other numeric query param: parseInt alone
+    // would coerce "12abc" → 12 (and accept "-1") — a mangled horizon
+    // instead of the invalid_months 400 garbage gets; in-range clamping
+    // ("0", "50") stays numeric
+    if (!/^\d+$/.test(monthsRaw)) {
       return NextResponse.json({ error: "invalid_months" }, { status: 400 })
     }
+    const n = Number.parseInt(monthsRaw, 10)
     months = Math.min(Math.max(n, 1), MAX_FORECAST_MONTHS)
   }
   const accountIdRaw = sp.get("accountId")

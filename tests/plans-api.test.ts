@@ -548,6 +548,16 @@ describe("GET /api/plans/occurrences", () => {
     expect(
       (await getOccurrences("from=2026-01-01&to=2026-02-01&accountId=0")).status
     ).toBe(400)
+    // digits-only: parseInt coercion ("12.9" → 12, "12abc" → 12) would
+    // silently read a different account than the client asked for
+    expect(
+      (await getOccurrences("from=2026-01-01&to=2026-02-01&accountId=12.9"))
+        .status
+    ).toBe(400)
+    expect(
+      (await getOccurrences("from=2026-01-01&to=2026-02-01&accountId=12abc"))
+        .status
+    ).toBe(400)
   })
 
   it("expands occurrences with category + read-time match state", async () => {
@@ -715,6 +725,15 @@ describe("GET /api/transactions/calendar", () => {
     expect(
       (await getCalendar("from=2026-01-01&to=2026-02-01&accountId=0")).status
     ).toBe(400)
+    // digits-only, same contract as GET /api/plans/occurrences: parseInt
+    // coercion would silently read a different account
+    expect(
+      (await getCalendar("from=2026-01-01&to=2026-02-01&accountId=12.9")).status
+    ).toBe(400)
+    expect(
+      (await getCalendar("from=2026-01-01&to=2026-02-01&accountId=12abc"))
+        .status
+    ).toBe(400)
     // same far-window contract as GET /api/plans/occurrences: the two
     // /planung window reads must fail together (the calendar pair shares
     // one ErrorState — a far navigation would otherwise 400 occurrences
@@ -826,6 +845,11 @@ describe("GET /api/plans/forecast", () => {
       (await getForecastRoute(anonRequest(`${BASE}/api/plans/forecast`))).status
     ).toBe(401)
     expect((await getForecast("months=abc")).status).toBe(400)
+    // digits-only: parseInt coercion would read "12abc" as a 12-month
+    // horizon instead of the invalid_months 400 garbage gets
+    expect((await getForecast("months=12abc")).status).toBe(400)
+    expect((await getForecast("months=12.9")).status).toBe(400)
+    expect((await getForecast("months=-1")).status).toBe(400)
   })
 
   it("returns the forecast envelope", async () => {
