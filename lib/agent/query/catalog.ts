@@ -6,6 +6,7 @@ import {
   categories,
   importBatches,
   labelRules,
+  plannedTransactions,
   transactions,
 } from "@/lib/db/schema"
 
@@ -222,6 +223,46 @@ export const queryTables: Record<string, QueryTableDef> = {
       batch: {
         target: "import_batches",
         on: eq(importBatches.id, transactions.batchId),
+      },
+    },
+  },
+  planned_transactions: {
+    table: plannedTransactions,
+    userIdColumn: plannedTransactions.userId,
+    columns: {
+      id: col("text", plannedTransactions.id),
+      account_id: col("integer", plannedTransactions.accountId),
+      counterparty: col("text", plannedTransactions.counterparty),
+      purpose: col("text", plannedTransactions.purpose),
+      amount_cents: col(
+        "integer",
+        plannedTransactions.amountCents,
+        "Cent, negativ=Ausgabe"
+      ),
+      category_id: col("integer", plannedTransactions.categoryId),
+      dtstart: col(
+        "text",
+        plannedTransactions.dtstart,
+        'erster Termin, ISO "JJJJ-MM-TT"'
+      ),
+      rrule: col(
+        "text",
+        plannedTransactions.rrule,
+        "RFC-5545-RRULE ohne DTSTART; NULL = einmalig am dtstart"
+      ),
+      status: col("text", plannedTransactions.status, "active|paused|finished"),
+      notes: col("text", plannedTransactions.notes),
+      created_at: col("text", plannedTransactions.createdAt),
+      updated_at: col("text", plannedTransactions.updatedAt),
+    },
+    joins: {
+      category: {
+        target: "categories",
+        on: eq(categories.id, plannedTransactions.categoryId),
+      },
+      account: {
+        target: "accounts",
+        on: eq(accounts.id, plannedTransactions.accountId),
       },
     },
   },

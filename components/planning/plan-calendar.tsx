@@ -1,0 +1,306 @@
+"use client"
+
+import * as React from "react"
+import { useRouter } from "next/navigation"
+import { addDays } from "date-fns"
+import { de as deLocale } from "date-fns/locale"
+import { EventCalendar } from "@/components/reui/event-calendar/event-calendar"
+import { EventCalendarContent } from "@/components/reui/event-calendar/event-calendar-content"
+import { EventCalendarNav } from "@/components/reui/event-calendar/event-calendar-nav"
+import type {
+  CalendarEvent,
+  CalendarView,
+  EventCalendarInteractions,
+  EventCalendarOccurrence,
+} from "@/components/reui/event-calendar/event-calendar-types"
+import {
+  ApiError,
+  useCalendarTransactions,
+  usePlanOccurrences,
+  transactionDeepLink,
+  type CalendarTransaction,
+  type PlanOccurrence,
+} from "@/components/planning/api"
+import { ErrorState } from "@/components/error-state"
+import { isoDateLocal, todayLocal } from "@/lib/analytics/date"
+import { euro } from "@/lib/money"
+import { resolveCategoryColor } from "@/lib/category-colors"
+
+function localMidnight(iso: string): Date {
+  const [y, m, d] = iso.split("-").map(Number)
+  return new Date(y, m - 1, d)
+}
+
+/** Chip label: counterparty/purpose + signed, German-formatted amount. */
+function chipTitle(
+  entry: {
+    label: string | null
+    purpose: string | null
+    amountCents: number
+  },
+  fallback: string
+): string {
+  const label = entry.label ?? entry.purpose ?? fallback
+  return `${label} · ${euro(entry.amountCents)}`
+}
+
+/** Wash a color toward muted — the visual language for REAL BANK chips. */
+function washedColor(color: string, keep: number): string {
+  return `color-mix(in oklab, ${color} ${keep}%, var(--muted-foreground))`
+}
+
+interface CalendarChipData {
+  /** planned occurrence (own dialog opens on click) */
+  occurrence?: PlanOccurrence
+  /** real bank transaction (booked or pending); no dialog opens */
+  transaction?: CalendarTransaction
+  /**
+   * "pending" = Nicht gebucht rows: the default chip draws them with the
+   * dashed provisional outline (the transactions table's pending language)
+   */
+  chipVariant?: "pending"
+}
+
+type OccurrenceData = CalendarChipData
+
+/** German i18n overrides (dates Germanize via the de locale). */
+const GERMAN_I18N = {
+  labels: {
+    today: "Heute",
+    previous: "Zurück",
+    next: "Weiter",
+    allDay: "Ganztägig",
+    noEvents: "Keine Termine",
+    loading: "Lade Termine",
+    selectView: "Ansicht wählen",
+    more: (count: number) => `+${count} weitere`,
+    events: (count: number) => (count === 1 ? "1 Termin" : `${count} Termine`),
+  },
+  viewNames: {
+    month: "Monat",
+    week: "Woche",
+    day: "Tag",
+    days: (count: number) => `${count} Tage`,
+    agenda: "Liste",
+    resource: "Zeit",
+  },
+  formats: {
+    dayTitle: "EEEE, d. MMMM yyyy",
+    agendaDayHeader: "EEEE, d. MMMM",
+    moreDayHeader: "EEEE, d. MMMM",
+  },
+}
+
+/**
+ * Stable prop identities for the calendar: month/agenda-only views and the
+ * all-off interaction set. The store's setOptions compares by identity and
+ * bumps its settings version on every change — inline literals would
+ * invalidate (and re-notify) once per parent render for zero effect.
+ */
+const CALENDAR_VIEWS: CalendarView[] = ["month", "agenda"]
+const CALENDAR_INTERACTIONS: Partial<EventCalendarInteractions> = {
+  drag: false,
+  resize: false,
+  selectSlot: false,
+}
+const CALENDAR_EVENT_TOOLTIP = { delay: 300 }
+
+export interface PlanCalendarProps {
+  accountId: number | null
+  onEventClick: (occurrence: PlanOccurrence) => void
+}
+
+/**
+ * Month/list calendar. The server is the single source of truth for
+ * expansion + matching (ADR-0035); the calendar renders two chip families:
+ * planned occurrences (full color — muted when paused/matched, destructive
+ * when überfällig) and REAL booked transactions washed toward muted
+ * (color-mix). Clicks only open plans; booked chips carry no dialog.
+ * Interactions stay off by design: editing an occurrence means editing its
+ * plan, never dragging (a drag would ambiguously rewrite DTSTART).
+ */
+export function PlanCalendar({ accountId, onEventClick }: PlanCalendarProps) {
+  const router = useRouter()
+  // named calendarWindow (not `window`): shadowing the browser global is a
+  // foot-gun for anything later reading window.* in this scope
+  const [calendarWindow, setCalendarWindow] = React.useState<{
+    from: string
+    to: string
+  } | null>(null)
+  const occurrencesQuery = usePlanOccurrences(
+    calendarWindow?.from ?? null,
+    calendarWindow?.to ?? null,
+    accountId
+  )
+  const bookedQuery = useCalendarTransactions(
+    calendarWindow?.from ?? null,
+    calendarWindow?.to ?? null,
+    accountId
+  )
+  // failed window reads stay visible instead of rendering as an empty
+  // month (the dashboard's ErrorState pattern) — placeholder data keeps a
+  // possibly stale calendar visible beneath
+  const calendarLoadFailed = occurrencesQuery.isError || bookedQuery.isError
+  // window_too_far is NOT a transient failure: the endpoints refuse this
+  // window deterministically (±MAX_WINDOW_DISTANCE_DAYS of today, docs
+  // planning.md), so the shared banner's "Erneut versuchen" could never
+  // succeed at that distance — the reads answer fine again as soon as the
+  // user navigates back toward today (onRangeChange refetches). The hint
+  // names that instead of offering a dead retry, and keeps the error
+  // styling so the month still cannot read as "nothing planned".
+  const windowTooFar =
+    occurrencesQuery.error instanceof ApiError &&
+    occurrencesQuery.error.code === "window_too_far"
+  const farWindow =
+    windowTooFar ||
+    (bookedQuery.error instanceof ApiError &&
+      bookedQuery.error.code === "window_too_far")
+
+  const handleRangeChange = React.useCallback(
+    (info: {
+      range: { start: Date; end: Date }
+      view: string
+      date: Date
+      timeZone: string
+    }) => {
+      // local calendar dates — toISOString() would shift the window edges
+      // across UTC midnight for non-UTC timezones
+      const from = isoDateLocal(info.range.start)
+      const to = isoDateLocal(new Date(info.range.end.getTime() - 1))
+      setCalendarWindow((prev) =>
+        prev && prev.from === from && prev.to === to ? prev : { from, to }
+      )
+    },
+    []
+  )
+
+  // local "today" — the UTC date from toISOString() miscolors overdue chips
+  // around local midnight for non-UTC timezones
+  const todayIso = todayLocal()
+
+  const events = React.useMemo<CalendarEvent<OccurrenceData>[]>(() => {
+    const occurrences = occurrencesQuery.data?.occurrences ?? []
+    const planned = occurrences.map((o) => {
+      const start = localMidnight(o.date)
+      const categoryColor =
+        o.categoryId !== null && o.categoryColor !== null
+          ? resolveCategoryColor(o.categoryId, o.categoryColor)
+          : null
+      // chip color: paused/matched = muted, überfällig = destructive,
+      // else the category color (primary tint when uncategorized)
+      let color: string
+      if (o.planStatus === "paused" || o.matched !== null) {
+        color = "var(--muted-foreground)"
+      } else if (o.date < todayIso) {
+        color = "var(--destructive)"
+      } else {
+        color = categoryColor ?? "var(--primary)"
+      }
+      const title = chipTitle(
+        {
+          label: o.counterparty,
+          purpose: o.purpose,
+          amountCents: o.amountCents,
+        },
+        "Geplant"
+      )
+      return {
+        id: o.id,
+        title: o.matched !== null ? `✓ ${title}` : title,
+        start,
+        end: addDays(start, 1),
+        allDay: true,
+        readOnly: true,
+        color,
+        data: { occurrence: o },
+      }
+    })
+    const booked = (bookedQuery.data?.transactions ?? []).map(
+      (tx: CalendarTransaction) => {
+        const start = localMidnight(tx.date)
+        const base =
+          tx.categoryId !== null && tx.categoryColor !== null
+            ? resolveCategoryColor(tx.categoryId, tx.categoryColor)
+            : "var(--primary)"
+        const title = chipTitle(
+          {
+            label: tx.counterparty,
+            purpose: tx.purpose,
+            amountCents: tx.amountCents,
+          },
+          "Buchung"
+        )
+        const pending = tx.status === "Nicht gebucht"
+        // booked = washed (40 %); pending = washed further (20 %), hollow
+        // marker + the dashed provisional chip variant
+        return {
+          id: `tx::${tx.id}`,
+          title: `${pending ? "◌" : "•"} ${title}`,
+          start,
+          end: addDays(start, 1),
+          allDay: true,
+          readOnly: true,
+          color: washedColor(base, pending ? 20 : 40),
+          data: {
+            transaction: tx,
+            ...(pending ? { chipVariant: "pending" as const } : {}),
+          },
+        }
+      }
+    )
+    return [...planned, ...booked]
+  }, [
+    occurrencesQuery.data?.occurrences,
+    bookedQuery.data?.transactions,
+    todayIso,
+  ])
+
+  return (
+    <>
+      {farWindow && (
+        <p className="mb-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          Dieser Zeitraum liegt außerhalb des planbaren Fensters (±60 Monate um
+          heute) — navigieren Sie im Kalender Richtung „Heute“ zurück.
+        </p>
+      )}
+      {!farWindow && calendarLoadFailed && (
+        <ErrorState
+          className="mb-2"
+          onRetry={() => {
+            void occurrencesQuery.refetch()
+            void bookedQuery.refetch()
+          }}
+        />
+      )}
+      <EventCalendar
+        views={CALENDAR_VIEWS}
+        defaultView="month"
+        events={events}
+        loading={occurrencesQuery.isLoading || bookedQuery.isLoading}
+        interactions={CALENDAR_INTERACTIONS}
+        enableShortcuts={false}
+        eventTooltip={CALENDAR_EVENT_TOOLTIP}
+        locale={deLocale}
+        weekStartsOn={1}
+        i18n={GERMAN_I18N}
+        onRangeChange={handleRangeChange}
+        onEventClick={(occurrence: EventCalendarOccurrence<OccurrenceData>) => {
+          const data = occurrence.event.data
+          if (data?.occurrence) {
+            // plan chips open the plan dialog
+            onEventClick(data.occurrence)
+          } else if (data?.transaction) {
+            // bank chips deep-link into the transactions table with the row
+            // surfaced (expanded, highlighted) — the id lookup is user-scoped
+            // and independent of any filter state
+            router.push(transactionDeepLink(data.transaction))
+          }
+        }}
+        className="h-[70vh] min-h-[540px] rounded-lg border"
+      >
+        <EventCalendarNav />
+        <EventCalendarContent />
+      </EventCalendar>
+    </>
+  )
+}

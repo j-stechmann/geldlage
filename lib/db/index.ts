@@ -246,6 +246,34 @@ export function createSchemaSqlite(db: Db) {
   db.run(
     `CREATE INDEX IF NOT EXISTS transactions_payee_idx ON transactions (payee)`
   )
+  // ── planned transactions (ADR-0035): virtual, recurring or one-off.
+  // Never inserted into transactions — the forecast expands occurrences and
+  // matches them read-time against booked rows (lib/planning/matching.ts).
+  // The status CHECK is runtime-enforced here; the drizzle check() defs in
+  // schema.ts must stay in sync with it.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS planned_transactions (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      account_id INTEGER REFERENCES accounts(id),
+      counterparty TEXT,
+      purpose TEXT,
+      amount_cents INTEGER NOT NULL CHECK (amount_cents <> 0),
+      category_id INTEGER REFERENCES categories(id),
+      dtstart TEXT NOT NULL,
+      rrule TEXT,
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'finished')),
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `)
+  db.run(
+    `CREATE INDEX IF NOT EXISTS planned_transactions_user_status_idx ON planned_transactions (user_id, status)`
+  )
+  db.run(
+    `CREATE INDEX IF NOT EXISTS planned_transactions_account_idx ON planned_transactions (account_id)`
+  )
   // ── agent chat (ADR-0033): threads + invites/members + messages. The
   // role CHECK is runtime-enforced here; the drizzle check() defs in
   // schema.ts must stay in sync with it.
@@ -360,12 +388,21 @@ function adoptLegacyIssuer(db: Db) {
     )
     return
   }
+  // Every table with a users(id) FK must be listed here (no ON DELETE
+  // action exists): a missed table keeps the duplicate's FK alive and the
+  // DELETE FROM users below fails the whole startup migration. The agent
+  // chat tables (ADR-0033) carry the FK too; chat_thread_members'
+  // (thread_id, user_id) uniqueness gets the pre-merge cleanup below.
   const childTables = [
     "accounts",
     "categories",
     "label_rules",
     "import_batches",
+    "planned_transactions",
     "transactions",
+    "chat_threads",
+    "chat_thread_members",
+    "chat_messages",
   ]
   for (const legacyUser of legacyUsers) {
     // A JIT-created duplicate (same subject, already on the new issuer) is
@@ -380,6 +417,22 @@ function adoptLegacyIssuer(db: Db) {
       .get()
     db.transaction((tx) => {
       if (duplicate) {
+        // chat_thread_members re-points can clash with the merged user's
+        // own (thread_id, user_id) row: both ids may hold explicit
+        // memberships on one thread (owner rows are never stored, but
+        // invites can bind memberships to both). Drop the duplicate's
+        // conflicting row FIRST so the generic re-point below cannot hit
+        // the unique index — the surviving row belongs to the identity
+        // that keeps its id, state and all (dropping one of two rows
+        // representing the same human's membership loses only its state).
+        tx.run(
+          sql`DELETE FROM chat_thread_members WHERE user_id = ${duplicate.id}
+              AND EXISTS (
+                SELECT 1 FROM chat_thread_members AS other
+                WHERE other.thread_id = chat_thread_members.thread_id
+                  AND other.user_id = ${legacyUser.id}
+              )`
+        )
         for (const table of childTables) {
           tx.run(
             sql`UPDATE ${sql.raw(table)} SET user_id = ${legacyUser.id} WHERE user_id = ${duplicate.id}`
@@ -635,6 +688,34 @@ export function migrateSchema(db: Db) {
   )
   db.run(
     `CREATE INDEX IF NOT EXISTS transactions_payee_idx ON transactions (payee)`
+  )
+  // ── planned transactions (ADR-0035): virtual, recurring or one-off.
+  // Never inserted into transactions — the forecast expands occurrences and
+  // matches them read-time against booked rows (lib/planning/matching.ts).
+  // The status CHECK is runtime-enforced here; the drizzle check() defs in
+  // schema.ts must stay in sync with it.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS planned_transactions (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      account_id INTEGER REFERENCES accounts(id),
+      counterparty TEXT,
+      purpose TEXT,
+      amount_cents INTEGER NOT NULL CHECK (amount_cents <> 0),
+      category_id INTEGER REFERENCES categories(id),
+      dtstart TEXT NOT NULL,
+      rrule TEXT,
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'finished')),
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `)
+  db.run(
+    `CREATE INDEX IF NOT EXISTS planned_transactions_user_status_idx ON planned_transactions (user_id, status)`
+  )
+  db.run(
+    `CREATE INDEX IF NOT EXISTS planned_transactions_account_idx ON planned_transactions (account_id)`
   )
   // ── agent chat (ADR-0033): threads + invites/members + messages. The
   // role CHECK is runtime-enforced here; the drizzle check() defs in

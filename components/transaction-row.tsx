@@ -154,6 +154,7 @@ export const TransactionRow = React.memo(function TransactionRow({
   activation,
   onToggle,
   onAssign,
+  focus = false,
 }: {
   row: TxRow
   expanded: boolean
@@ -161,11 +162,24 @@ export const TransactionRow = React.memo(function TransactionRow({
   activation: RowActivation
   onToggle: (id: string) => void
   onAssign: (row: TxRow) => void
+  /** deep-linked row (from the /planung calendar): highlighted + scrolled to */
+  focus?: boolean
 }) {
   const counterparty = counterpartyOf(row)
+  const rowRef = React.useRef<HTMLTableRowElement>(null)
+  React.useEffect(() => {
+    if (focus) {
+      rowRef.current?.scrollIntoView({ block: "center", behavior: "smooth" })
+    }
+  }, [focus])
   return (
     <TableRow
-      className="cursor-pointer"
+      ref={rowRef}
+      data-focus={focus || undefined}
+      className={cn(
+        "cursor-pointer",
+        focus && "bg-accent/40 outline-2 -outline-offset-2 outline-ring/60"
+      )}
       onPointerDown={activation.onPointerDown}
       onClick={(e) => {
         // only a plain activation (see use-row-activation) toggles the row
