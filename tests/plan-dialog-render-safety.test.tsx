@@ -254,6 +254,45 @@ describe("plan dialog: invalid builder input must not crash the page", () => {
     expect(saveButton()).toBeEnabled()
   })
 
+  it("a zero amount disarms save inline instead of a save-time 400", async () => {
+    // validatePlanInput rejects amount_cents = 0 (invalid_amount) — "0,00"
+    // used to keep the save button armed and surfaced only as the generic
+    // 400 toast. The dialog must show the field error and disarm like the
+    // byte caps do.
+    renderWithQuery(
+      <PlanDialog
+        open
+        onOpenChange={() => {}}
+        plan={{ ...BASE_PLAN, rrule: null }}
+      />
+    )
+    const input = await waitFor(() => inputByLabel("Betrag"))
+    // the prefilled -95 € amount keeps the button armed before the change
+    expect(saveButton()).toBeEnabled()
+
+    fireEvent.change(input, { target: { value: "0,00" } })
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("Betrag darf nicht 0 sein")
+    })
+    expect(saveButton()).toBeDisabled()
+
+    // a repair re-arms — even a 1-cent amount is a valid plan
+    fireEvent.change(input, { target: { value: "0,01" } })
+    await waitFor(() => {
+      expect(document.body.textContent).not.toContain(
+        "Betrag darf nicht 0 sein"
+      )
+    })
+    expect(saveButton()).toBeEnabled()
+
+    // the bare "0" is caught the same way
+    fireEvent.change(input, { target: { value: "0" } })
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("Betrag darf nicht 0 sein")
+    })
+    expect(saveButton()).toBeDisabled()
+  })
+
   it("a sparse-but-live rule previews its real next dates (ladder, not a 400-day window)", async () => {
     // leap-day yearly plan anchored in a non-leap year: the first occurrence
     // (2028-02-29) is > 2 years after dtstart — a fixed 400-day preview

@@ -752,6 +752,26 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
     [form.counterparty, form.purpose, form.notes]
   )
 
+  // 0 is invalid server-side (validatePlanInput: amount must be a non-zero
+  // safe integer of cents) — pre-empted inline like the byte caps, so "0,00"
+  // disarms the save with a field error instead of only failing as the
+  // save-time 400 toast the button was still armed for. Text the parser
+  // REJECTS stays on the save path on purpose: "950," mid-typing throws, and
+  // an inline red at every keystroke would fight the input — the toast there
+  // carries the format hint.
+  const amountError = React.useMemo<string | null>(() => {
+    const t = form.amountText.trim()
+    if (t === "") return null
+    try {
+      if (parseGermanAmountToCents(t) === 0) {
+        return "Betrag darf nicht 0 sein"
+      }
+    } catch {
+      return null
+    }
+    return null
+  }, [form.amountText])
+
   // ── preview: next ≤3 dates, from the effective rule (same engine as the
   // server: the rrule package) ──
   const preview = React.useMemo(() => {
@@ -883,6 +903,7 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
   const canSave =
     isValidIsoDate(form.dtstart) &&
     form.amountText.trim() !== "" &&
+    amountError === null &&
     preview.error === null &&
     textErrors.counterparty === null &&
     textErrors.purpose === null &&
@@ -929,8 +950,13 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
                 value={form.amountText}
                 onChange={(e) => set({ amountText: e.target.value })}
                 aria-label="Betrag"
+                aria-invalid={amountError !== null || undefined}
               />,
-              "Deutsches Format, z. B. 950,00"
+              amountError ? (
+                <span className="text-destructive">{amountError}</span>
+              ) : (
+                "Deutsches Format, z. B. 950,00"
+              )
             )}
             {field(
               "Startdatum",
