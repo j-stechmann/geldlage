@@ -361,6 +361,16 @@ export function describeRrule(rruleText: string | null): string {
     }
     base = interval === 1 ? "täglich" : `alle ${interval} Tage`
   } else if (freq === "WEEKLY") {
+    // WKST moves the week boundary a multi-week INTERVAL expands across
+    // (RFC 5545: significant for WEEKLY with INTERVAL > 1) — "alle 2 Wochen"
+    // reads identically for WKST=MO and WKST=SU while firing different
+    // weeks; raw rule (same hatch). With INTERVAL=1 every week fires, so
+    // WKST cannot change an occurrence (the semantics-free reasoning
+    // rebuildParity uses in plan-dialog.tsx) and must not demote the rule
+    // to raw.
+    if (parts.get("WKST") !== undefined && interval > 1) {
+      return rruleText
+    }
     // BYMONTHDAY (honored by the engine despite being RFC-forbidden on
     // WEEKLY) and BYMONTH shrink the weekly cadence to specific days or
     // months — "wöchentlich" would hide that; raw rule (same hatch)

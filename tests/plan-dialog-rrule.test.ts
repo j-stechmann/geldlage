@@ -441,6 +441,25 @@ describe("describeRrule BY* narrowing falls back to the raw rule", () => {
     expect(describeRrule("FREQ=WEEKLY;INTERVAL=2")).toBe("alle 2 Wochen")
   })
 
+  it("WEEKLY with WKST + multi-week INTERVAL is never 'alle N Wochen'", () => {
+    // WKST moves the week boundary the interval expands across (RFC 5545,
+    // significant for WEEKLY with INTERVAL > 1): WKST=MO and WKST=SU fire
+    // different weeks — the raw rule is the only truthful badge
+    expect(describeRrule("FREQ=WEEKLY;INTERVAL=2;WKST=SU")).toBe(
+      "FREQ=WEEKLY;INTERVAL=2;WKST=SU"
+    )
+    expect(describeRrule("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO;WKST=SU")).toBe(
+      "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO;WKST=SU"
+    )
+    // INTERVAL=1 fires every week, so WKST cannot change any occurrence
+    // (the semantics-free reasoning rebuildParity uses in plan-dialog.tsx)
+    // — the humanized badge must survive a semantics-free WKST
+    expect(describeRrule("FREQ=WEEKLY;WKST=SU")).toBe("wöchentlich")
+    expect(describeRrule("FREQ=WEEKLY;BYDAY=MO;WKST=SU")).toBe(
+      "wöchentlich am Mo"
+    )
+  })
+
   it("MONTHLY with BYMONTH is never 'monatlich'", () => {
     // MONTHLY;BYMONTH=2;BYMONTHDAY=1 = once a year (February 1st only)
     expect(describeRrule("FREQ=MONTHLY;BYMONTH=2;BYMONTHDAY=1")).toBe(
