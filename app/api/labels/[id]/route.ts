@@ -128,7 +128,13 @@ export async function DELETE(
   //    too (no ON DELETE action); without this the delete would raise
   //    FOREIGN KEY constraint failed (unhandled → 500) whenever a plan
   //    references the label. Plans have no re-labeling concept — they keep
-  //    expanding, just uncategorized ("ohne Kategorie").
+  //    expanding, just uncategorized ("ohne Kategorie"). Deliberately NOT
+  //    user-scoped, unlike every other statement here: this is the FK safety
+  //    net, not a data update — it must clear EVERY reference to this
+  //    globally-unique id so the delete below can never fail, and a foreign
+  //    plan referencing the category (unreachable through app writes, but
+  //    visible to the FK) would otherwise re-raise the 500. Touches at most
+  //    the one category id proven owned by the session user.
   // 3. delete: rules cascade (FK ON DELETE CASCADE), remaining category FKs
   //    satisfied by the resets above
   // All steps run in ONE transaction: a concurrent LLM apply landing between
