@@ -639,7 +639,13 @@ export function TopCategoriesChart({
                 >
                   {merged.map((d) => (
                     <Cell
-                      key={d.name}
+                      // keyed on the merge identity, never the name: rows
+                      // carry DISTINCT categoryIds (grouped by id on the Ist
+                      // side, one catTotals entry per id on the planned side,
+                      // null → the single uncategorized row), while two
+                      // user-named categories can share a display name —
+                      // a name key would render duplicate React keys
+                      key={String(d.categoryId)}
                       fill={d.planned ? d.fill : "transparent"}
                     />
                   ))}

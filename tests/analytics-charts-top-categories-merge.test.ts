@@ -128,4 +128,35 @@ describe("topCategoriesMerge", () => {
       "100,00 € (50 %)"
     )
   })
+
+  it("same-named categories stay distinct identities (the Cell keys render without collisions)", () => {
+    // two user-created categories sharing a display name must remain two rows
+    // with distinct ids — the planned-vs-actual chart keys its per-row
+    // <Cell> fill on this identity, so a name-keyed identity would render
+    // duplicate React keys (and the rows themselves would be indistinguishable)
+    const chartData = [
+      istRow({ categoryId: 1, name: "Versicherung", value: 50 }),
+      istRow({ categoryId: 2, name: "Versicherung", value: 70 }),
+    ]
+    const merged = topCategoriesMerge(
+      chartData,
+      forecast([
+        plannedEntry({ categoryId: 2, name: "Versicherung", totalCents: 40_000 }),
+        plannedEntry({
+          categoryId: null,
+          name: "ohne Kategorie",
+          totalCents: 10_000,
+        }),
+      ])
+    )
+    const versicherungen = merged.filter((r) => r.name === "Versicherung")
+    expect(versicherungen).toHaveLength(2)
+    // planned money stacked onto the right one of the two same-named rows
+    expect(versicherungen.find((r) => r.categoryId === 1)?.planned).toBeUndefined()
+    expect(versicherungen.find((r) => r.categoryId === 2)?.planned).toBe(400)
+    // ids stay pairwise distinct across ALL rows — what the Cell keys are
+    expect(new Set(merged.map((r) => String(r.categoryId))).size).toBe(
+      merged.length
+    )
+  })
 })
