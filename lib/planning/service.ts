@@ -38,8 +38,12 @@ import { isLaterAnchor } from "@/lib/analytics/engine"
 /**
  * dtstart floor (year): occurrence expansion walks forward from dtstart on
  * every read (plan list, occurrences, forecast) and rrule has no internal
- * iteration cap — a pre-1900 dtstart would make each request iterate
- * centuries per plan for no representable purpose.
+ * iteration cap — per-read cost is linear in the walk distance
+ * (window end − dtstart) and grows forever with plan age, so a 1900-floor
+ * DAILY plan already iterates ~126 years (~70 ms measured) on every read
+ * window that touches today. The floor bounds the worst case at
+ * one century-and-a-quarter back; anything earlier has no representable
+ * purpose (bank data never reaches that far).
  */
 const MIN_DTSTART_YEAR = 1900
 /** occurrence-window cap for the occurrences endpoint (days) */

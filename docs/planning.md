@@ -67,11 +67,17 @@ Indexes: `planned_transactions_user_status_idx` `(user_id, status)` and
   would cross into toISOString's extended-year form, truncate into an
   Invalid Date and make every rung answer "no occurrences"; occurrences
   beyond that bound are unrepresentable as ISO dates and honestly read as
-  none. **Cost note (deliberate for now):** `GET /api/plans` and agent
-  `list_plans` pay one expansion per plan on every list read — bounded by
-  the ladder, negligible at expected plan counts. If plan counts grow:
-  persist `next_due_date` at write time and refresh drifted rows in a
-  bounded worker-tick trickle, instead of expanding per read.
+  none. **Cost note (deliberate for now):** rrule has no seek — every read
+  re-walks occurrence-by-occurrence from `dtstart` until the read window is
+  behind it, so the per-plan cost driver is **dtstart age** (walk distance),
+  and it grows forever: measured on this repo's engine, a DAILY plan costs
+  ~4 ms per read window when young, ~14 ms at a 2006 dtstart and ~68 ms at
+  the 1900 floor — ~0.5 ms per year of plan age, linear in plan count per
+  read (`GET /api/plans` + agent `list_plans` next-dates, calendar
+  occurrences, forecast) — so `/planung` scales with its OLDEST live plan
+  rather than with plan count. If that grows: persist `next_due_date` at
+  write time and refresh drifted rows in a bounded worker-tick trickle,
+  instead of expanding per read.
 
 ## Occurrence matching (`lib/planning/matching.ts`)
 
