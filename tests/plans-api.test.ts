@@ -850,6 +850,12 @@ describe("GET /api/plans/forecast", () => {
     expect((await getForecast("months=12abc")).status).toBe(400)
     expect((await getForecast("months=12.9")).status).toBe(400)
     expect((await getForecast("months=-1")).status).toBe(400)
+    // same digits-only contract as accountId on /plans/occurrences and
+    // /transactions/calendar: "12.9" → 12 would silently scope the
+    // projection to account 12 instead of answering invalid_account
+    expect((await getForecast("accountId=12.9")).status).toBe(400)
+    expect((await getForecast("accountId=12abc")).status).toBe(400)
+    expect((await getForecast("accountId=-1")).status).toBe(400)
   })
 
   it("returns the forecast envelope", async () => {

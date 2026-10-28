@@ -31,6 +31,13 @@ export async function GET(request: NextRequest) {
   const accountIdRaw = sp.get("accountId")
   let accountId: number | undefined
   if (accountIdRaw !== null) {
+    // digits-only (the normalizeOptionalId pattern in
+    // lib/planning/service.ts): parseInt alone would coerce "12.9" → 12 or
+    // "12abc" → 12 — a mangled param silently reading a different account
+    // than the client asked for, instead of the invalid_account 400
+    if (!/^\d+$/.test(accountIdRaw)) {
+      return NextResponse.json({ error: "invalid_account" }, { status: 400 })
+    }
     const n = Number.parseInt(accountIdRaw, 10)
     if (!Number.isInteger(n) || n <= 0) {
       return NextResponse.json({ error: "invalid_account" }, { status: 400 })
