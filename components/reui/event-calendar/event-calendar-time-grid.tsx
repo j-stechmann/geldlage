@@ -49,7 +49,7 @@ import { mergeProps } from "@base-ui/react/merge-props"
 import { useRender } from "@base-ui/react/use-render"
 import { addDays, addMinutes, differenceInMinutes, format } from "date-fns"
 
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
 /** Current time, refreshed on an interval and on tab focus. */

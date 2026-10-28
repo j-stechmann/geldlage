@@ -64,7 +64,12 @@
   `planned_transactions` is now in `adoptLegacyIssuer`'s child tables — the
   legacy-rebrand merge (legacy user + JIT-created duplicate) previously
   died on `DELETE FROM users` with a FK violation (and aborted boot)
-  whenever the duplicate workspace held a plan (regression-tested);
+  whenever the duplicate workspace held a plan; the agent-chat tables
+  (ADR-0033) carry the same `users(id)` FK and had that exact gap since
+  their own introduction — they are on the list now, plus a pre-merge
+  delete of clashing `chat_thread_members` rows (the duplicate's
+  membership is dropped when the surviving identity already holds one on
+  the shared thread) (regression-tested);
   `GET /api/plans/occurrences` bounds the window to ±60 months of today
   (`window_too_far`, 1826 d = the forecast horizon cap) — rrule expansion
   walks from `dtstart` occurrence-by-occurrence (no seek), so far-future
