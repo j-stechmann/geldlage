@@ -133,6 +133,18 @@ describe("validateRrule", () => {
     ).not.toThrow()
   })
 
+  it("rejects an explicit TZID part (the parser would silently strip it)", () => {
+    // rrule's string parser never carries TZID into origOptions, so the
+    // part-based unsupported check cannot see it — without the textual
+    // guard "TZID=Europe/Berlin;FREQ=…" would be stored as if the user had
+    // never written the part (canonicalization must reject, not strip)
+    expectRuleError(
+      "TZID=Europe/Berlin;FREQ=MONTHLY;BYMONTHDAY=1",
+      "unsupported part: TZID"
+    )
+    expectRuleError("FREQ=MONTHLY;BYMONTHDAY=1;TZID=Europe/Berlin")
+  })
+
   it("rejects oversized rule texts; the maximal legit rule stays accepted", () => {
     // the allowlisted vocabulary tops out at a few hundred chars — beyond
     // the cap the text is payload smuggled through the RRULE parser, not

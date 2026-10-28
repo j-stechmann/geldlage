@@ -289,18 +289,23 @@ function weekdayTokens(v: unknown): string[] {
   })
 }
 
-/** Order-insensitive signature of a byweekday part (parity/loss compare). */
+/**
+ * Order-insensitive signature of a byweekday part (parity/loss compare).
+ * Set semantics: RFC list parts are unordered and duplicate-free, so the
+ * same token twice ("BYDAY=MO,MO") must compare as one — a stored rule
+ * with dup noise stays builder-representable instead of routing raw.
+ */
 function byWeekdaySignature(v: unknown): string {
-  return weekdayTokens(v).sort().join(",")
+  return [...new Set(weekdayTokens(v))].sort().join(",")
 }
 
-/** Order-insensitive signature of a number-list part (bymonthday/bymonth). */
+/**
+ * Order-insensitive signature of a number-list part (bymonthday/bymonth) —
+ * set semantics like byWeekdaySignature ("1,1" ≡ "1").
+ */
 function numberListSignature(v: unknown): string {
   const arr = Array.isArray(v) ? v : v === undefined || v === null ? [] : [v]
-  return arr
-    .map((n) => String(n))
-    .sort()
-    .join(",")
+  return [...new Set(arr.map((n) => String(n)))].sort().join(",")
 }
 
 /**
@@ -469,17 +474,31 @@ export function parseRruleToForm(
     if (freq === "WEEKLY") {
       // ordinal BYDAY tokens are not valid for weekly rules (validation
       // rejects them) — filtered defensively anyway, signed forms included
-      overrides.byDay = byDayTokens.filter((t) => !/^-?\d/.test(t))
+      overrides.byDay = [
+        ...new Set(byDayTokens.filter((t) => !/^-?\d/.test(t))),
+      ]
     }
     if (freq === "MONTHLY" || freq === "YEARLY") {
       // signed tokens too: "1FR,-1FR" is two ordinals, not one + a plain day
       const ordinals = byDayTokens.filter((t) => /^-?\d/.test(t))
-      const monthDays = (collect(o.bymonthday) as (number | string)[])
-        .map((n) => Number.parseInt(String(n), 10))
-        .filter((n) => Number.isInteger(n))
-      const months = (collect(o.bymonth) as (number | string)[])
-        .map((n) => Number.parseInt(String(n), 10))
-        .filter((n) => Number.isInteger(n))
+      // set semantics (RFC list parts are unordered AND duplicate-free):
+      // rrule preserves dup tokens through parse + serialization, so a
+      // stored "1,1" is possible — the builder's save then rewrites it to
+      // the clean single token instead of carrying the noise forever
+      const monthDays = [
+        ...new Set(
+          (collect(o.bymonthday) as (number | string)[])
+            .map((n) => Number.parseInt(String(n), 10))
+            .filter((n) => Number.isInteger(n))
+        ),
+      ]
+      const months = [
+        ...new Set(
+          (collect(o.bymonth) as (number | string)[])
+            .map((n) => Number.parseInt(String(n), 10))
+            .filter((n) => Number.isInteger(n))
+        ),
+      ]
       const ordinal = ordinals.length === 1 ? ordinals[0] : null
       // single ordinal token split into ordinal prefix + weekday letter
       // ("5FR" → "5" + "FR")

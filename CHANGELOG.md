@@ -175,7 +175,24 @@
   row match — a hand-edited URL with padded whitespace fetched the right
   row (the server trims) but failed the row.id comparison, leaving the
   highlight and expansion silently dead (whitespace-only params now fall
-  back to the filter pipeline exactly like the server; regression-tested).
+  back to the filter pipeline exactly like the server; regression-tested);
+  an explicit `TZID=` RRULE part is now rejected loudly (`unsupported part:
+TZID`) instead of silently stripped — rrule's string parser never carries
+  it into `origOptions`, so the part-level check could not see it and the
+  rule would have stored as if the part were never written (the tool
+  descriptions' "everything non-allowlisted is rejected" claim is now
+  literally true; regression-tested); same-snapshotDate snapshot batches
+  (two accounts imported on one day, a same-day re-import) anchor the
+  balance KPI and the forecast deterministically — freshest import wins
+  (`createdAt`, then `id`) instead of unordered-select scan-order luck, and
+  both scopes apply the identical `isLaterAnchor` rule so the balance KPI
+  and the forecast starting balance can never name different snapshots for
+  the same user (regression-tested); the plan dialog treats duplicate
+  BY\*-list tokens as one token — RFC list parts are unordered and
+  duplicate-free, but rrule preserves dups through parse and
+  serialization, so a stored `BYDAY=MO,MO` used to route raw forever and
+  carried its noise into badges; it now maps into the builder and a save
+  rewrites it dup-free (regression-tested).
 - **plan routes reject unknown body fields** (`unknown_field`, service-level
   in `validatePlanInput`): a typo'd key ("accountid", "amountCent") in a
   POST/PATCH body was silently dropped — the plan was created/updated

@@ -44,6 +44,21 @@ export interface AnalyticsResult {
 interface BalanceAnchor {
   snapshotDate: string
   snapshotAmountCents: number
+  /** deterministic same-day tie-break part: fresher import wins */
+  createdAt: string
+  /** deterministic last tie-break part (createdAt is not unique) */
+  id: string
+}
+
+/** True when r should replace latest — snapshotDate then createdAt then id. */
+export function isLaterAnchor(
+  r: BalanceAnchor,
+  latest: BalanceAnchor
+): boolean {
+  if (r.snapshotDate !== latest.snapshotDate)
+    return r.snapshotDate > latest.snapshotDate
+  if (r.createdAt !== latest.createdAt) return r.createdAt > latest.createdAt
+  return r.id > latest.id
 }
 
 /**
@@ -84,6 +99,9 @@ function buildTimeScopedWhere(
  * Balance anchor = LATEST snapshot across all batches (most recent known
  * absolute balance point). Current balance = snapshot + Σ(booked amounts
  * with booking_date > snapshot_date) — robust to missing older history.
+ * Batches tied on snapshotDate resolve deterministically, freshest import
+ * first (see isLaterAnchor) — computeForecast applies the identical rule so
+ * its balance KPI and forecast starting balance can never disagree.
  */
 function latestAnchor(
   userId: number,
@@ -92,6 +110,8 @@ function latestAnchor(
   const db = getDb()
   const rows = db
     .select({
+      id: importBatches.id,
+      createdAt: importBatches.createdAt,
       snapshotDate: importBatches.snapshotDate,
       snapshotAmountCents: importBatches.snapshotAmountCents,
     })
@@ -107,12 +127,13 @@ function latestAnchor(
     )
     .all()
   const valid = rows.filter(
-    (r): r is { snapshotDate: string; snapshotAmountCents: number } =>
+    (r): r is BalanceAnchor =>
       r.snapshotDate !== null && r.snapshotAmountCents !== null
   )
   if (valid.length === 0) return null
-  return valid.reduce((latest, r) =>
-    r.snapshotDate > latest.snapshotDate ? r : latest
+  return valid.reduce(
+    (latest, r) => (isLaterAnchor(r, latest) ? r : latest),
+    valid[0]
   )
 }
 

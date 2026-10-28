@@ -37,7 +37,10 @@ Indexes: `planned_transactions_user_status_idx` `(user_id, status)` and
   `FREQ ∈ {DAILY, WEEKLY, MONTHLY, YEARLY}`; parts allowlist
   `INTERVAL/COUNT/UNTIL/BYDAY/BYMONTHDAY/BYMONTH/BYSETPOS/WKST`;
   `INTERVAL 1–100`, `COUNT 1–366`; multi-line texts and `DTSTART:`/`EXDATE:`/
-  `RDATE:`-carrying inputs rejected. Ordinal (numeric) `BYDAY` values
+  `RDATE:`-carrying inputs rejected. `TZID=` parts are rejected outright,
+  not silently stripped — rrule's string parser never carries the part into
+  `origOptions`, so only a textual guard can keep canonicalization from
+  pretending the user never wrote it. Ordinal (numeric) `BYDAY` values
   (`1FR`, `-1SU`) are rejected for DAILY/WEEKLY — RFC-invalid, and rrule
   silently _ignores_ the ordinal there. Canonical stored form is rrule's
   serialization (no `RRULE:` prefix; `+1FR` ordinals normalized to `1FR`).
@@ -100,6 +103,10 @@ is left untouched; the forecast endpoint is deliberately separate.
 - **Starting balance** = latest snapshot anchor (date ≤ today) + Σ booked
   `(snapshot, today]`; no snapshot → Σ booked ≤ today, flagged
   `withoutSnapshot`. Account filter respected like the balance timeline.
+  Same-snapshotDate batches (two accounts imported on one day) tie-break
+  deterministically — freshest import first (`createdAt`, then `id`,
+  `isLaterAnchor`), the identical rule the balance KPI applies, so the KPI
+  and the forecast can never name different snapshots for the same user.
   Inherited anchor caveat (same as the analytics balance KPI): the anchor
   is the single latest snapshot _batch_ — an all-accounts projection of a
   user whose accounts carry **per-account snapshots** enters only that one

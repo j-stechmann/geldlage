@@ -322,6 +322,34 @@ describe("computeForecast", () => {
     expect(otherForecast.monthlyPlanned).toHaveLength(0)
   })
 
+  it("same-snapshotDate batches tie-break deterministically: freshest import wins", () => {
+    seedBatch({ snapshotDate: "2025-06-30", snapshotAmountCents: 10_000 })
+    // two batches tied on snapshotDate (two accounts imported on one day);
+    // inserted OLDER-createdAt first to prove the pick is the explicit
+    // (createdAt, id) rule, not scan order
+    seedBatch({
+      id: "batch-tie-z",
+      createdAt: "2026-02-01T10:00:00.000Z",
+      updatedAt: "2026-02-01T10:00:00.000Z",
+      snapshotDate: "2026-01-31",
+      snapshotAmountCents: 100_000,
+    })
+    seedBatch({
+      id: "batch-tie-a",
+      createdAt: "2026-02-01T18:00:00.000Z",
+      updatedAt: "2026-02-01T18:00:00.000Z",
+      snapshotDate: "2026-01-31",
+      snapshotAmountCents: 300_000,
+    })
+    seedTx("2026-02-05", -50_000)
+
+    const forecast = computeForecast(userId, { months: 1, today: "2026-02-15" })
+    expect(forecast.withoutSnapshot).toBe(false)
+    // the 18:00 batch beats the 10:00 batch even though the 10:00 batch was
+    // inserted (and would be scanned) first
+    expect(forecast.startingBalanceCents).toBe(300_000 - 50_000)
+  })
+
   it("finished and paused plans behave: finished never expands, paused does", () => {
     seedBatch({ snapshotDate: "2026-01-31", snapshotAmountCents: 100_000 })
     seedPlan({

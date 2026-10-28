@@ -163,6 +163,15 @@ export function validateRrule(input: string): string {
   ) {
     throw new RuleValidationError("single rule only")
   }
+  // TZID needs its own textual guard: rrule's string parser SILENTLY drops
+  // the part (it never reaches the origOptions-based unsupported check
+  // below), so "TZID=Europe/Berlin;FREQ=…" would be stored as if the user
+  // had never written it. Canonicalization must reject, never strip
+  // semantics (tool descriptions promise rejection for everything
+  // non-allowlisted — verified no allowlisted part contains "TZID").
+  if (raw.includes("TZID=")) {
+    throw new RuleValidationError("unsupported part: TZID")
+  }
   let rule: RRule
   try {
     const parsed = rrulestr(raw, { forceset: false })

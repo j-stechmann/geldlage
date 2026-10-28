@@ -126,6 +126,21 @@ describe("parseRruleToForm faithfulness gate", () => {
     expect(o.byMonth).toEqual([])
   })
 
+  it("duplicate BY*-list tokens compare as one and map into the builder", () => {
+    // rrule preserves dup tokens through parse AND serialization, so dup
+    // noise is genuinely storable ("BYDAY=MO,MO" round-trips validateRrule
+    // verbatim). RFC list parts are unordered and duplicate-free — the
+    // parity signature must treat the dup as one token, or the rule would
+    // route raw and stay noisy forever; the builder's save then rewrites
+    // the stored text dup-free.
+    const w = parseRruleToForm("FREQ=WEEKLY;BYDAY=MO,MO", DTSTART)
+    expect(w.rawDirty, "weekly dup BYDAY maps").toBe(false)
+    expect(w.byDay).toEqual(["MO"])
+    const m = parseRruleToForm("FREQ=MONTHLY;BYMONTHDAY=1,1", DTSTART)
+    expect(m.rawDirty, "monthly dup BYMONTHDAY maps").toBe(false)
+    expect(m.byMonthDayText).toBe("1")
+  })
+
   it("bysetpos rules stay raw (unchanged behavior)", () => {
     const o = parseRruleToForm("FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1", DTSTART)
     expect(o.rawDirty).toBe(true)

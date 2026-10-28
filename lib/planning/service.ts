@@ -33,6 +33,7 @@ import {
 } from "@/lib/planning/matching"
 import { MAX_COUNTERPARTY, MAX_TEXT } from "@/lib/planning/limits"
 import { todayLocal } from "@/lib/analytics/date"
+import { isLaterAnchor } from "@/lib/analytics/engine"
 
 /**
  * dtstart floor (year): occurrence expansion walks forward from dtstart on
@@ -642,6 +643,10 @@ function enrichWithMatches(
 interface BalanceAnchor {
   snapshotDate: string
   snapshotAmountCents: number
+  /** deterministic same-day tie-break part: fresher import wins */
+  createdAt: string
+  /** deterministic last tie-break part (createdAt is not unique) */
+  id: string
 }
 
 export interface ForecastResult {
@@ -714,6 +719,8 @@ export function computeForecast(
       : eq(importBatches.userId, userId)
   const anchors = db
     .select({
+      id: importBatches.id,
+      createdAt: importBatches.createdAt,
       snapshotDate: importBatches.snapshotDate,
       snapshotAmountCents: importBatches.snapshotAmountCents,
     })
@@ -721,14 +728,18 @@ export function computeForecast(
     .where(anchorWhere)
     .all()
     .filter(
-      (r): r is { snapshotDate: string; snapshotAmountCents: number } =>
+      (r): r is BalanceAnchor =>
         r.snapshotDate !== null &&
         r.snapshotAmountCents !== null &&
         r.snapshotDate <= today
     )
+  // Same-day batches (two accounts imported on one date, a re-import) tie
+  // on snapshotDate alone — the select has no order, so the pick would be
+  // scan-order luck and could even differ from the balance KPI for the same
+  // user. isLaterAnchor makes the freshest import win deterministically;
+  // lib/analytics/engine.ts's latestAnchor applies the identical rule.
   const anchor = anchors.reduce<BalanceAnchor | null>(
-    (latest, r) =>
-      latest === null || r.snapshotDate > latest.snapshotDate ? r : latest,
+    (latest, r) => (latest === null || isLaterAnchor(r, latest) ? r : latest),
     null
   )
 
