@@ -206,7 +206,7 @@ TZID`) instead of silently stripped — rrule's string parser never carries
   the end condition (COUNT/UNTIL) and interval into rules that route raw
   (BYSETPOS, unknown FREQ) — a later genuine frequency switch resumed the
   builder from EMPTY_FORM defaults and silently dropped the stored end
-  condition on save, while rules routing raw through the *late*
+  condition on save, while rules routing raw through the _late_
   (unfaithful-mapping) path kept theirs for the same switch
   (regression-tested); a deep-linked transactions focus view whose
   referenced row is gone (deleted, stale id) reads "Transaktion nicht

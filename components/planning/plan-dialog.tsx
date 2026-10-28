@@ -1030,7 +1030,7 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
             fieldset min-content quirk Tailwind's preflight does not reset. */}
         <fieldset
           disabled={busy}
-          className="grid gap-4 border-0 p-0 m-0 min-w-0"
+          className="m-0 grid min-w-0 gap-4 border-0 p-0"
         >
           <div className="grid gap-4 sm:grid-cols-3">
             {field(

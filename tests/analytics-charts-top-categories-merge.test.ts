@@ -141,7 +141,11 @@ describe("topCategoriesMerge", () => {
     const merged = topCategoriesMerge(
       chartData,
       forecast([
-        plannedEntry({ categoryId: 2, name: "Versicherung", totalCents: 40_000 }),
+        plannedEntry({
+          categoryId: 2,
+          name: "Versicherung",
+          totalCents: 40_000,
+        }),
         plannedEntry({
           categoryId: null,
           name: "ohne Kategorie",
@@ -152,7 +156,9 @@ describe("topCategoriesMerge", () => {
     const versicherungen = merged.filter((r) => r.name === "Versicherung")
     expect(versicherungen).toHaveLength(2)
     // planned money stacked onto the right one of the two same-named rows
-    expect(versicherungen.find((r) => r.categoryId === 1)?.planned).toBeUndefined()
+    expect(
+      versicherungen.find((r) => r.categoryId === 1)?.planned
+    ).toBeUndefined()
     expect(versicherungen.find((r) => r.categoryId === 2)?.planned).toBe(400)
     // ids stay pairwise distinct across ALL rows — what the Cell keys are
     expect(new Set(merged.map((r) => String(r.categoryId))).size).toBe(

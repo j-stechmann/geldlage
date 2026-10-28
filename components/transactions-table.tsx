@@ -427,15 +427,13 @@ export function TransactionsTable({
                   colSpan={totalColumns}
                   className="h-32 text-center text-muted-foreground"
                 >
-                  {focusMode ? (
-                    // deep-link miss: the calendar's bank chip pointed at a
-                    // row that is gone (deleted, or a stale id) — a generic
-                    // "no data" message would read like the list itself is
-                    // empty
-                    "Transaktion nicht gefunden (ggf. gelöscht). Eine Filteränderung kehrt zur Liste zurück."
-                  ) : (
-                    "Keine Transaktionen gefunden. CSV-Datei in das Fenster ziehen, um zu importieren."
-                  )}
+                  {focusMode
+                    ? // deep-link miss: the calendar's bank chip pointed at a
+                      // row that is gone (deleted, or a stale id) — a generic
+                      // "no data" message would read like the list itself is
+                      // empty
+                      "Transaktion nicht gefunden (ggf. gelöscht). Eine Filteränderung kehrt zur Liste zurück."
+                    : "Keine Transaktionen gefunden. CSV-Datei in das Fenster ziehen, um zu importieren."}
                 </TableCell>
               </TableRow>
             ) : (

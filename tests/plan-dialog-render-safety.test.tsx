@@ -586,9 +586,7 @@ describe("plan dialog: raw RRULE mode validates exactly like the server", () => 
       const items = Array.from(
         document.body.querySelectorAll('[data-slot="select-item"]')
       )
-      const found = items.find(
-        (el) => el.textContent?.trim() === "Monatlich"
-      )
+      const found = items.find((el) => el.textContent?.trim() === "Monatlich")
       expect(found, "Monatlich item should be rendered").toBeTruthy()
       return found as HTMLElement
     })
