@@ -316,7 +316,14 @@ function planRowsQuery() {
 export function listPlans(userId: number): PlanRow[] {
   return planRowsQuery()
     .where(eq(plannedTransactions.userId, userId))
-    .orderBy(sql`${plannedTransactions.createdAt} DESC`)
+    .orderBy(
+      sql`${plannedTransactions.createdAt} DESC`,
+      // stable total order: same-instant createdAt ties (two rows written
+      // within one millisecond) must not shuffle between requests — the id
+      // is unique, so this closes the tie for good. Consumed by the board's
+      // plan cards and planSummaries' "newest-first" cap alike.
+      sql`${plannedTransactions.id} DESC`
+    )
     .all()
 }
 

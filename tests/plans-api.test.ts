@@ -372,6 +372,33 @@ describe("GET /api/plans", () => {
     expect((await other.json()).plans).toHaveLength(0)
   })
 
+  it("breaks equal-createdAt ties deterministically on id", async () => {
+    // createdAt carries millisecond precision, but two rows written within
+    // that one millisecond (bulk seeds) share it — without a unique-column
+    // tiebreaker the relative order would depend on the query plan, i.e.
+    // shuffle between requests. The id is unique, so id DESC (same direction
+    // as the list) closes the tie for good.
+    const stamp = "2026-03-01T12:00:00.000Z"
+    for (const id of ["plan-a-tie", "plan-b-tie"]) {
+      db.insert(plannedTransactions)
+        .values({
+          id,
+          userId,
+          amountCents: -100,
+          dtstart: "2026-03-01",
+          createdAt: stamp,
+          updatedAt: stamp,
+        })
+        .run()
+    }
+    const res = await getPlansRow(userId)
+    expect(res.status).toBe(200)
+    expect((await res.json()).plans.map((p: { id: string }) => p.id)).toEqual([
+      "plan-b-tie",
+      "plan-a-tie",
+    ])
+  })
+
   it("401 without a session", async () => {
     const res = await getPlans(anonRequest(`${BASE}/api/plans`))
     expect(res.status).toBe(401)
