@@ -148,6 +148,39 @@ describe("parseRruleToForm faithfulness gate", () => {
     expect(o.rawRrule).toBe("FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1")
   })
 
+  it("prefills the end condition into raw-routed rules the builder can't render", () => {
+    // a valid storable BYSETPOS rule routes raw, but COUNT/INTERVAL are real
+    // stored semantics: the early raw paths used to drop them (no
+    // endMode/interval prefill), so a later genuine frequency switch —
+    // which exits raw mode and resumes the builder — silently started from
+    // EMPTY_FORM defaults and lost the end condition on save. The rules on
+    // the LATE (unfaithful-mapping) raw path always kept their end-mode
+    // prefill; this makes the two raw paths symmetric.
+    const o = parseRruleToForm(
+      "FREQ=MONTHLY;BYDAY=MO;BYSETPOS=-1;COUNT=5",
+      DTSTART
+    )
+    expect(o.rawDirty).toBe(true)
+    expect(o.rawRrule).toBe("FREQ=MONTHLY;BYDAY=MO;BYSETPOS=-1;COUNT=5")
+    expect(o.endMode).toBe("count")
+    expect(o.count).toBe(5)
+    expect(o.interval).toBe(1)
+    expect(o.freq).toBeUndefined()
+  })
+
+  it("prefills UNTIL and a non-default interval into raw-routed rules", () => {
+    const o = parseRruleToForm(
+      "FREQ=MONTHLY;INTERVAL=3;BYDAY=MO;BYSETPOS=-1;UNTIL=2027-12-31",
+      DTSTART
+    )
+    expect(o.rawDirty).toBe(true)
+    expect(o.endMode).toBe("until")
+    // date-only/sub-noon UNTILs are lifted to noon before parsing, so the
+    // UTC date part is stable in both directions
+    expect(o.untilDate).toBe("2027-12-31")
+    expect(o.interval).toBe(3)
+  })
+
   it("falls back to raw-authoritative without a usable dtstart", () => {
     expect(parseRruleToForm("FREQ=DAILY", undefined).rawDirty).toBe(true)
     expect(parseRruleToForm("FREQ=DAILY", null).rawDirty).toBe(true)

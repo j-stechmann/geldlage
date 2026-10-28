@@ -69,6 +69,26 @@ describe("TransactionsTable focusTxId (deep link from /planung)", () => {
     expect(document.getElementById("tx-details-tx-1")).not.toBeNull()
   })
 
+  it("names the miss when the focused transaction does not exist", async () => {
+    // a stale/deleted deep-link target must not render the generic empty
+    // listing under the "nur diese Transaktion" badge — the user clicked a
+    // concrete chip in /planung and deserves to know THAT row is gone
+    const stub = stubFetch([
+      {
+        url: /\/api\/transactions$/,
+        json: { rows: [], total: 0, page: 1, pageCount: 1 },
+      },
+    ])
+    const { container } = renderWithQuery(
+      <TransactionsTable filters={EMPTY_FILTERS} focusTxId="tx-gone" />
+    )
+    await waitFor(() => {
+      expect(container.textContent).toContain("Transaktion nicht gefunden")
+    })
+    expect(container.textContent).not.toContain("CSV-Datei")
+    expect(stub.calls.some((c) => c.url.includes("id=tx-gone"))).toBe(true)
+  })
+
   it("trims a whitespace-padded focus param before lookup and row match", async () => {
     // the server trims the id before lookup (app/api/transactions/route.ts);
     // the client must trim the focus param too, or the fetch succeeds (server

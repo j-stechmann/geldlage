@@ -741,7 +741,9 @@ export function computeForecast(
   // on snapshotDate alone — the select has no order, so the pick would be
   // scan-order luck and could even differ from the balance KPI for the same
   // user. isLaterAnchor makes the freshest import win deterministically;
-  // lib/analytics/engine.ts's latestAnchor applies the identical rule.
+  // lib/analytics/engine.ts's latestAnchor applies the identical rule —
+  // including the snapshotDate <= today filter here, so a future-dated
+  // Saldo line never anchors one scope while the other rejects it.
   const anchor = anchors.reduce<BalanceAnchor | null>(
     (latest, r) => (latest === null || isLaterAnchor(r, latest) ? r : latest),
     null

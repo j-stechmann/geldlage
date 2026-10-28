@@ -121,18 +121,20 @@ export interface PlanCalendarProps {
  */
 export function PlanCalendar({ accountId, onEventClick }: PlanCalendarProps) {
   const router = useRouter()
-  const [window, setWindow] = React.useState<{
+  // named calendarWindow (not `window`): shadowing the browser global is a
+  // foot-gun for anything later reading window.* in this scope
+  const [calendarWindow, setCalendarWindow] = React.useState<{
     from: string
     to: string
   } | null>(null)
   const occurrencesQuery = usePlanOccurrences(
-    window?.from ?? null,
-    window?.to ?? null,
+    calendarWindow?.from ?? null,
+    calendarWindow?.to ?? null,
     accountId
   )
   const bookedQuery = useCalendarTransactions(
-    window?.from ?? null,
-    window?.to ?? null,
+    calendarWindow?.from ?? null,
+    calendarWindow?.to ?? null,
     accountId
   )
   // failed window reads stay visible instead of rendering as an empty
@@ -165,7 +167,7 @@ export function PlanCalendar({ accountId, onEventClick }: PlanCalendarProps) {
       // across UTC midnight for non-UTC timezones
       const from = isoDateLocal(info.range.start)
       const to = isoDateLocal(new Date(info.range.end.getTime() - 1))
-      setWindow((prev) =>
+      setCalendarWindow((prev) =>
         prev && prev.from === from && prev.to === to ? prev : { from, to }
       )
     },

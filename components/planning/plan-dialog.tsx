@@ -433,11 +433,7 @@ export function parseRruleToForm(
             : o.freq === 0
               ? "YEARLY"
               : null
-    if (freq === null || o.bysetpos !== undefined) {
-      return { rawRrule: rruleText, rawDirty: true }
-    }
     const overrides: Partial<FormState> = {
-      freq,
       interval: typeof o.interval === "number" ? o.interval : 1,
     }
     const count = typeof o.count === "number" ? o.count : null
@@ -451,6 +447,19 @@ export function parseRruleToForm(
     } else {
       overrides.endMode = "none"
     }
+    if (freq === null || o.bysetpos !== undefined) {
+      // The builder cannot rebuild this rule faithfully (unknown FREQ or a
+      // BYSETPOS part) — the raw text stays authoritative. The end
+      // condition and interval above are REAL stored semantics though:
+      // prefilling them means a genuine later frequency switch (which exits
+      // raw mode and resumes the builder) keeps COUNT/INTERVAL/UNTIL
+      // instead of silently starting at EMPTY_FORM defaults and dropping
+      // them on save. freq stays at its EMPTY_FORM default: while raw, the
+      // Wiederholung select reads FREQ from the raw text (freqDisplay), and
+      // a genuine switch sets it explicitly.
+      return { ...overrides, rawRrule: rruleText, rawDirty: true }
+    }
+    overrides.freq = freq
 
     const collect = (v: unknown): unknown[] =>
       Array.isArray(v) ? v : v !== undefined ? [v] : []
@@ -1013,7 +1022,16 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-4">
+        {/* fieldset (not div) so busy can disable every field at once:
+            typing during the in-flight save used to keep the edits, which the
+            dialog then silently discarded on success (busy closes it). The
+            footer buttons stay outside — cancel must remain clickable, and
+            the save button carries its own busy state. min-w-0 offsets the
+            fieldset min-content quirk Tailwind's preflight does not reset. */}
+        <fieldset
+          disabled={busy}
+          className="grid gap-4 border-0 p-0 m-0 min-w-0"
+        >
           <div className="grid gap-4 sm:grid-cols-3">
             {field(
               "Richtung",
@@ -1548,7 +1566,7 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
               <span className="text-muted-foreground">Keine Termine.</span>
             )}
           </div>
-        </div>
+        </fieldset>
 
         <DialogFooter>
           <Button

@@ -111,8 +111,10 @@ is left untouched; the forecast endpoint is deliberately separate.
   `withoutSnapshot`. Account filter respected like the balance timeline.
   Same-snapshotDate batches (two accounts imported on one day) tie-break
   deterministically — freshest import first (`createdAt`, then `id`,
-  `isLaterAnchor`), the identical rule the balance KPI applies, so the KPI
-  and the forecast can never name different snapshots for the same user.
+  `isLaterAnchor`), the identical rule the balance KPI applies; both scopes
+  also ignore snapshots dated **after** today (a future-dated Saldo line
+  never anchors one scope while the other rejects it), so the KPI and the
+  forecast can never pick different snapshots for the same user.
   Inherited anchor caveat (same as the analytics balance KPI): the anchor
   is the single latest snapshot _batch_ — an all-accounts projection of a
   user whose accounts carry **per-account snapshots** enters only that one

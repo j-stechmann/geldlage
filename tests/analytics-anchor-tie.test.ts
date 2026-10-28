@@ -111,3 +111,36 @@ describe("latestAnchor snapshotDate ties", () => {
     expect(analytics.kpis.currentBalanceCents).toBe(300_000)
   })
 })
+
+describe("latestAnchor future-dated snapshots", () => {
+  it("ignores a snapshot dated after today (the forecast's rule)", () => {
+    // an export whose Saldo line sits in the future (e.g. an export holding
+    // future-dated bookings priced into the balance) must not anchor the
+    // balance KPI — computeForecast rejects such snapshots, so anchoring
+    // here would strand the two scopes on different balance models
+    seedBatch({ snapshotDate: "2026-02-20", snapshotAmountCents: 900_000 })
+    seedTx("2026-02-01", +10_000)
+
+    const analytics = computeAnalytics(
+      parseFilters(new URLSearchParams()),
+      userId,
+      "2026-02-15"
+    )
+    expect(analytics.kpis.balanceWithoutSnapshot).toBe(true)
+    // pseudo balance = bookings cumulated from zero, NOT snapshot-derived
+    expect(analytics.kpis.currentBalanceCents).toBe(10_000)
+  })
+
+  it("still prefers a past snapshot next to a future one", () => {
+    seedBatch({ snapshotDate: "2026-02-20", snapshotAmountCents: 900_000 })
+    seedBatch({ snapshotDate: "2026-01-31", snapshotAmountCents: 100_000 })
+
+    const analytics = computeAnalytics(
+      parseFilters(new URLSearchParams()),
+      userId,
+      "2026-02-15"
+    )
+    expect(analytics.kpis.balanceWithoutSnapshot).toBe(false)
+    expect(analytics.kpis.currentBalanceCents).toBe(100_000)
+  })
+})

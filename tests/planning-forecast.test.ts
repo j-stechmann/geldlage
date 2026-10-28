@@ -285,6 +285,18 @@ describe("computeForecast", () => {
     expect(forecast.startingBalanceCents).toBe(-10_000 + 5_000)
   })
 
+  it("ignores a snapshot dated after today (same rule as the balance KPI)", () => {
+    // a snapshot past the projection's `today` (future-dated Saldo line) is
+    // not a current-balance point yet — computeForecast has always filtered
+    // it out, and latestAnchor now applies the identical rule so the engine
+    // KPI and this starting balance cannot pick different snapshots
+    seedBatch({ snapshotDate: "2026-03-20", snapshotAmountCents: 900_000 })
+    seedTx("2026-03-01", -10_000)
+    const forecast = computeForecast(userId, { months: 1, today: "2026-03-15" })
+    expect(forecast.withoutSnapshot).toBe(true)
+    expect(forecast.startingBalanceCents).toBe(-10_000)
+  })
+
   it("honours the account filter for anchors, booking sums and plans", () => {
     seedBatch({ snapshotDate: "2026-01-31", snapshotAmountCents: 100_000 })
     seedTx("2026-02-01", -10_000)

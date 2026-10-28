@@ -193,6 +193,30 @@ TZID`) instead of silently stripped — rrule's string parser never carries
   serialization, so a stored `BYDAY=MO,MO` used to route raw forever and
   carried its noise into badges; it now maps into the builder and a save
   rewrites it dup-free (regression-tested).
+- **planning review follow-ups round 2**:
+  the balance KPI and the forecast share the complete snapshot-anchor rule
+  — `latestAnchor` ignores snapshots dated **after** today, exactly like
+  `computeForecast`'s candidate filter. A future-dated Saldo line (an
+  export holding future-dated bookings priced into the balance) anchored
+  the KPI while the forecast rejected it, stranding the two scopes on
+  different balance models (regression-tested on both sides; the
+  no-snapshot fallbacks stay conceptually different — engine pseudo
+  balance cumulated from zero vs. forecast Σ booked ≤ today — and both
+  comments now say so instead of overclaiming); the plan dialog prefills
+  the end condition (COUNT/UNTIL) and interval into rules that route raw
+  (BYSETPOS, unknown FREQ) — a later genuine frequency switch resumed the
+  builder from EMPTY_FORM defaults and silently dropped the stored end
+  condition on save, while rules routing raw through the *late*
+  (unfaithful-mapping) path kept theirs for the same switch
+  (regression-tested); a deep-linked transactions focus view whose
+  referenced row is gone (deleted, stale id) reads "Transaktion nicht
+  gefunden (ggf. gelöscht)" instead of the generic no-data listing under
+  the "nur diese Transaktion" badge (regression-tested); the plan dialog's
+  fields disable while a save is in flight — typing during the request
+  kept edits that the dialog then silently discarded once the successful
+  save closed it (footer buttons stay enabled so cancel always works); the
+  plan calendar names its window state `calendarWindow` instead of
+  shadowing the `window` global.
 - **plan routes reject unknown body fields** (`unknown_field`, service-level
   in `validatePlanInput`): a typo'd key ("accountid", "amountCent") in a
   POST/PATCH body was silently dropped — the plan was created/updated

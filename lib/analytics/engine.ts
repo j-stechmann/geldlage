@@ -100,12 +100,17 @@ function buildTimeScopedWhere(
  * absolute balance point). Current balance = snapshot + Σ(booked amounts
  * with booking_date > snapshot_date) — robust to missing older history.
  * Batches tied on snapshotDate resolve deterministically, freshest import
- * first (see isLaterAnchor) — computeForecast applies the identical rule so
- * its balance KPI and forecast starting balance can never disagree.
+ * first (see isLaterAnchor); snapshots dated AFTER today are ignored —
+ * computeForecast (lib/planning/service.ts) applies the identical rule, so
+ * both scopes pick the same snapshot (a future-dated Saldo line, e.g. from
+ * an export holding future bookings, never anchors one scope alone). The
+ * no-snapshot fallbacks remain conceptually different (engine: pseudo
+ * balance cumulated from zero, unbounded; forecast: Σ booked ≤ today).
  */
 function latestAnchor(
   userId: number,
-  accountId?: number
+  accountId: number | undefined,
+  today: string
 ): BalanceAnchor | null {
   const db = getDb()
   const rows = db
@@ -128,7 +133,13 @@ function latestAnchor(
     .all()
   const valid = rows.filter(
     (r): r is BalanceAnchor =>
-      r.snapshotDate !== null && r.snapshotAmountCents !== null
+      r.snapshotDate !== null &&
+      r.snapshotAmountCents !== null &&
+      // matches computeForecast's candidate filter: a snapshot dated after
+      // today (export header mis-parse, future bookings priced into the
+      // Saldo) is not a "current balance" point yet — anchoring on it would
+      // let the KPI name a snapshot the forecast rejects
+      r.snapshotDate <= today
   )
   if (valid.length === 0) return null
   return valid.reduce(
@@ -311,7 +322,7 @@ export function computeAnalytics(
     .slice(0, 12)
 
   // ── balance: snapshot anchor math, time-scoped only ───────────────
-  const anchor = latestAnchor(userId, f.accountId)
+  const anchor = latestAnchor(userId, f.accountId, today)
   const { dateFrom, dateTo } = f
 
   // The backward reconstruction subtracts everything between a day and the
