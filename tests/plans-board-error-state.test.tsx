@@ -75,6 +75,20 @@ function stubAll(fail: Record<string, Fail> = {}): StubbedFetch {
 
 const ERROR_TEXT = "Daten konnten nicht geladen werden."
 
+/**
+ * window_too_far is deterministic at a far distance (both window endpoints
+ * refuse ±60 months of today; docs/planning.md), so the calendar must
+ * answer with a navigation hint instead of the shared dead retry.
+ */
+const FAR_HINT = "Dieser Zeitraum liegt außerhalb des planbaren Fensters"
+const FAR_ERROR = {
+  status: 400,
+  json: {
+    error: "window_too_far",
+    message: "window must lie within 1826 days of today",
+  },
+}
+
 function retryButton(container: HTMLElement): HTMLButtonElement {
   const buttons = Array.from(container.querySelectorAll("button"))
   const retry = buttons.find((b) => b.textContent === "Erneut versuchen")
@@ -124,8 +138,25 @@ describe("PlansBoard failure surface", () => {
     await waitFor(() => {
       expect(container.textContent).toContain(ERROR_TEXT)
     })
+    // a generic failure keeps the retryable banner, not the far-window hint
+    expect(container.textContent).not.toContain(FAR_HINT)
     // the calendar banner sits in a still-functional board (plans loaded)
     expect(container.textContent).toContain("Plan anlegen")
     expect(container.textContent).toContain("Noch keine Pläne")
+  })
+
+  it("a far window shows the navigation hint instead of a dead retry", async () => {
+    stubAll({ occ: FAR_ERROR, cal: FAR_ERROR })
+    const { container } = renderWithQuery(<PlansBoard />)
+    await waitFor(() => {
+      expect(container.textContent).toContain(FAR_HINT)
+    })
+    // the retry would 400 again at this distance (same window): absent
+    const buttons = Array.from(container.querySelectorAll("button"))
+    expect(buttons.some((b) => b.textContent === "Erneut versuchen")).toBe(
+      false
+    )
+    // the hint must still read as failure — never as "nothing planned"
+    expect(container.textContent).toContain("Plan anlegen")
   })
 })

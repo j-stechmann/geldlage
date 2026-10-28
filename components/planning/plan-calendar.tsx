@@ -12,6 +12,7 @@ import type {
   EventCalendarOccurrence,
 } from "@/components/reui/event-calendar/event-calendar-types"
 import {
+  ApiError,
   useCalendarTransactions,
   usePlanOccurrences,
   transactionDeepLink,
@@ -122,6 +123,20 @@ export function PlanCalendar({ accountId, onEventClick }: PlanCalendarProps) {
   // month (the dashboard's ErrorState pattern) — placeholder data keeps a
   // possibly stale calendar visible beneath
   const calendarLoadFailed = occurrencesQuery.isError || bookedQuery.isError
+  // window_too_far is NOT a transient failure: the endpoints refuse this
+  // window deterministically (±MAX_WINDOW_DISTANCE_DAYS of today, docs
+  // planning.md), so the shared banner's "Erneut versuchen" could never
+  // succeed at that distance — the reads answer fine again as soon as the
+  // user navigates back toward today (onRangeChange refetches). The hint
+  // names that instead of offering a dead retry, and keeps the error
+  // styling so the month still cannot read as "nothing planned".
+  const windowTooFar =
+    occurrencesQuery.error instanceof ApiError &&
+    occurrencesQuery.error.code === "window_too_far"
+  const farWindow =
+    windowTooFar ||
+    (bookedQuery.error instanceof ApiError &&
+      bookedQuery.error.code === "window_too_far")
 
   const handleRangeChange = React.useCallback(
     (info: {
@@ -224,7 +239,13 @@ export function PlanCalendar({ accountId, onEventClick }: PlanCalendarProps) {
 
   return (
     <>
-      {calendarLoadFailed && (
+      {farWindow && (
+        <p className="mb-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          Dieser Zeitraum liegt außerhalb des planbaren Fensters (±60 Monate
+          um heute) — navigieren Sie im Kalender Richtung „Heute“ zurück.
+        </p>
+      )}
+      {!farWindow && calendarLoadFailed && (
         <ErrorState
           className="mb-2"
           onRetry={() => {

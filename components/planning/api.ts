@@ -102,7 +102,8 @@ export interface CalendarTransaction {
   categoryId: number | null
   categoryName: string | null
   categoryColor: string | null
-  accountId: number
+  /** legacy rows carry no account (transactions.account_id is nullable) */
+  accountId: number | null
 }
 
 export function forecastKey(months: number, accountId: number | null) {
