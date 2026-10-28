@@ -8,6 +8,16 @@ month-windowing/balance math in JavaScript
 reflects the filtered query results — with one deliberate exception
 (balances, see below).
 
+**The planned overlay is deliberately NOT part of this engine.** Planned
+(geplante) transactions and the balance projection form a
+**third scope** ([ADR-0035](adr/adr-0035-planned-transactions-rrule.md),
+[planning.md](planning.md)) with its own endpoint
+(`GET /api/plans/forecast`): planned money never enters `computeAnalytics`
+results, and real booked money never enters projected sums. The dashboard's
+"Geplant einblenden" toggle fetches the forecast separately and merges it
+into the charts client-side (`mergeBalance`/`mergeCashflow` in
+[components/analytics-charts.tsx](../components/analytics-charts.tsx)).
+
 ## Filters
 
 `parseFilters()` → `buildWhere()` build the shared WHERE clause from query

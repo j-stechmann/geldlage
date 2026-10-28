@@ -1,5 +1,229 @@
 # Changelog
 
+## v1.21.0
+
+### Added
+
+- **planning — geplante Transaktionen (calendar, matching, forecast)**:
+  future money becomes plannable — recurring (full RFC 5545 RRULE via the
+  `rrule` package) or one-off plans live in a new virtual
+  `planned_transactions` table and **never touch `transactions`**
+  (dedupe/labeling/snapshot machinery unchanged, ADR-0035). New
+  `lib/planning/` (recurrence validation allowlist + noon-UTC expansion,
+  read-time greedy occurrence matching vs. booked rows with
+  erwartet/überfällig/gebucht states — no stored matches, forecast on a
+  third analytics scope in `GET /api/plans/forecast`), new routes
+  `/api/plans` (+`/[id]`, `/occurrences`, `/forecast`), a `/planung` page
+  with the ReUI EventCalendar (Base UI twin, copy-and-own under
+  `components/reui/`), a full RRULE builder dialog with live next-dates
+  preview (same engine as the server), and a forecast summary card. The
+  calendar also renders REAL bank transactions carrying a Buchungsdatum —
+  booked (washed `•`) and pending `Nicht gebucht` (dashed hollow `◌`; fed
+  by a new `GET /api/transactions/calendar` window endpoint) —, month view
+  is the default, all dialog dropdowns display their chosen label (Base UI
+  `items` maps), and `UNTIL` forms are normalized (rrule only parses compact
+  datetimes; dashed forms compacted, and every sub-noon UNTIL — date-only,
+  midnight, `06:00Z` …, floating no-Z included — lifted to noon so the
+  final day stays included; also at read time, lifting pre-fix stored
+  rules), and validated rules must yield an occurrence within the bounded
+  next-date ladder (five rungs, closing rung ≥ the Gregorian 400-year
+  cycle — sparse-but-live rules like leap-day yearly are
+  creatable, dead rules rejected). Bank chips deep-link to the transactions table
+  (`?tx=<id>`; `GET /api/transactions` gained an `id` param —
+  `queryTransactionById`, a user-scoped single-row lookup bypassing filters
+  and pagination that also shares the row projection with the list query —
+  the table queries exactly that row, then expands, highlights and scrolls
+  to it; render-time focus adjustment, jsdom-tested). The dashboard's "Geplant einblenden"
+  planned-vs-actual mode (dashed
+  projection line, stacked planned cashflow/category bars, projected
+  horizon balance). The agent's read-only query DSL catalog (ADR-0034)
+  gained `planned_transactions`. Tests: RRULE validation/expansion,
+  matching tolerances + greedy determinism, forecast oracle to the cent,
+  plan API routes; vendored ReUI sources are lint-ignored
+  (eslint.config.mjs). Docs: new planning.md + ADR-0035, data-model/api/
+  frontend/analytics/testing updated.
+- **agent — the LLM can now manage plans (CRUD)**: four new tools
+  (`list_plans`, `create_plan`, `update_plan`, `delete_plan`) call the
+  same user-scoped planning service as the REST routes (ADR-0036 — first
+  write tools; ADR-0033's read-only stance lifted domain by domain).
+  `list_plans` returns compact, capped summaries with the computed
+  `next_due_date` (the query DSL cannot expand RRULEs); `update_plan`
+  patches single fields incl. pause/finish via `status`. snake_case tool
+  surface both ways (ADR-0034 naming), loud unknown-field rejection,
+  `PlanValidationError` codes folded into `code: message` tool errors the
+  model self-corrects from; deletes stay prompt-guarded (resolve ids via
+  `list_plans`/`query_data` first, confirm in chat, prefer
+  `status: finished`; system prompt gains a registry-gated plan rules
+  block). Tests: agent-plan-tools (validation passthrough, cross-user
+  isolation, patch semantics, capped summaries, registry/prompt wiring).
+  Docs: ADR-0036, planning.md agent-access section, ADR index.
+
+### Fixed
+
+- **planning review follow-ups**:
+  `planned_transactions` is now in `adoptLegacyIssuer`'s child tables — the
+  legacy-rebrand merge (legacy user + JIT-created duplicate) previously
+  died on `DELETE FROM users` with a FK violation (and aborted boot)
+  whenever the duplicate workspace held a plan; the agent-chat tables
+  (ADR-0033) carry the same `users(id)` FK and had that exact gap since
+  their own introduction — they are on the list now, plus a pre-merge
+  delete of clashing `chat_thread_members` rows (the duplicate's
+  membership is dropped when the surviving identity already holds one on
+  the shared thread) (regression-tested);
+  `GET /api/plans/occurrences` bounds the window to ±60 months of today
+  (`window_too_far`, 1826 d = the forecast horizon cap) — rrule expansion
+  walks from `dtstart` occurrence-by-occurrence (no seek), so far-future
+  windows could block the event loop ~0.6 s per DAILY plan
+  (window-cap arithmetic also no longer relies on overflowing 4-digit ISO
+  `isoDatePlus` near year 9999; regression-tested); unplanned-looking bank
+  chips (no counterparty/purpose) on the /planung calendar no longer fall
+  back to the word "Geplant" — they read "Buchung"; the /planung page
+  surfaces failed plan/calendar/forecast reads with the dashboard's
+  ErrorState + retry instead of rendering as silent empty states; the
+  Top-Ausgabenkategorien tooltip no longer presents the Ist-period share
+  behind a planned-only amount (the planned segment entry prints its
+  supplement alone); the plan list's Wiederholung badge states the engine's
+  real cadence for yearless YEARLY rules (BYMONTHDAY ⇒ "jedes Monats",
+  plain BYDAY ⇒ "jeden <Tag>" — both used to read as a lying "jährlich";
+  INTERVAL > 1 is part of the text, BYDAY+BYMONTHDAY intersections fall
+  back to the raw rule); an "Alle" (INTERVAL) beyond 100 in the plan dialog
+  disarms the dialog with an inline error instead of a green preview
+  followed by a save-time 400; the next-date ladder gained a closing rung
+  (147,000 d ≥ one Gregorian 400-year cycle) — live rules whose gaps can
+  exceed the early rungs (e.g. `YEARLY;INTERVAL=100`) previously read as
+  "no future dates" after their first occurrence passed (and even failed
+  creation for far-out first occurrences); the plan dialog pre-checks the
+  server's BYTE text caps inline (the browser maxLength counts characters
+  only, so e.g. a 128-character umlaut name hit a save-time 400 —
+  purpose/notes gain their maxLengths, shared constants live in
+  `lib/planning/limits.ts`); the plan card's muted line no longer renders
+  a dangling " · " for the category shown in the chip row; the forecast's
+  all-accounts anchor caveat (single latest snapshot _batch_, inherited
+  from the analytics balance KPI — understates multi-account users, exact
+  when account-scoped) is now documented in planning.md; raw-RRULE edits
+  in the plan dialog are validated with the exact server-side
+  `validateRrule` pass — an invalid raw rule disarms the dialog inline
+  (same surface as a builder-mode error) instead of staying saveable until
+  the save-time 400 toast, and the Wiederholung select tracks the raw
+  text's FREQ, so clearing the raw RRULE (→ one-off plan) reads as
+  "Einmalig" instead of the stale pre-edit frequency; the deep-linked
+  transactions focus view (`?tx=<id>`) disables its pager — the id lookup
+  ignores page state, so the controls were clickable no-ops around a stale
+  "N / 1" indicator that now reads "Fokus"; the dashboard's "Geplant
+  einblenden" surfaces a failed forecast read with the ErrorState + retry
+  pattern instead of silently dropping the overlay;
+  `GET /api/transactions/calendar` gained the same ±60-month window
+  distance cap as `GET /api/plans/occurrences`, so the two /planung window
+  reads fail together under their shared ErrorState (regression-tested);
+  the plan dialog's create/update fan the mutation out to the planning
+  caches (`invalidatePlans`) — the dialog path was the one mutation entry
+  point without the fan-out, and with the app's `staleTime` +
+  no-refetch-on-window-focus the board, calendar chips, forecast card and
+  dashboard overlay kept showing pre-mutation data until the affected
+  queries remounted (regression-tested); a stored ordinal BYDAY the
+  Wiederholung picker can't display ("−2SU" … — beyond the picker's
+  1–5/"letzte") routes to the raw-authoritative RRULE field instead of
+  rendering an empty pattern select, and "5." (5th weekday) became a
+  picker item so stored 5FR plans display their pattern (round-trip and
+  faithfulness-gate tested); planning.md's next-date ladder description
+  matches the shipped five rungs (400 → 147 000 days); the next-date
+  ladder clamps its rung ends at the last storable ISO date (`9999-12-31`)
+  — for late-9999 dtstarts the unclamped ends crossed into toISOString's
+  extended-year form (`+010001-…`), truncated into Invalid Dates and made
+  every rung answer "no occurrences" (live rules were falsely rejected at
+  creation; occurrences beyond the storable range now honestly read as
+  none, and the rungs stop widening once clamped — regression-tested),
+  and the plan dialog's next-dates preview stops on an unchanged date
+  instead of repeating the same chip when its cursor leaves the storable
+  range; occurrence category enrichment (occurrences route + forecast
+  planned categories) is user-scoped like every other planning read —
+  category ids are globally unique so today's rows are unaffected, but the
+  name/color resolution no longer leans solely on the write-path
+  ownership checks; the Wiederholung badge stays truthful for
+  raw-RRULE-only shapes where a bare frequency word would hide a narrowing
+  BY\* part — DAILY with BYDAY/BYMONTHDAY/BYMONTH (e.g.
+  `FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR` = werktags, `DAILY;BYMONTHDAY=1` =
+  am 1. jedes Monats — the engine honors both verification-tested, the
+  badge used to read "täglich"), WEEKLY with BYMONTHDAY/BYMONTH
+  (`BYMONTHDAY` is RFC-forbidden on WEEKLY yet engine-honored),
+  MONTHLY with BYMONTH (`MONTHLY;BYMONTH=2;BYMONTHDAY=1` = once a year,
+  badge used to read "monatlich"), and BYSETPOS now escapes before the
+  COUNT/UNTIL suffix is composed onto wording that ignored it
+  (`MONTHLY;BYSETPOS=-1;BYDAY=MO;COUNT=5` must not read "am 1. Mo, 5×") —
+  all verified shapes fall back to the raw rule (regression-tested); the
+  deep-linked transactions focus view also disables its column-header sort
+  buttons — only the sort dropdown was disabled, so a header click silently
+  mutated the sort that applies again after leaving focus mode; the owned
+  `components/ui/calendar.tsx` + `ui/popover.tsx` copies import `cn` from
+  `@/lib/utils` like the rest of the owned code (the `cn` dependency
+  remains for the lint-ignored vendored reui tree); `list_plans` rejects
+  unknown arguments loudly like the write tools instead of silently
+  answering the unfiltered list (a `{"status": "active"}` attempt would
+  have read back as "your active plans" — plain no-args calls stay valid);
+  the forecast hook serves no cross-account placeholder data — with "Geplant
+  einblenden" on, an account-filter switch now blanks the projection
+  figures/overlay until the differently scoped read lands instead of
+  keeping the previous account's numbers on screen (regression-tested; the
+  calendar's stale-while-loading visibility is unchanged); the
+  Top-Ausgabenkategorien tooltip no longer prints a noise "0,00 € geplant"
+  line under every row while the forecast toggle is off — the planned bar
+  series now stays unmounted then, because recharts keeps tooltip entries
+  with `value != null` and the rows' 0-value planned field passed that
+  filter (the toggle-on path already normalized 0 → undefined; same
+  series-visibility gate as the cashflow and balance overlays); the
+  deep-linked focus mode trims its `tx` param before the id lookup and the
+  row match — a hand-edited URL with padded whitespace fetched the right
+  row (the server trims) but failed the row.id comparison, leaving the
+  highlight and expansion silently dead (whitespace-only params now fall
+  back to the filter pipeline exactly like the server; regression-tested);
+  an explicit `TZID=` RRULE part is now rejected loudly (`unsupported part:
+TZID`) instead of silently stripped — rrule's string parser never carries
+  it into `origOptions`, so the part-level check could not see it and the
+  rule would have stored as if the part were never written (the tool
+  descriptions' "everything non-allowlisted is rejected" claim is now
+  literally true; regression-tested); same-snapshotDate snapshot batches
+  (two accounts imported on one day, a same-day re-import) anchor the
+  balance KPI and the forecast deterministically — freshest import wins
+  (`createdAt`, then `id`) instead of unordered-select scan-order luck, and
+  both scopes apply the identical `isLaterAnchor` rule so the balance KPI
+  and the forecast starting balance can never name different snapshots for
+  the same user (regression-tested); the plan dialog treats duplicate
+  BY\*-list tokens as one token — RFC list parts are unordered and
+  duplicate-free, but rrule preserves dups through parse and
+  serialization, so a stored `BYDAY=MO,MO` used to route raw forever and
+  carried its noise into badges; it now maps into the builder and a save
+  rewrites it dup-free (regression-tested).
+- **planning review follow-ups round 2**:
+  the balance KPI and the forecast share the complete snapshot-anchor rule
+  — `latestAnchor` ignores snapshots dated **after** today, exactly like
+  `computeForecast`'s candidate filter. A future-dated Saldo line (an
+  export holding future-dated bookings priced into the balance) anchored
+  the KPI while the forecast rejected it, stranding the two scopes on
+  different balance models (regression-tested on both sides; the
+  no-snapshot fallbacks stay conceptually different — engine pseudo
+  balance cumulated from zero vs. forecast Σ booked ≤ today — and both
+  comments now say so instead of overclaiming); the plan dialog prefills
+  the end condition (COUNT/UNTIL) and interval into rules that route raw
+  (BYSETPOS, unknown FREQ) — a later genuine frequency switch resumed the
+  builder from EMPTY_FORM defaults and silently dropped the stored end
+  condition on save, while rules routing raw through the _late_
+  (unfaithful-mapping) path kept theirs for the same switch
+  (regression-tested); a deep-linked transactions focus view whose
+  referenced row is gone (deleted, stale id) reads "Transaktion nicht
+  gefunden (ggf. gelöscht)" instead of the generic no-data listing under
+  the "nur diese Transaktion" badge (regression-tested); the plan dialog's
+  fields disable while a save is in flight — typing during the request
+  kept edits that the dialog then silently discarded once the successful
+  save closed it (footer buttons stay enabled so cancel always works); the
+  plan calendar names its window state `calendarWindow` instead of
+  shadowing the `window` global.
+- **plan routes reject unknown body fields** (`unknown_field`, service-level
+  in `validatePlanInput`): a typo'd key ("accountid", "amountCent") in a
+  POST/PATCH body was silently dropped — the plan was created/updated
+  without exactly that field and read back as a successful mutation. The
+  agent tools enforced this at their snake_case arg boundary already; the
+  REST boundary now fails the same way (regression-tested).
+
 ## v1.20.0
 
 ### Changed

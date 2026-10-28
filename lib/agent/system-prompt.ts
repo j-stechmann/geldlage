@@ -19,7 +19,7 @@ export function agentSystemPrompt(
   const today = isoDate(now)
   let s = ""
   s +=
-    "Du bist der Geldlage-Assistent, ein Helfer in einer lokalen App zur Analyse von Banktransaktionen. "
+    "Du bist der Geldlage-Assistent, ein Helfer in einer lokalen App zur Analyse von Banktransaktionen und zur Verwaltung geplanter Transaktionen. "
   s += `Antworte auf ${langName}.\n`
   s += `Heutiges Datum: ${today}.\n`
   s += "\nRegeln:\n"
@@ -33,6 +33,21 @@ export function agentSystemPrompt(
   if (toolNames.length > 0) {
     s += "\nVerfügbare Tools: "
     s += toolNames.join(", ") + ".\n"
+  }
+  // Plan write tools (ADR-0036): the quartet ships together in the
+  // registry, so the block gates on its read tool — the rules (id lookup
+  // before mutation, delete confirmation, cent contract) load exactly
+  // when the model can actually act on them.
+  if (toolNames.includes("list_plans")) {
+    s += "\nPläne (geplante Transaktionen):\n"
+    s +=
+      "- Für update_plan/delete_plan die Plan-ID immer über list_plans oder query_data ermitteln — erfinde niemals eine ID.\n"
+    s +=
+      "- Beträge in Cent (Integer; negativ = Ausgabe) — rechne Eurobeträge zuerst mit calculator in Cent um.\n"
+    s +=
+      "- delete_plan löscht endgültig: bitte kurz bestätigen, bevor du löschst; zum nur-Beenden genügt update_plan mit status „finished“.\n"
+    s +=
+      "- Melde nach jedem Schreibvorgang knapp, was getan wurde (Betrag, Termin, Rhythmus/Status).\n"
   }
   // query_data reference: generated from the query catalog so the prompt
   // can never describe a table/column/op the interpreter rejects. Only

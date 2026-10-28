@@ -38,7 +38,7 @@ lexically sortable; the analytics engine slices months with
 
 ## Tables
 
-Nine tables ([lib/db/schema.ts](../lib/db/schema.ts)); every domain table
+Ten tables ([lib/db/schema.ts](../lib/db/schema.ts)); every domain table
 carries `user_id` — rows are invisible to other users
 ([ADR-0032](adr/adr-0032-multi-user-oidc.md)):
 
@@ -49,14 +49,17 @@ erDiagram
   USERS ||--o{ CATEGORIES : "user_id"
   USERS ||--o{ LABEL_RULES : "user_id"
   USERS ||--o{ TRANSACTIONS : "user_id (denormalized)"
+  USERS ||--o{ PLANNED_TRANSACTIONS : "user_id"
   USERS ||--o{ CHAT_THREADS : "user_id (owner)"
   USERS ||--o{ CHAT_THREAD_MEMBERS : "user_id"
   USERS ||--o{ CHAT_MESSAGES : "user_id (author, nullable)"
   ACCOUNTS ||--o{ TRANSACTIONS : "account_id"
   ACCOUNTS ||--o{ IMPORT_BATCHES : "account_id"
+  ACCOUNTS ||--o{ PLANNED_TRANSACTIONS : "account_id (nullable)"
   IMPORT_BATCHES ||--o{ TRANSACTIONS : "batch_id"
   CATEGORIES ||--o{ TRANSACTIONS : "category_id"
   CATEGORIES ||--o{ LABEL_RULES : "label_id (cascade delete)"
+  CATEGORIES ||--o{ PLANNED_TRANSACTIONS : "category_id (nullable)"
   CHAT_THREADS ||--o{ CHAT_THREAD_MEMBERS : "thread_id (cascade delete)"
   CHAT_THREADS ||--o{ CHAT_MESSAGES : "thread_id (cascade delete)"
 ```
@@ -163,6 +166,32 @@ Indexes: `transactions_dedupe_unique` UNIQUE `(account_id, source_hash,
 occurrence_index)` — the dedupe linchpin — plus `account_booking`,
 `booking_date`, `label_status` (worker claim scan), `batch_id`, `category`,
 `payee`.
+
+### `planned_transactions`
+
+Virtual planned transactions ([ADR-0035](adr/adr-0035-planned-transactions-rrule.md);
+the recurrence engine, matching and forecast live in
+[lib/planning/](../lib/planning/), guide: [planning.md](planning.md)).
+**Never inserted into `transactions`** — expansion + read-time matching
+compute everything per request ([ADR-0035](adr/adr-0035-planned-transactions-rrule.md)).
+
+| Column                      | Type                    | Notes                                                                               |
+| --------------------------- | ----------------------- | ----------------------------------------------------------------------------------- |
+| `id`                        | TEXT PK                 | UUID                                                                                |
+| `user_id`                   | INTEGER FK → users      | owning user                                                                         |
+| `account_id`                | INTEGER FK → accounts   | nullable — NULL = "any account"                                                     |
+| `counterparty`              | TEXT                    | free text; drives the occurrence match (normalized substring vs. payer/payee)       |
+| `purpose`                   | TEXT                    | free text                                                                           |
+| `amount_cents`              | INTEGER NOT NULL        | signed ([ADR-0002](adr/adr-0002-integer-cents.md)); CHECK `<> 0`                    |
+| `category_id`               | INTEGER FK → categories | nullable                                                                            |
+| `dtstart`                   | TEXT NOT NULL           | first occurrence, ISO `YYYY-MM-DD`                                                  |
+| `rrule`                     | TEXT                    | bare RFC 5545 RRULE (allowlisted parts, caps); **NULL = one-off on `dtstart`**      |
+| `status`                    | TEXT NOT NULL           | `active / paused / finished` — CHECK enforced (`planned_transactions_status_check`) |
+| `notes`                     | TEXT                    |                                                                                     |
+| `created_at` / `updated_at` | TEXT ISO                |                                                                                     |
+
+Indexes: `planned_transactions_user_status_idx` `(user_id, status)`,
+`planned_transactions_account_idx` `(account_id)`.
 
 ### `chat_threads` / `chat_thread_members` / `chat_messages`
 

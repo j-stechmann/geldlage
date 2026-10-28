@@ -77,8 +77,8 @@ export async function DELETE(request: NextRequest) {
     }
     return NextResponse.json({ deleted: result.changes })
   } catch (err) {
-    // accounts own transactions/import_batches (FK, no cascade): an account
-    // with history cannot be dropped wholesale
+    // accounts own transactions/import_batches/planned_transactions (FK, no
+    // cascade): an account with history or plans cannot be dropped wholesale
     if (
       err instanceof Error &&
       err.message.includes("FOREIGN KEY constraint failed")
@@ -86,7 +86,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json(
         {
           error: "account_in_use",
-          message: "account has transactions or import batches",
+          message: "account has transactions, import batches or plans",
         },
         { status: 409 }
       )

@@ -136,7 +136,7 @@ describe("legacy dkb.db adoption (rebrand file rename)", () => {
       db = getDb()
       expect(
         db.all(`SELECT name FROM sqlite_master WHERE type = 'table'`)
-      ).toHaveLength(10) // 7 app tables + 3 agent chat tables (ADR-0033)
+      ).toHaveLength(11) // 8 app tables (incl. planned_transactions, ADR-0035) + 3 agent chat tables (ADR-0033)
     })
 
     expect(fs.existsSync(dbPath)).toBe(true)
@@ -173,6 +173,26 @@ describe("legacy issuer migration (rebrand users.issuer rewrite)", () => {
       resetConfigCache()
       resetDefaultDbForTest()
     }
+  }
+
+  /** Same-subject user under the given issuer (the migration's merge key). */
+  function seedAkadminUser(
+    database: Db,
+    issuer: string,
+    name: string,
+    subject = "akadmin"
+  ): number {
+    return database
+      .insert(schema.users)
+      .values({
+        issuer,
+        subject,
+        name,
+        email: `${name.toLowerCase()}@example.com`,
+        createdAt: new Date().toISOString(),
+      })
+      .returning()
+      .get().id
   }
 
   it("migrates a legacy-issuer user with all of its data", () => {
@@ -279,6 +299,48 @@ describe("legacy issuer migration (rebrand users.issuer rewrite)", () => {
           updatedAt: new Date().toISOString(),
         })
         .run()
+      // A plan the duplicate created on the new issuer: without
+      // planned_transactions in adoptLegacyIssuer's child tables this row
+      // keeps the users(id) FK alive and the delete below fails the whole
+      // merge (startup crash).
+      db.insert(schema.plannedTransactions)
+        .values({
+          id: "dup-plan",
+          userId: dupId,
+          amountCents: -4_200,
+          dtstart: "2026-03-01",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+        .run()
+      // A chat thread the duplicate created (ADR-0033): the same users(id)
+      // FK shape — and chat_thread_members' (thread_id, user_id) uniqueness
+      // additionally needs the pre-merge conflict cleanup when both
+      // identities shared a thread.
+      db.insert(schema.chatThreads)
+        .values({
+          id: "dup-thread",
+          userId: dupId,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+        .run()
+      db.insert(schema.chatThreadMembers)
+        .values({
+          threadId: "dup-thread",
+          userId: dupId,
+          state: "joined",
+        })
+        .run()
+      db.insert(schema.chatMessages)
+        .values({
+          id: "dup-msg",
+          threadId: "dup-thread",
+          userId: dupId,
+          role: "user",
+          content: "hi",
+        })
+        .run()
 
       migrateSchema(db)
 
@@ -296,6 +358,76 @@ describe("legacy issuer migration (rebrand users.issuer rewrite)", () => {
           `SELECT COUNT(*) AS n FROM accounts WHERE user_id = ${legacyId}`
         )[0]?.n
       ).toBe(1)
+      expect(
+        db.all<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM planned_transactions WHERE user_id = ${legacyId}`
+        )[0]?.n
+      ).toBe(1)
+      expect(
+        db.all<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM chat_threads WHERE user_id = ${legacyId}`
+        )[0]?.n
+      ).toBe(1)
+      expect(
+        db.all<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM chat_thread_members WHERE user_id = ${legacyId}`
+        )[0]?.n
+      ).toBe(1)
+      expect(
+        db.all<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM chat_messages WHERE user_id = ${legacyId}`
+        )[0]?.n
+      ).toBe(1)
+    })
+  })
+
+  it("merges a duplicate whose membership clashes with the merged user's own row", () => {
+    // both identities hold explicit memberships on one (third-party-owned)
+    // thread — the generic re-point would hit the (thread_id, user_id)
+    // unique index and crash the merge; the duplicate's row must be
+    // dropped first so the merge completes
+    withIssuers(() => {
+      db = getDb()
+      const legacyId = seedAkadminUser(db, LEGACY, "Old")
+      const dupId = seedAkadminUser(db, TARGET, "Fresh")
+      // a third-party thread owner must differ by subject (users are
+      // unique on (issuer, subject)) — the migration's "unexpected issuer"
+      // guard only admits LEGACY/TARGET issuers, which this satisfies
+      const ownerId = seedAkadminUser(db, TARGET, "Owner", "owner-subject")
+
+      db.insert(schema.chatThreads)
+        .values({
+          id: "shared-thread",
+          userId: ownerId,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+        .run()
+      // dup joined earlier ("joined"), the surviving identity was invited
+      // later — the states differ and only the surviving row's state wins
+      db.insert(schema.chatThreadMembers)
+        .values({ threadId: "shared-thread", userId: dupId, state: "joined" })
+        .run()
+      db.insert(schema.chatThreadMembers)
+        .values({
+          threadId: "shared-thread",
+          userId: legacyId,
+          state: "invited",
+        })
+        .run()
+
+      migrateSchema(db)
+
+      expect(
+        db.all<{ id: number }>(`SELECT id FROM users WHERE id = ${dupId}`)
+      ).toEqual([])
+      // the duplicate's clashing row was dropped, the legacy row survives
+      expect(
+        db.all<{ n: number; state: string }>(
+          `SELECT COUNT(*) AS n, state FROM chat_thread_members
+           WHERE thread_id = 'shared-thread' AND user_id = ${legacyId}`
+        )[0]
+      ).toEqual({ n: 1, state: "invited" })
     })
   })
 

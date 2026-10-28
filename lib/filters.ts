@@ -65,3 +65,21 @@ export function paramsToFilters(sp: URLSearchParams): TableFilters {
   }
   return f
 }
+
+/**
+ * True when any filter besides the account is set. The analytics scopes
+ * (cashflow, top categories, transaction rows) react to these; the planning
+ * forecast does not (its money is anchored on absolute snapshots and is
+ * account-scoped only) — UI copy uses this to explain the difference.
+ */
+export function hasContentFilters(f: TableFilters): boolean {
+  return (
+    f.q !== "" ||
+    f.dateFrom !== null ||
+    f.dateTo !== null ||
+    f.type !== "all" ||
+    f.categoryIds.length > 0 ||
+    f.status !== "Gebucht" ||
+    f.labelStatus !== "all"
+  )
+}

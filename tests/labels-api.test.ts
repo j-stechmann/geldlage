@@ -2,7 +2,13 @@ import { describe, it, expect, beforeEach } from "vitest"
 import { eq } from "drizzle-orm"
 import { NextRequest } from "next/server"
 import type { Db } from "@/lib/db"
-import { accounts, categories, labelRules, transactions } from "@/lib/db/schema"
+import {
+  accounts,
+  categories,
+  labelRules,
+  plannedTransactions,
+  transactions,
+} from "@/lib/db/schema"
 import { GET as listLabels, POST as createLabel } from "@/app/api/labels/route"
 import {
   PATCH as patchLabel,
@@ -11,7 +17,7 @@ import {
 import { DELETE as deleteRule } from "@/app/api/label-rules/[id]/route"
 import { GET as listRules } from "@/app/api/labels/[id]/rules/route"
 import { POST as assignLabel } from "@/app/api/transactions/[id]/label/route"
-import { authedRequest, setupTestDb } from "./helpers"
+import { authedRequest, seedUser, setupTestDb, TEST_SUBJECT_2 } from "./helpers"
 
 const IBAN = "DE02120300000000202051"
 
@@ -399,6 +405,82 @@ describe("DELETE /api/labels/[id]", () => {
       { params: Promise.resolve({ id: "999" }) }
     )
     expect(out.status).toBe(404)
+  })
+
+  it("clears planned_transactions referencing the category (plan FK)", async () => {
+    const created = await createLabel(
+      await jsonReq("http://test/api/labels", { name: "Miete" })
+    )
+    const { id } = (await created.json()) as { id: number }
+    db.insert(plannedTransactions)
+      .values({
+        id: "plan-referencing-label",
+        userId,
+        amountCents: -95_000,
+        dtstart: "2026-01-01",
+        rrule: "FREQ=MONTHLY;BYMONTHDAY=1",
+        categoryId: id,
+      })
+      .run()
+
+    // Regression: planned_transactions.category_id REFERENCES categories(id)
+    // without ON DELETE action — deleting a label a plan references must
+    // clear the plan reference inside the same transaction, not raise
+    // FOREIGN KEY constraint failed as an unhandled 500 (plans have no
+    // re-labeling step that could clear it beforehand).
+    const out = await deleteLabel(
+      await authedDelete(`http://x/api/labels/${id}`),
+      { params: Promise.resolve({ id: String(id) }) }
+    )
+    expect(out.status).toBe(200)
+    expect(db.select().from(categories).all()).toHaveLength(0)
+    const plan = db
+      .select()
+      .from(plannedTransactions)
+      .where(eq(plannedTransactions.id, "plan-referencing-label"))
+      .get()
+    expect(plan!.categoryId).toBeNull()
+  })
+
+  it("clears even a foreign plan's reference (FK safety net, deliberately unscoped)", async () => {
+    const created = await createLabel(
+      await jsonReq("http://test/api/labels", { name: "Miete" })
+    )
+    const { id } = (await created.json()) as { id: number }
+    const otherUserId = seedUser(
+      db,
+      TEST_SUBJECT_2,
+      "https://other-issuer.example.com"
+    )
+    // App writes can never produce this row (createPlan/validatePlanInput
+    // reject foreign references) — it simulates a foreign plan whose
+    // category_id carries the same globally-unique id. The plan-FK cleanup is
+    // deliberately NOT user-scoped: it must clear EVERY reference to the id
+    // being deleted, or this delete raises FOREIGN KEY constraint failed
+    // (unhandled → 500) instead of succeeding.
+    db.insert(plannedTransactions)
+      .values({
+        id: "foreign-plan",
+        userId: otherUserId,
+        amountCents: -10_000,
+        dtstart: "2026-01-01",
+        rrule: "FREQ=MONTHLY;BYMONTHDAY=1",
+        categoryId: id,
+      })
+      .run()
+
+    const out = await deleteLabel(
+      await authedDelete(`http://x/api/labels/${id}`),
+      { params: Promise.resolve({ id: String(id) }) }
+    )
+    expect(out.status).toBe(200)
+    expect(db.select().from(categories).all()).toHaveLength(0)
+    const plan = db
+      .select()
+      .from(plannedTransactions)
+      .where(eq(plannedTransactions.id, "foreign-plan"))
+      .get()
+    expect(plan!.categoryId).toBeNull()
   })
 })
 

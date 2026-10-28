@@ -1,0 +1,1586 @@
+"use client"
+
+import * as React from "react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
+import { RRule, rrulestr } from "rrule"
+import { normalizeRuleInput } from "@/lib/planning/recurrence"
+import { todayLocal } from "@/lib/analytics/date"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Badge } from "@/components/ui/badge"
+import {
+  parseGermanAmountToCents,
+  formatCentsAsGerman,
+  normalizeWhitespace,
+} from "@/lib/money"
+import { apiFetch } from "@/lib/api-fetch"
+import {
+  createPlan,
+  updatePlan,
+  invalidatePlans,
+  ApiError,
+  type PlanFormValues,
+  type PlanRow,
+} from "@/components/planning/api"
+import {
+  expandOccurrenceDates,
+  isValidIsoDate,
+  isoDatePlus,
+  MAX_ISO_DATE,
+  nextOccurrenceDate,
+  noonUtc,
+  validateRrule,
+} from "@/lib/planning/recurrence"
+import { MAX_COUNTERPARTY, MAX_TEXT } from "@/lib/planning/limits"
+
+interface AccountOption {
+  id: number
+  iban: string
+  name: string
+}
+interface LabelOption {
+  id: number
+  name: string
+  origin: string
+  color: string | null
+}
+
+interface FormState {
+  direction: "Ausgang" | "Eingang"
+  amountText: string
+  counterparty: string
+  purpose: string
+  notes: string
+  accountId: string // "all" = any account
+  categoryId: string // "none" = no category
+  dtstart: string
+  /** "" = einmalig */
+  freq: "" | "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY"
+  interval: number
+  byDay: string[]
+  monthlyMode: "mday" | "wday"
+  byMonthDayText: string
+  ordinal: string
+  ordinalDay: string
+  byMonth: string[]
+  yearlyMode: "mday" | "wday"
+  yearlyMonthDayText: string
+  endMode: "none" | "until" | "count"
+  untilDate: string
+  count: number
+  /** the effective RRULE text (builder writes it; user edits make it raw) */
+  rawRrule: string
+  rawDirty: boolean
+}
+
+const EMPTY_FORM: FormState = {
+  direction: "Ausgang",
+  amountText: "",
+  counterparty: "",
+  purpose: "",
+  notes: "",
+  accountId: "all",
+  categoryId: "none",
+  dtstart: "",
+  freq: "",
+  interval: 1,
+  byDay: [],
+  monthlyMode: "mday",
+  byMonthDayText: "",
+  ordinal: "1",
+  ordinalDay: "MO",
+  byMonth: [],
+  yearlyMode: "mday",
+  yearlyMonthDayText: "",
+  endMode: "none",
+  untilDate: "",
+  count: 12,
+  rawRrule: "",
+  rawDirty: false,
+}
+
+const WEEKDAY_CHIPS: Array<{ value: string; label: string }> = [
+  { value: "MO", label: "Mo" },
+  { value: "TU", label: "Di" },
+  { value: "WE", label: "Mi" },
+  { value: "TH", label: "Do" },
+  { value: "FR", label: "Fr" },
+  { value: "SA", label: "Sa" },
+  { value: "SU", label: "So" },
+]
+
+const MONTH_CHIPS = [
+  "Jan",
+  "Feb",
+  "Mär",
+  "Apr",
+  "Mai",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Okt",
+  "Nov",
+  "Dez",
+]
+
+function field(
+  label: string,
+  children: React.ReactNode,
+  hint?: React.ReactNode
+) {
+  return (
+    <label className="block space-y-1.5">
+      <span className="text-sm font-medium">{label}</span>
+      {children}
+      {hint && (
+        <span className="block text-xs text-muted-foreground">{hint}</span>
+      )}
+    </label>
+  )
+}
+
+/**
+ * Parse a comma list of month days ("1,15,-1"); throws on garbage. Tokens
+ * must be integer literals: Number.parseInt would silently coerce decimal
+ * typos ("1.5" → day 1) into a different recurring plan than the user
+ * typed. Exported for the dialog regression tests.
+ */
+export function parseByMonthDay(text: string): number[] {
+  const list = text
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+  if (list.length === 0) return []
+  if (list.some((s) => !/^-?\d+$/.test(s))) {
+    throw new Error("Ungültige Monatstage (Ganzzahlen erwartet)")
+  }
+  const nums = list.map((s) => Number.parseInt(s, 10))
+  if (
+    nums.some((n) => !Number.isInteger(n) || n === 0 || Math.abs(n) > 31) ||
+    new Set(nums).size !== nums.length ||
+    list.length > 31
+  ) {
+    throw new Error("Ungültige Monatstage")
+  }
+  return nums
+}
+
+/** UTF-8 byte length — the unit the server's text caps actually count. */
+function utf8Bytes(s: string): number {
+  return new TextEncoder().encode(s).length
+}
+
+/**
+ * Per-field byte-cap pre-check mirroring the server exactly: service.ts
+ * measures `normalizeWhitespace` (NFC + collapse + trim) of the sent value
+ * against the same constants (lib/planning/limits.ts) — the client must
+ * apply the identical measure, or a browser-accepted 128-character
+ * umlaut/emoji name would only surface as the server's 400.
+ * Returned German message renders under the offending field and disarms
+ * the save button (same inline pattern as the rule errors).
+ */
+export function textLimitError(
+  label: string,
+  value: string,
+  max: number
+): string | null {
+  const n = utf8Bytes(normalizeWhitespace(value))
+  if (n <= max) return null
+  return `${label} ist zu lang: ${n} Bytes, max. ${max} — Zeichen ≠ Bytes (Umlaute/Emoji zählen doppelt)`
+}
+
+/** Compose the RRULE text from the builder fields; null = one-off. */
+function buildRrule(s: FormState): string | null {
+  if (s.freq === "") return null
+  // the interval input clamps only the lower bound — a typed 500 must fail
+  // INLINE (like the count end condition does) instead of producing a green
+  // preview and a save-time 400-toast from the server's MAX_INTERVAL cap
+  if (!Number.isInteger(s.interval) || s.interval < 1 || s.interval > 100) {
+    throw new Error("Intervall muss zwischen 1 und 100 liegen")
+  }
+  const parts: string[] = [`FREQ=${s.freq}`]
+  if (s.interval > 1) parts.push(`INTERVAL=${s.interval}`)
+  if (s.freq === "WEEKLY" && s.byDay.length > 0) {
+    parts.push(`BYDAY=${s.byDay.join(",")}`)
+  }
+  if (s.freq === "MONTHLY") {
+    if (s.monthlyMode === "wday") {
+      parts.push(`BYDAY=${s.ordinal}${s.ordinalDay}`)
+    } else {
+      const days = parseByMonthDay(s.byMonthDayText)
+      if (days.length > 0) parts.push(`BYMONTHDAY=${days.join(",")}`)
+    }
+  }
+  if (s.freq === "YEARLY") {
+    if (s.byMonth.length > 0) parts.push(`BYMONTH=${s.byMonth.join(",")}`)
+    if (s.yearlyMode === "wday") {
+      parts.push(`BYDAY=${s.ordinal}${s.ordinalDay}`)
+    } else {
+      const days = parseByMonthDay(s.yearlyMonthDayText)
+      if (days.length > 0) parts.push(`BYMONTHDAY=${days.join(",")}`)
+    }
+  }
+  if (s.endMode === "until") {
+    // a CHOSEN end condition must be complete: an empty/invalid date would
+    // otherwise silently save an unbounded rule while the form displays
+    // "Am Datum" — throw so the effective-rule memo flips to error state
+    // (inline message + disabled save) instead of dropping the part
+    if (!s.untilDate || !isValidIsoDate(s.untilDate)) {
+      throw new Error("Enddatum fehlt oder ist ungültig")
+    }
+    // noon-anchored UNTIL → the chosen day stays INCLUDED (occurrences sit
+    // at noon on the same UTC clock)
+    const u = noonUtc(s.untilDate)
+    const pad = (n: number) => String(n).padStart(2, "0")
+    parts.push(
+      `UNTIL=${u.getUTCFullYear()}${pad(u.getUTCMonth() + 1)}${pad(u.getUTCDate())}T${pad(u.getUTCHours())}${pad(u.getUTCMinutes())}${pad(u.getUTCSeconds())}Z`
+    )
+  } else if (s.endMode === "count") {
+    const n = Math.round(s.count)
+    if (!Number.isInteger(n) || n < 1 || n > 366) {
+      throw new Error("Anzahl muss zwischen 1 und 366 liegen")
+    }
+    parts.push(`COUNT=${n}`)
+  }
+  return parts.join(";")
+}
+
+/** Ascending-ISO equality of two occurrence expansions. */
+function sameOccurrenceSets(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((d, i) => d === b[i])
+}
+
+/** MO..SU letters at the RRULE weekday numbers 0..6. */
+const WEEKDAY_LETTERS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"]
+
+/** Tokens ("MO", "1FR", "-1SU") of a byweekday part; "?" for unusable entries. */
+function weekdayTokens(v: unknown): string[] {
+  const arr = Array.isArray(v) ? v : v === undefined || v === null ? [] : [v]
+  return arr.map((wd): string => {
+    const weekday: number =
+      typeof wd === "number"
+        ? wd
+        : typeof wd === "object" && wd !== null
+          ? ((wd as { weekday?: number }).weekday ?? -1)
+          : -1
+    const n: number | undefined =
+      typeof wd === "object" && wd !== null
+        ? ((wd as { n?: number }).n ?? undefined)
+        : undefined
+    const letter = WEEKDAY_LETTERS[weekday]
+    if (!letter) return "?"
+    return n !== undefined ? `${n}${letter}` : letter
+  })
+}
+
+/**
+ * Order-insensitive signature of a byweekday part (parity/loss compare).
+ * Set semantics: RFC list parts are unordered and duplicate-free, so the
+ * same token twice ("BYDAY=MO,MO") must compare as one — a stored rule
+ * with dup noise stays builder-representable instead of routing raw.
+ */
+function byWeekdaySignature(v: unknown): string {
+  return [...new Set(weekdayTokens(v))].sort().join(",")
+}
+
+/**
+ * Order-insensitive signature of a number-list part (bymonthday/bymonth) —
+ * set semantics like byWeekdaySignature ("1,1" ≡ "1").
+ */
+function numberListSignature(v: unknown): string {
+  const arr = Array.isArray(v) ? v : v === undefined || v === null ? [] : [v]
+  return [...new Set(arr.map((n) => String(n)))].sort().join(",")
+}
+
+/**
+ * Part parity between a stored rule's parsed options and the builder's
+ * rebuild: every part the builder vocabulary could silently drop
+ * (WKST ≠ MO, BYMONTH on WEEKLY/MONTHLY, multi-ordinal or mixed BYDAY,
+ * BYDAY+BYMONTHDAY mixes) must re-appear in the rebuild with the same
+ * semantics.
+ *
+ * The occurrence-set gate alone misses these when a rule is so sparse that
+ * BOTH rules expand to the empty set over the compare window (e.g.
+ * INTERVAL=100 yearly — the first occurrence is ~100 years out): stored
+ * [] == mis-rebuilt [] would read "faithful" and the next save would
+ * silently rewrite the cadence. Parity fails such rebuilds structurally
+ * instead. Lists compare order-insensitively; interval/count normalize
+ * over their defaults (explicit INTERVAL=1 vs omitted is parity, not
+ * loss); UNTIL compares at DAY granularity (the builder re-anchors the
+ * end date at noon — the same effective bound for noon-anchored
+ * occurrences; a shifted end DATE still mismatches). Exported for the
+ * dialog regression tests.
+ */
+export function rebuildParity(
+  stored: Record<string, unknown>,
+  rebuiltText: string
+): boolean {
+  let rebuilt: Record<string, unknown>
+  try {
+    const parsed = rrulestr(rebuiltText, { forceset: false })
+    if (!(parsed instanceof RRule)) return false
+    rebuilt = parsed.origOptions as Record<string, unknown>
+  } catch {
+    return false
+  }
+  if (stored.freq !== rebuilt.freq) return false
+  const int = (v: unknown): number => (typeof v === "number" ? v : 1)
+  const interval = int(stored.interval)
+  if (interval !== int(rebuilt.interval)) return false
+  // WKST only bends week-grouped expansions (INTERVAL ≥ 2): with interval
+  // 1 it is semantics-free, so an explicit WKST there must not demote a
+  // builder-representable rule to raw
+  const wkst = (v: unknown): number | null => {
+    if (v === undefined || v === null) return null
+    if (typeof v === "number") return v
+    if (typeof v === "object") {
+      const weekday = (v as { weekday?: number }).weekday
+      if (typeof weekday === "number") return weekday
+    }
+    return null
+  }
+  if (interval > 1 && (wkst(stored.wkst) ?? 0) !== (wkst(rebuilt.wkst) ?? 0)) {
+    return false
+  }
+  const countOf = (v: unknown): number | null =>
+    typeof v === "number" ? v : null
+  if (countOf(stored.count) !== countOf(rebuilt.count)) return false
+  const dayOf = (v: unknown): string | null =>
+    v instanceof Date ? v.toISOString().slice(0, 10) : null
+  if (dayOf(stored.until) !== dayOf(rebuilt.until)) return false
+  if (
+    byWeekdaySignature(stored.byweekday) !==
+      byWeekdaySignature(rebuilt.byweekday) ||
+    numberListSignature(stored.bymonthday) !==
+      numberListSignature(rebuilt.bymonthday) ||
+    numberListSignature(stored.bymonth) !== numberListSignature(rebuilt.bymonth)
+  ) {
+    return false
+  }
+  return true
+}
+
+/**
+ * Map a stored RRULE back into the builder fields; returns the overrides to
+ * apply. The result is gated on faithfulness: whenever the builder fields
+ * (EMPTY_FORM + overrides) cannot reproduce the stored rule 1:1,
+ * `rawDirty=true` and the raw text stays authoritative — an untouched
+ * edit-save must never silently rewrite a recurrence the builder can't
+ * represent (multi-ordinal BYDAY, picker ordinals beyond 1–5/−1, yearless
+ * plain-weekday rules, plain-weekday+BYMONTH, BYDAY+BYMONTHDAY mixes, WKST
+ * variants). Multi-month-chip weekday YEARLY rules DO map into the wday
+ * fields — buildRrule reproduces them exactly; the historical silent
+ * rewrite of that shape (the mday mapping dropping BYDAY) is closed
+ * structurally by rebuildParity catching the dropped part. Ordinal
+ * weekday-yearly without BYMONTH maps too (the ordinal counts across the
+ * whole year — the dialog's own hint documents exactly that semantics);
+ * only its PLAIN-weekday sibling stays raw.
+ * The gate is part parity (rebuildParity — every stored part must
+ * re-appear in the rebuild; the occurrence-set compare alone fails for
+ * ultra-sparse rules, where both sides of the compare window expand to
+ * the empty set), part occurrence-set equality over an 800-day window.
+ * Exported for the dialog round-trip regression tests.
+ */
+export function parseRruleToForm(
+  rruleText: string | null,
+  dtstart?: string | null
+): Partial<FormState> {
+  if (rruleText === null || rruleText.trim() === "") {
+    return { freq: "", rawRrule: "", rawDirty: false }
+  }
+  try {
+    const parsed = rrulestr(normalizeRuleInput(rruleText), {
+      forceset: false,
+    })
+    if (!(parsed instanceof RRule))
+      return { rawRrule: rruleText, rawDirty: true }
+    const o = parsed.origOptions as {
+      freq?: number
+      interval?: number
+      count?: number
+      until?: Date | number | null
+      byweekday?: unknown
+      bymonthday?: number | number[]
+      bymonth?: number | number[]
+      bysetpos?: unknown
+      wkst?: unknown
+    }
+    // freq: YEARLY=0, MONTHLY=1, WEEKLY=2, DAILY=3
+    const freq =
+      o.freq === 3
+        ? "DAILY"
+        : o.freq === 2
+          ? "WEEKLY"
+          : o.freq === 1
+            ? "MONTHLY"
+            : o.freq === 0
+              ? "YEARLY"
+              : null
+    const overrides: Partial<FormState> = {
+      interval: typeof o.interval === "number" ? o.interval : 1,
+    }
+    const count = typeof o.count === "number" ? o.count : null
+    const until = o.until instanceof Date ? o.until : null
+    if (count !== null) {
+      overrides.endMode = "count"
+      overrides.count = count
+    } else if (until !== null) {
+      overrides.endMode = "until"
+      overrides.untilDate = until.toISOString().slice(0, 10)
+    } else {
+      overrides.endMode = "none"
+    }
+    if (freq === null || o.bysetpos !== undefined) {
+      // The builder cannot rebuild this rule faithfully (unknown FREQ or a
+      // BYSETPOS part) — the raw text stays authoritative. The end
+      // condition and interval above are REAL stored semantics though:
+      // prefilling them means a genuine later frequency switch (which exits
+      // raw mode and resumes the builder) keeps COUNT/INTERVAL/UNTIL
+      // instead of silently starting at EMPTY_FORM defaults and dropping
+      // them on save. freq stays at its EMPTY_FORM default: while raw, the
+      // Wiederholung select reads FREQ from the raw text (freqDisplay), and
+      // a genuine switch sets it explicitly.
+      return { ...overrides, rawRrule: rruleText, rawDirty: true }
+    }
+    overrides.freq = freq
+
+    const collect = (v: unknown): unknown[] =>
+      Array.isArray(v) ? v : v !== undefined ? [v] : []
+    const byDayTokens = collect(o.byweekday)
+      .map((wd): string => {
+        const weekday: number =
+          typeof wd === "number"
+            ? wd
+            : ((wd as { weekday?: number }).weekday ?? -1)
+        // rrule's Weekday carries the ordinal as `n` ("1FR" → {weekday:4,n:1});
+        // plain tokens have no n — reading `.nth` would never resolve
+        const nth: number | undefined =
+          typeof wd === "object" && wd !== null
+            ? ((wd as { n?: number }).n ?? undefined)
+            : undefined
+        const letter = WEEKDAY_LETTERS[weekday]
+        if (!letter) return ""
+        return nth !== undefined ? `${nth}${letter}` : letter
+      })
+      .filter(Boolean)
+
+    if (freq === "WEEKLY") {
+      // ordinal BYDAY tokens are not valid for weekly rules (validation
+      // rejects them) — filtered defensively anyway, signed forms included
+      overrides.byDay = [
+        ...new Set(byDayTokens.filter((t) => !/^-?\d/.test(t))),
+      ]
+    }
+    if (freq === "MONTHLY" || freq === "YEARLY") {
+      // signed tokens too: "1FR,-1FR" is two ordinals, not one + a plain day
+      const ordinals = byDayTokens.filter((t) => /^-?\d/.test(t))
+      // set semantics (RFC list parts are unordered AND duplicate-free):
+      // rrule preserves dup tokens through parse + serialization, so a
+      // stored "1,1" is possible — the builder's save then rewrites it to
+      // the clean single token instead of carrying the noise forever
+      const monthDays = [
+        ...new Set(
+          (collect(o.bymonthday) as (number | string)[])
+            .map((n) => Number.parseInt(String(n), 10))
+            .filter((n) => Number.isInteger(n))
+        ),
+      ]
+      const months = [
+        ...new Set(
+          (collect(o.bymonth) as (number | string)[])
+            .map((n) => Number.parseInt(String(n), 10))
+            .filter((n) => Number.isInteger(n))
+        ),
+      ]
+      const ordinal = ordinals.length === 1 ? ordinals[0] : null
+      // single ordinal token split into ordinal prefix + weekday letter
+      // ("5FR" → "5" + "FR")
+      const ordinalMatch =
+        ordinal === null
+          ? null
+          : /^(-?\d+)(MO|TU|WE|TH|FR|SA|SU)$/.exec(ordinal)
+      // the picker items cover 1–5 and "letzte" (-1). An ordinal outside
+      // that set ("-2SU" …) would render an empty pattern field despite
+      // round-tripping the same rule — route it raw instead (the raw text
+      // stays authoritative, the same escape hatch as multi-ordinal BYDAY).
+      // BYMONTHDAY must be absent in both modes: the builder writes exactly
+      // one of BYMONTHDAY/BYDAY per mode, and MONTHLY has no month-chip
+      // concept — a stored intersection must not lose its BY* half (parity
+      // would route raw anyway, but the field mapping stays honest).
+      const PICKER_ORDINALS = new Set(["1", "2", "3", "4", "5", "-1"])
+      if (
+        ordinalMatch !== null &&
+        PICKER_ORDINALS.has(ordinalMatch[1]) &&
+        monthDays.length === 0
+      ) {
+        if (freq === "MONTHLY") {
+          overrides.monthlyMode = "wday"
+          overrides.ordinal = ordinalMatch[1]
+          overrides.ordinalDay = ordinalMatch[2]
+        } else {
+          // ANY number of month chips is builder-representable: buildRrule
+          // writes BYMONTH=<list> beside the BYDAY ordinal, so the rebuild
+          // reproduces the stored rule exactly. The historical trap (the
+          // mday mapping silently dropping BYDAY on a routine edit-save) is
+          // closed structurally by rebuildParity catching the dropped part,
+          // not by routing the shape raw.
+          overrides.yearlyMode = "wday"
+          overrides.byMonth = months.map(String)
+          overrides.ordinal = ordinalMatch[1]
+          overrides.ordinalDay = ordinalMatch[2]
+        }
+      } else {
+        overrides.monthlyMode = "mday"
+        overrides.byMonthDayText = monthDays.join(",")
+        if (freq === "YEARLY") {
+          overrides.yearlyMode = "mday"
+          overrides.yearlyMonthDayText = monthDays.join(",")
+          overrides.byMonth = months.map(String)
+        }
+      }
+    }
+    overrides.rawRrule = rruleText
+    // Faithfulness gate: rebuild the rule exactly as the dialog's effective
+    // rule would be on an untouched open ({EMPTY_FORM + overrides}) and
+    // require it to produce the SAME occurrences as the stored rule over an
+    // 800-day window (two annual cycles — catches year-level aliasing like
+    // "1MO yearly" vs a plain yearly whose first year coincides). Equal sets
+    // → the builder can own the rule; otherwise the raw text stays
+    // authoritative. A string comparison would be wrong here: canonical
+    // spellings differ (e.g. an explicit INTERVAL=1) while the semantics
+    // agree.
+    let faithful = false
+    if (dtstart != null && isValidIsoDate(dtstart)) {
+      const w = { from: dtstart, to: isoDatePlus(dtstart, 800) }
+      let rebuilt: string | null = null
+      try {
+        rebuilt = buildRrule({ ...EMPTY_FORM, ...overrides })
+      } catch {
+        rebuilt = null
+      }
+      faithful =
+        rebuilt !== null &&
+        // parity FIRST: a rule the builder vocabulary drops must route raw
+        // even when the set compare below sees [] == [] (ultra-sparse
+        // stored and mis-rebuilt rules are both empty over the window —
+        // see rebuildParity's doc)
+        rebuildParity(o, rebuilt) &&
+        sameOccurrenceSets(
+          expandOccurrenceDates(dtstart, rruleText, w),
+          expandOccurrenceDates(dtstart, rebuilt, w)
+        )
+    }
+    overrides.rawDirty = !faithful
+    return overrides
+  } catch {
+    return { rawRrule: rruleText, rawDirty: true }
+  }
+}
+
+/** Build the fully-initialized form for a dialog open (edit plan or new). */
+function initialForm(plan: PlanRow | null | undefined): FormState {
+  if (plan) {
+    const overrides = parseRruleToForm(plan.rrule, plan.dtstart)
+    return {
+      ...EMPTY_FORM,
+      direction: plan.amountCents > 0 ? "Eingang" : "Ausgang",
+      amountText: formatCentsAsGerman(Math.abs(plan.amountCents)),
+      counterparty: plan.counterparty ?? "",
+      purpose: plan.purpose ?? "",
+      notes: plan.notes ?? "",
+      accountId: plan.accountId === null ? "all" : String(plan.accountId),
+      categoryId: plan.categoryId === null ? "none" : String(plan.categoryId),
+      dtstart: plan.dtstart,
+      ...overrides,
+    }
+  }
+  return { ...EMPTY_FORM, dtstart: todayLocal() }
+}
+
+function describePlanError(err: unknown): string {
+  const fallback =
+    err instanceof Error && err.message ? err.message : "Netzwerkfehler"
+  if (!(err instanceof ApiError)) return fallback
+  const map: Record<string, string> = {
+    invalid_amount:
+      "Betrag ist ungültig (nicht-null Ganzzahl in Cent erwartet)",
+    invalid_dtstart:
+      "Startdatum ist kein gültiges Datum (frühestens 01.01.1900)",
+    invalid_rrule: "Wiederholungsregel ist ungültig",
+    invalid_status: "Status ist ungültig",
+    invalid_counterparty: "Vertragspartner ist zu lang (max. 128 Bytes)",
+    invalid_purpose: "Verwendungszweck ist zu lang (max. 500 Bytes)",
+    invalid_notes: "Notizen sind zu lang (max. 500 Bytes)",
+    account_not_found: "Konto nicht gefunden",
+    category_not_found: "Kategorie nicht gefunden",
+    invalid_plan: "Betrag und Startdatum sind erforderlich",
+  }
+  return map[err.code] ?? fallback
+}
+
+/**
+ * The Wiederholung select's pick → builder patch, or null for a NO-OP.
+ * Base UI fires onValueChange on EVERY item press — including re-picking
+ * the already-displayed value (SelectItem commits unconditionally, no
+ * equality check). A same-value tap must therefore NOT leave raw mode:
+ * resuming the builder from its stale field state would silently rewrite
+ * exactly the recurrence that routed raw (rawDirty stays authoritative
+ * until the user genuinely switches to another frequency). Exported for
+ * the dialog regression tests.
+ */
+export function freqPickPatch(
+  display: "once" | FormState["freq"],
+  picked: string | null | undefined
+): Pick<FormState, "freq" | "rawDirty"> | null {
+  const normalized =
+    picked === null || picked === undefined || picked === "once"
+      ? "once"
+      : picked
+  if (normalized === display) return null
+  return {
+    freq: normalized === "once" ? "" : (normalized as FormState["freq"]),
+    rawDirty: false,
+  }
+}
+
+/**
+ * Hint for YEARLY rules with no month chips — mode-accurate per the rrule
+ * engine: without BYMONTH, BYMONTHDAY repeats the day every month (12×/year),
+ * while ordinal BYDAY counts across the YEAR (1st–4th weekday → January,
+ * last → December). In mday mode that 12×-copy is only truthful once a day
+ * text is entered: with the day field still empty the rule is a bare
+ * FREQ=YEARLY, whose expansion is the start-date ANNIVERSARY (1×/year) —
+ * a contradicting hint would sit right above a preview showing it.
+ * Extracted pure so the regression tests can lock the semantics — the copy
+ * used to describe the two modes swapped.
+ */
+export function yearlyNoMonthHint(
+  yearlyMode: FormState["yearlyMode"],
+  dayChosen = true
+): string {
+  if (yearlyMode === "wday") {
+    return (
+      "Kein Monat gewählt — die Ordnungszahl zählt über das ganze Jahr " +
+      "(„1. Mo“ = erster Montag des Jahres; „letzte Fr“ = letzter Freitag " +
+      "des Jahres); wähle Monate, wenn der Termin in einem bestimmten " +
+      "Monat kommen soll."
+    )
+  }
+  if (!dayChosen) {
+    return (
+      "Kein Monat gewählt — jährlich am Startdatum. Sobald ein Tag " +
+      "eingetragen ist, kehrt er in jedem Monat wieder (12× pro Jahr); " +
+      "wähle Monate, wenn der Termin nur einmal jährlich kommen soll."
+    )
+  }
+  return (
+    "Kein Monat gewählt — der gewählte Tag kehrt dann in jedem Monat " +
+    "wieder (12× pro Jahr); wähle Monate, wenn der Termin nur einmal " +
+    "jährlich kommen soll."
+  )
+}
+
+export interface PlanDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  /** set = edit existing plan; null/undefined = create */
+  plan?: PlanRow | null
+}
+
+export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
+  const isEdit = plan !== null && plan !== undefined
+  const [busy, setBusy] = React.useState(false)
+  const queryClient = useQueryClient()
+
+  // initial state is derived per dialog open (plan/new); adjusting state
+  // during render ("adjusting state when a prop change", react.dev) avoids
+  // an effect entirely
+  const initKey = `${open ? "open" : "closed"}|${plan?.id ?? "new"}`
+  const [form, setForm] = React.useState<FormState>(() => initialForm(plan))
+  const [renderedKey, setRenderedKey] = React.useState(initKey)
+  if (renderedKey !== initKey) {
+    setRenderedKey(initKey)
+    setForm(initialForm(plan))
+  }
+
+  const set = React.useCallback(
+    (patch: Partial<FormState>) => setForm((prev) => ({ ...prev, ...patch })),
+    []
+  )
+
+  const { data: accounts } = useQuery<AccountOption[]>({
+    queryKey: ["accounts"],
+    queryFn: async () => {
+      const res = await apiFetch("/api/accounts")
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = (await res.json()) as { accounts: AccountOption[] }
+      return data.accounts
+    },
+    enabled: open,
+  })
+  const { data: labelsData } = useQuery<{ labels: LabelOption[] }>({
+    queryKey: ["labels"],
+    queryFn: async () => {
+      const res = await apiFetch("/api/labels")
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      return res.json()
+    },
+    enabled: open,
+  })
+
+  // the effective RRULE text: builder output, unless the user edits raw —
+  // plus a rule-error flag. buildRrule can throw (parseByMonthDay on
+  // garbage/duplicate month days); the memo must never: an uncaught render
+  // error here would unmount the whole app (no error.tsx boundary exists).
+  // The flag turns the throw into inline preview text + a disabled save.
+  const effective = React.useMemo<{
+    rrule: string | null
+    error: string | null
+  }>(() => {
+    if (form.rawDirty) {
+      const raw = form.rawRrule.trim()
+      if (raw === "") return { rrule: null, error: null }
+      // the raw text is authoritative and must satisfy exactly what the
+      // server validates (validateRrule): previously the raw mode checked
+      // nothing, so an invalid raw rule stayed saveable until the request
+      // 400'd (toast) — now it disarms the dialog like a builder error,
+      // with the same inline message that save would have surfaced
+      try {
+        validateRrule(raw)
+      } catch {
+        return { rrule: null, error: "Wiederholungsregel ist ungültig" }
+      }
+      return { rrule: raw, error: null }
+    }
+    try {
+      return { rrule: buildRrule(form), error: null }
+    } catch (err) {
+      return {
+        rrule: null,
+        error:
+          err instanceof Error && err.message
+            ? err.message
+            : "Ungültige Wiederholungsregel",
+      }
+    }
+  }, [form])
+  const effectiveRrule = effective.rrule
+
+  // While the raw text is authoritative (rawDirty) the "Wiederholung"
+  // select displays the FREQ of the EFFECTIVE rule, never the dormant
+  // builder state — clearing the raw text (→ one-off) must read as
+  // "Einmalig" and a raw FREQ=DAILY as "Täglich", instead of the stale
+  // pre-edit frequency. Unmatched raw text (no FREQ / invalid rule) keeps
+  // the last builder value; the preview error + disarmed save carry the
+  // invalidity. Any select interaction leaves raw mode (rawDirty: false)
+  // and resumes the builder.
+  const freqDisplay = React.useMemo<"once" | FormState["freq"]>(() => {
+    if (!form.rawDirty) return form.freq === "" ? "once" : form.freq
+    const raw = form.rawRrule.trim()
+    // a cleared raw text IS the one-off effective rule (rrule: null) —
+    // never fall back to the dormant builder frequency here
+    if (raw === "") return "once"
+    const m = /FREQ=(DAILY|WEEKLY|MONTHLY|YEARLY)/i.exec(raw)
+    return m
+      ? (m[1].toUpperCase() as FormState["freq"])
+      : form.freq === ""
+        ? "once"
+        : form.freq
+  }, [form.rawDirty, form.rawRrule, form.freq])
+
+  // rawDirty=false display: the built rule text, HELD over transient
+  // builder errors — clearing the end date or typing an out-of-range
+  // interval must not visually wipe the RRULE field (it reappears once a
+  // repair clears effective.error). A genuine one-off (rrule null, error
+  // null) still clears the field — that empty value IS the "Einmalig"
+  // display. The hold must be READABLE in render, so it lives in state
+  // guarded by the equality check — the react.dev "set state during
+  // render" pattern (same as the renderedKey reset above and
+  // transactions-table's focus sync; refs are unreadable at render,
+  // setState-in-effect is forbidden). The hold never needs a
+  // per-dialog-open reset: initialForm never produces a builder-error
+  // state (parseRruleToForm routes unfaithful rules raw), so a held text
+  // can only surface for an error the CURRENT dialog interaction produced.
+  const [lastBuiltRrule, setLastBuiltRrule] = React.useState("")
+  if (
+    !form.rawDirty &&
+    effectiveRrule !== null &&
+    lastBuiltRrule !== effectiveRrule
+  ) {
+    setLastBuiltRrule(effectiveRrule)
+  }
+  const rruleDisplay = form.rawDirty
+    ? form.rawRrule
+    : effectiveRrule !== null
+      ? effectiveRrule
+      : effective.error !== null
+        ? lastBuiltRrule
+        : ""
+
+  // text byte caps (server mirror — see textLimitError): the memo never
+  // throws, each exceeded field gets an inline hint and disarms the save
+  const textErrors = React.useMemo(
+    () => ({
+      counterparty: textLimitError(
+        "Vertragspartner",
+        form.counterparty,
+        MAX_COUNTERPARTY
+      ),
+      purpose: textLimitError("Verwendungszweck", form.purpose, MAX_TEXT),
+      notes: textLimitError("Notizen", form.notes, MAX_TEXT),
+    }),
+    [form.counterparty, form.purpose, form.notes]
+  )
+
+  // 0 is invalid server-side (validatePlanInput: amount must be a non-zero
+  // safe integer of cents) — pre-empted inline like the byte caps, so "0,00"
+  // disarms the save with a field error instead of only failing as the
+  // save-time 400 toast the button was still armed for. Text the parser
+  // REJECTS stays on the save path on purpose: "950," mid-typing throws, and
+  // an inline red at every keystroke would fight the input — the toast there
+  // carries the format hint.
+  const amountError = React.useMemo<string | null>(() => {
+    const t = form.amountText.trim()
+    if (t === "") return null
+    try {
+      if (parseGermanAmountToCents(t) === 0) {
+        return "Betrag darf nicht 0 sein"
+      }
+    } catch {
+      return null
+    }
+    return null
+  }, [form.amountText])
+
+  // ── preview: next ≤3 dates, from the effective rule (same engine as the
+  // server: the rrule package) ──
+  const preview = React.useMemo(() => {
+    if (effective.error !== null) {
+      return { dates: [] as string[], error: effective.error }
+    }
+    const dtstart = form.dtstart
+    if (!isValidIsoDate(dtstart))
+      return { dates: [] as string[], error: null as string | null }
+    if (effective.rrule === null) return { dates: [dtstart], error: null }
+    try {
+      // parse-check first: expandOccurrenceDates swallows malformed rules
+      // as "no occurrences" — a broken raw rule must still read as
+      // "ungültig", not as a dead-but-valid rule
+      const parsed = rrulestr(normalizeRuleInput(effective.rrule), {
+        forceset: false,
+      })
+      if (!(parsed instanceof RRule))
+        return { dates: [], error: "Regel nicht unterstützt" }
+      // next dates via the same bounded horizon ladder the server's
+      // validation uses (nextOccurrenceDate): sparse-but-live rules
+      // (leap-day yearly, large INTERVAL) preview their real next dates —
+      // a fixed 400-day window would falsely claim "keinen Termin"
+      const dates: string[] = []
+      let cursor = dtstart
+      for (let i = 0; i < 3; i++) {
+        const next = nextOccurrenceDate(dtstart, effective.rrule, cursor)
+        if (next === null) break
+        dates.push(next)
+        // The ladder and this cursor walk share the 9999-12-31 storable
+        // boundary: isoDatePlus past it overflows into the extended
+        // "+010001-…" form, and nextOccurrenceDate's dtstart-vs-afterIso
+        // string compare orders "+" before "9" — the next call re-anchors
+        // at DTSTART and would replay the FIRST occurrence, not repeat the
+        // last. Nothing storable lies beyond the boundary; stop there.
+        if (next >= MAX_ISO_DATE) break
+        cursor = isoDatePlus(next, 1)
+      }
+      if (dates.length === 0) {
+        return {
+          dates,
+          error:
+            "Diese Regel erzeugt keinen Termin am oder nach dem Startdatum",
+        }
+      }
+      return { dates, error: null }
+    } catch {
+      return { dates: [], error: "Wiederholungsregel ist ungültig" }
+    }
+  }, [effective, form.dtstart])
+
+  // short-month hint: monthly rules on days ≥ 29 skip short months
+  const monthDayHint = React.useMemo(() => {
+    if (form.freq !== "MONTHLY" || form.monthlyMode !== "mday") return null
+    const days = form.byMonthDayText
+      .split(",")
+      .map((v) => Number.parseInt(v.trim(), 10))
+      .filter((n) => Number.isInteger(n) && n >= 29)
+    if (days.length === 0) return null
+    return days.length === 1
+      ? `In kurzen Monaten (z. B. Februar) springt diese Regel über den ${days[0]}. — der Termin fällt aus.`
+      : "In kurzen Monaten (z. B. Februar) springt diese Regel über die gewählten Tage — die Termine fallen aus."
+  }, [form.freq, form.monthlyMode, form.byMonthDayText])
+
+  const save = async () => {
+    // defense in depth: the button is already disabled — in builder mode
+    // via buildRrule's throws, in raw mode via the validateRrule
+    // pre-check — AND on an unproductive rule (valid syntax, but e.g.
+    // UNTIL before dtstart: preview.error carries it, and canSave folds
+    // it in). Saving would otherwise send rrule: null and silently strip
+    // a recurrence the failed builder simply couldn't render.
+    if (preview.error !== null) return
+    setBusy(true)
+    try {
+      const amountText = form.amountText.trim()
+      const cents = parseGermanAmountToCents(amountText)
+      const amountCents = form.direction === "Eingang" ? cents : -cents
+      const values: PlanFormValues = {
+        accountId:
+          form.accountId === "all" ? null : Number.parseInt(form.accountId, 10),
+        counterparty:
+          form.counterparty.trim() === "" ? null : form.counterparty.trim(),
+        purpose: form.purpose.trim() === "" ? null : form.purpose.trim(),
+        amountCents,
+        categoryId:
+          form.categoryId === "none"
+            ? null
+            : Number.parseInt(form.categoryId, 10),
+        dtstart: form.dtstart,
+        rrule: effectiveRrule,
+        notes: form.notes.trim() === "" ? null : form.notes.trim(),
+      }
+      if (isEdit && plan) {
+        await updatePlan(plan.id, values)
+      } else {
+        await createPlan(values)
+      }
+      toast.success(isEdit ? "Plan aktualisiert" : "Plan erstellt")
+      // the app runs staleTime 5s + refetchOnWindowFocus:false — without
+      // this fan-out the board, calendar chips, forecast card and the
+      // dashboard overlay keep showing pre-mutation data until the
+      // affected queries remount (navigate away and back). The board's own
+      // status-toggle/delete paths already fan out the same way.
+      invalidatePlans(queryClient)
+      onOpenChange(false)
+    } catch (err) {
+      if (
+        err instanceof RangeError ||
+        (err instanceof Error && err.name === "ParseError")
+      ) {
+        toast.error("Betrag ist ungültig", {
+          description: 'Eingabe wie "1.234,56" erwartet.',
+        })
+      } else {
+        toast.error(
+          isEdit ? "Speichern fehlgeschlagen" : "Erstellen fehlgeschlagen",
+          {
+            description: describePlanError(err),
+          }
+        )
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // preview.error is a SUPERSET of effective.error (the preview memo
+  // re-returns it first) and additionally covers syntactically valid but
+  // unproductive rules ("keinen Termin …"): without it, a rule with e.g.
+  // UNTIL before dtstart showed a red preview while save stayed armed and
+  // only the server's 400 (generic "ungültig" toast) pushed back.
+  const canSave =
+    isValidIsoDate(form.dtstart) &&
+    form.amountText.trim() !== "" &&
+    amountError === null &&
+    preview.error === null &&
+    textErrors.counterparty === null &&
+    textErrors.purpose === null &&
+    textErrors.notes === null
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>
+            {isEdit ? "Plan bearbeiten" : "Geplante Transaktion anlegen"}
+          </DialogTitle>
+          <DialogDescription>
+            Pläne sind virtuell — sie erscheinen im Kalender und in der
+            Prognose, berühren aber echte Buchungen nicht.
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* fieldset (not div) so busy can disable every field at once:
+            typing during the in-flight save used to keep the edits, which the
+            dialog then silently discarded on success (busy closes it). The
+            footer buttons stay outside — cancel must remain clickable, and
+            the save button carries its own busy state. min-w-0 offsets the
+            fieldset min-content quirk Tailwind's preflight does not reset. */}
+        <fieldset
+          disabled={busy}
+          className="m-0 grid min-w-0 gap-4 border-0 p-0"
+        >
+          <div className="grid gap-4 sm:grid-cols-3">
+            {field(
+              "Richtung",
+              <Select
+                value={form.direction}
+                onValueChange={(v) =>
+                  set({ direction: (v ?? "Ausgang") as "Ausgang" | "Eingang" })
+                }
+                items={{ Ausgang: "Ausgabe (−)", Eingang: "Einnahme (+)" }}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Ausgang">Ausgabe (−)</SelectItem>
+                  <SelectItem value="Eingang">Einnahme (+)</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+            {field(
+              "Betrag",
+              <Input
+                inputMode="decimal"
+                placeholder="1.234,56"
+                value={form.amountText}
+                onChange={(e) => set({ amountText: e.target.value })}
+                aria-label="Betrag"
+                aria-invalid={amountError !== null || undefined}
+              />,
+              amountError ? (
+                <span className="text-destructive">{amountError}</span>
+              ) : (
+                "Deutsches Format, z. B. 950,00"
+              )
+            )}
+            {field(
+              "Startdatum",
+              <Input
+                type="date"
+                value={form.dtstart}
+                onChange={(e) => set({ dtstart: e.target.value })}
+                aria-label="Startdatum"
+              />
+            )}
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-3">
+            {field(
+              "Vertragspartner",
+              <Input
+                value={form.counterparty}
+                onChange={(e) => set({ counterparty: e.target.value })}
+                placeholder="z. B. Mietwerk GmbH"
+                maxLength={128}
+                aria-invalid={textErrors.counterparty !== null || undefined}
+                aria-label="Vertragspartner"
+              />,
+              textErrors.counterparty ? (
+                <span className="text-destructive">
+                  {textErrors.counterparty}
+                </span>
+              ) : (
+                "Pflanzt ein Gegenpartei-Match für die „gebucht“-Erkennung — der Text muss (Groß-/Kleinschreibung egal) im Vertragspartner der Buchungen vorkommen."
+              )
+            )}
+            {field(
+              "Verwendungszweck",
+              <Input
+                value={form.purpose}
+                onChange={(e) => set({ purpose: e.target.value })}
+                maxLength={500}
+                aria-invalid={textErrors.purpose !== null || undefined}
+                aria-label="Verwendungszweck"
+              />,
+              textErrors.purpose ? (
+                <span className="text-destructive">{textErrors.purpose}</span>
+              ) : undefined
+            )}
+            {field(
+              "Notizen",
+              <Input
+                value={form.notes}
+                onChange={(e) => set({ notes: e.target.value })}
+                maxLength={500}
+                aria-invalid={textErrors.notes !== null || undefined}
+                aria-label="Notizen"
+              />,
+              textErrors.notes ? (
+                <span className="text-destructive">{textErrors.notes}</span>
+              ) : undefined
+            )}
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            {field(
+              "Konto",
+              <Select
+                value={form.accountId}
+                onValueChange={(v) => set({ accountId: v ?? "all" })}
+                items={{
+                  all: "Alle Konten",
+                  ...Object.fromEntries(
+                    (accounts ?? []).map((a) => [String(a.id), a.name])
+                  ),
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Alle Konten" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Alle Konten</SelectItem>
+                  {(accounts ?? []).map((a) => (
+                    <SelectItem key={a.id} value={String(a.id)}>
+                      {a.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            {field(
+              "Kategorie",
+              <Select
+                value={form.categoryId}
+                onValueChange={(v) => set({ categoryId: v ?? "none" })}
+                items={{
+                  none: "ohne Kategorie",
+                  ...Object.fromEntries(
+                    (labelsData?.labels ?? []).map((l) => [
+                      String(l.id),
+                      l.name,
+                    ])
+                  ),
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="ohne Kategorie" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">ohne Kategorie</SelectItem>
+                  {(labelsData?.labels ?? []).map((l) => (
+                    <SelectItem key={l.id} value={String(l.id)}>
+                      {l.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+
+          <div className="space-y-3 rounded-md border p-3">
+            <div className="grid gap-3 sm:grid-cols-3">
+              {field(
+                "Wiederholung",
+                <Select
+                  value={freqDisplay}
+                  onValueChange={(v) => {
+                    // a same-value re-pick is a no-op: Base UI fires
+                    // onValueChange on every item press, also on the value
+                    // already displayed — leaving raw mode there would
+                    // resume the builder on stale field state (see
+                    // freqPickPatch)
+                    const patch = freqPickPatch(freqDisplay, v)
+                    if (patch !== null) set(patch)
+                  }}
+                  items={{
+                    once: "Einmalig",
+                    DAILY: "Täglich",
+                    WEEKLY: "Wöchentlich",
+                    MONTHLY: "Monatlich",
+                    YEARLY: "Jährlich",
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="once">Einmalig</SelectItem>
+                    <SelectItem value="DAILY">Täglich</SelectItem>
+                    <SelectItem value="WEEKLY">Wöchentlich</SelectItem>
+                    <SelectItem value="MONTHLY">Monatlich</SelectItem>
+                    <SelectItem value="YEARLY">Jährlich</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+              {form.freq !== "" &&
+                field(
+                  "Alle",
+                  <Input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={form.interval}
+                    onChange={(e) =>
+                      set({
+                        interval: Math.max(
+                          1,
+                          Math.round(Number(e.target.value) || 1)
+                        ),
+                      })
+                    }
+                    aria-label="Intervall"
+                  />,
+                  form.freq === "WEEKLY"
+                    ? "Wochen zwischen den Terminen"
+                    : form.freq === "MONTHLY"
+                      ? "Monate zwischen den Terminen"
+                      : "Tage/Jahre zwischen den Terminen"
+                )}
+              {form.freq !== "" &&
+                field(
+                  "Ende",
+                  <Select
+                    value={form.endMode}
+                    onValueChange={(v) =>
+                      set({ endMode: (v ?? "none") as FormState["endMode"] })
+                    }
+                    items={{
+                      none: "Nie",
+                      until: "Am Datum",
+                      count: "Nach N Vorfällen",
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Nie</SelectItem>
+                      <SelectItem value="until">Am Datum</SelectItem>
+                      <SelectItem value="count">Nach N Vorfällen</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+            </div>
+
+            {form.endMode === "until" && (
+              <div className="max-w-60">
+                {field(
+                  "Enddatum",
+                  <Input
+                    type="date"
+                    value={form.untilDate}
+                    onChange={(e) => set({ untilDate: e.target.value })}
+                    aria-label="Enddatum"
+                  />
+                )}
+              </div>
+            )}
+            {form.endMode === "count" && (
+              <div className="max-w-40">
+                {field(
+                  "Anzahl",
+                  <Input
+                    type="number"
+                    min={1}
+                    max={366}
+                    value={form.count}
+                    onChange={(e) =>
+                      set({ count: Math.round(Number(e.target.value) || 1) })
+                    }
+                    aria-label="Anzahl Vorfälle"
+                  />,
+                  `${form.count} Termine`
+                )}
+              </div>
+            )}
+
+            {form.freq === "WEEKLY" && (
+              <div className="flex flex-wrap gap-1.5">
+                {WEEKDAY_CHIPS.map((chip) => (
+                  <Button
+                    key={chip.value}
+                    type="button"
+                    size="sm"
+                    variant={
+                      form.byDay.includes(chip.value) ? "default" : "outline"
+                    }
+                    aria-pressed={form.byDay.includes(chip.value)}
+                    onClick={() =>
+                      set({
+                        byDay: form.byDay.includes(chip.value)
+                          ? form.byDay.filter((d) => d !== chip.value)
+                          : [...form.byDay, chip.value],
+                      })
+                    }
+                  >
+                    {chip.label}
+                  </Button>
+                ))}
+              </div>
+            )}
+
+            {form.freq === "MONTHLY" && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {field(
+                  "Muster",
+                  <Select
+                    value={form.monthlyMode}
+                    onValueChange={(v) =>
+                      set({
+                        monthlyMode: (v ?? "mday") as FormState["monthlyMode"],
+                      })
+                    }
+                    items={{
+                      mday: "Am Tag des Monats",
+                      wday: "Am Wochentag",
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="mday">Am Tag des Monats</SelectItem>
+                      <SelectItem value="wday">Am Wochentag</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+                {form.monthlyMode === "mday" ? (
+                  field(
+                    "Monatstage",
+                    <Input
+                      value={form.byMonthDayText}
+                      onChange={(e) => set({ byMonthDayText: e.target.value })}
+                      placeholder="z. B. 1, 15 oder -1 (letzter)"
+                      aria-label="Monatstage"
+                    />,
+                    monthDayHint ??
+                      'Komma-getrennt, z. B. "1, 15"; -1 = letzter Tag'
+                  )
+                ) : (
+                  <div className="flex items-end gap-2">
+                    <Select
+                      value={form.ordinal}
+                      onValueChange={(v) => set({ ordinal: v ?? "1" })}
+                      items={{
+                        "1": "1.",
+                        "2": "2.",
+                        "3": "3.",
+                        "4": "4.",
+                        "5": "5.",
+                        "-1": "letzte",
+                      }}
+                    >
+                      <SelectTrigger aria-label="Ordnung">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="1">1.</SelectItem>
+                        <SelectItem value="2">2.</SelectItem>
+                        <SelectItem value="3">3.</SelectItem>
+                        <SelectItem value="4">4.</SelectItem>
+                        <SelectItem value="5">5.</SelectItem>
+                        <SelectItem value="-1">letzte</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={form.ordinalDay}
+                      onValueChange={(v) => set({ ordinalDay: v ?? "MO" })}
+                      items={Object.fromEntries(
+                        WEEKDAY_CHIPS.map((c) => [c.value, c.label])
+                      )}
+                    >
+                      <SelectTrigger aria-label="Wochentag">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {WEEKDAY_CHIPS.map((c) => (
+                          <SelectItem key={c.value} value={c.value}>
+                            {c.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {form.freq === "YEARLY" && (
+              <div className="space-y-3">
+                <div
+                  className="flex flex-wrap gap-1.5"
+                  role="group"
+                  aria-label="Monate"
+                >
+                  {MONTH_CHIPS.map((label, i) => {
+                    const value = String(i + 1)
+                    const active = form.byMonth.includes(value)
+                    return (
+                      <Button
+                        key={value}
+                        type="button"
+                        size="sm"
+                        variant={active ? "default" : "outline"}
+                        aria-pressed={active}
+                        onClick={() =>
+                          set({
+                            byMonth: active
+                              ? form.byMonth.filter((m) => m !== value)
+                              : [...form.byMonth, value],
+                          })
+                        }
+                      >
+                        {label}
+                      </Button>
+                    )
+                  })}
+                </div>
+                {form.byMonth.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    {yearlyNoMonthHint(
+                      form.yearlyMode,
+                      form.yearlyMonthDayText.trim() !== ""
+                    )}
+                  </p>
+                )}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {field(
+                    "Muster",
+                    <Select
+                      value={form.yearlyMode}
+                      onValueChange={(v) =>
+                        set({
+                          yearlyMode: (v ?? "mday") as FormState["yearlyMode"],
+                        })
+                      }
+                      items={{
+                        mday: "Am Tag des Monats",
+                        wday: "Am Wochentag",
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="mday">Am Tag des Monats</SelectItem>
+                        <SelectItem value="wday">Am Wochentag</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
+                  {form.yearlyMode === "mday" ? (
+                    field(
+                      "Tag",
+                      <Input
+                        value={form.yearlyMonthDayText}
+                        onChange={(e) =>
+                          set({ yearlyMonthDayText: e.target.value })
+                        }
+                        placeholder="z. B. 1 oder -1"
+                        aria-label="Tag im Monat"
+                      />
+                    )
+                  ) : (
+                    <div className="flex items-end gap-2">
+                      <Select
+                        value={form.ordinal}
+                        onValueChange={(v) => set({ ordinal: v ?? "1" })}
+                        items={{
+                          "1": "1.",
+                          "2": "2.",
+                          "3": "3.",
+                          "4": "4.",
+                          "5": "5.",
+                          "-1": "letzte",
+                        }}
+                      >
+                        <SelectTrigger aria-label="Ordnung">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="1">1.</SelectItem>
+                          <SelectItem value="2">2.</SelectItem>
+                          <SelectItem value="3">3.</SelectItem>
+                          <SelectItem value="4">4.</SelectItem>
+                          <SelectItem value="5">5.</SelectItem>
+                          <SelectItem value="-1">letzte</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Select
+                        value={form.ordinalDay}
+                        onValueChange={(v) => set({ ordinalDay: v ?? "MO" })}
+                        items={Object.fromEntries(
+                          WEEKDAY_CHIPS.map((c) => [c.value, c.label])
+                        )}
+                      >
+                        <SelectTrigger aria-label="Wochentag">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {WEEKDAY_CHIPS.map((c) => (
+                            <SelectItem key={c.value} value={c.value}>
+                              {c.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {field(
+            "RRULE (erweitert)",
+            <Input
+              className="font-mono text-xs"
+              spellCheck={false}
+              value={rruleDisplay}
+              onChange={(e) =>
+                set({ rawRrule: e.target.value, rawDirty: true })
+              }
+              placeholder="FREQ=MONTHLY;INTERVAL=1;BYMONTHDAY=1"
+              aria-label="RRULE"
+            />
+          )}
+
+          <div className="rounded-md bg-muted/50 p-3 text-sm">
+            {preview.error ? (
+              <span className="text-destructive">{preview.error}</span>
+            ) : preview.dates.length > 0 ? (
+              <span>
+                <Badge variant="outline" className="mr-2 font-normal">
+                  Vorschau
+                </Badge>
+                {preview.dates.map((d) => (
+                  <span key={d} className="mr-2 tabular-nums">
+                    {d.split("-").reverse().join(".")}
+                  </span>
+                ))}
+              </span>
+            ) : (
+              <span className="text-muted-foreground">Keine Termine.</span>
+            )}
+          </div>
+        </fieldset>
+
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={busy}
+          >
+            Abbrechen
+          </Button>
+          <Button onClick={() => void save()} disabled={busy || !canSave}>
+            {busy ? "Speichern…" : isEdit ? "Speichern" : "Anlegen"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
