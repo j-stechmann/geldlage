@@ -9,6 +9,8 @@ import { EventCalendarContent } from "@/components/reui/event-calendar/event-cal
 import { EventCalendarNav } from "@/components/reui/event-calendar/event-calendar-nav"
 import type {
   CalendarEvent,
+  CalendarView,
+  EventCalendarInteractions,
   EventCalendarOccurrence,
 } from "@/components/reui/event-calendar/event-calendar-types"
 import {
@@ -88,6 +90,20 @@ const GERMAN_I18N = {
     moreDayHeader: "EEEE, d. MMMM",
   },
 }
+
+/**
+ * Stable prop identities for the calendar: month/agenda-only views and the
+ * all-off interaction set. The store's setOptions compares by identity and
+ * bumps its settings version on every change — inline literals would
+ * invalidate (and re-notify) once per parent render for zero effect.
+ */
+const CALENDAR_VIEWS: CalendarView[] = ["month", "agenda"]
+const CALENDAR_INTERACTIONS: Partial<EventCalendarInteractions> = {
+  drag: false,
+  resize: false,
+  selectSlot: false,
+}
+const CALENDAR_EVENT_TOOLTIP = { delay: 300 }
 
 export interface PlanCalendarProps {
   accountId: number | null
@@ -241,8 +257,8 @@ export function PlanCalendar({ accountId, onEventClick }: PlanCalendarProps) {
     <>
       {farWindow && (
         <p className="mb-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          Dieser Zeitraum liegt außerhalb des planbaren Fensters (±60 Monate
-          um heute) — navigieren Sie im Kalender Richtung „Heute“ zurück.
+          Dieser Zeitraum liegt außerhalb des planbaren Fensters (±60 Monate um
+          heute) — navigieren Sie im Kalender Richtung „Heute“ zurück.
         </p>
       )}
       {!farWindow && calendarLoadFailed && (
@@ -255,13 +271,13 @@ export function PlanCalendar({ accountId, onEventClick }: PlanCalendarProps) {
         />
       )}
       <EventCalendar
-        views={["month", "agenda"]}
+        views={CALENDAR_VIEWS}
         defaultView="month"
         events={events}
         loading={occurrencesQuery.isLoading || bookedQuery.isLoading}
-        interactions={{ drag: false, resize: false, selectSlot: false }}
+        interactions={CALENDAR_INTERACTIONS}
         enableShortcuts={false}
-        eventTooltip={{ delay: 300 }}
+        eventTooltip={CALENDAR_EVENT_TOOLTIP}
         locale={deLocale}
         weekStartsOn={1}
         i18n={GERMAN_I18N}
