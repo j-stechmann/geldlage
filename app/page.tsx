@@ -109,6 +109,11 @@ export default function DashboardPage() {
             <span className="text-xs text-muted-foreground">
               Geplante Beträge reagieren nur auf den Kontofilter, nicht auf die
               anderen Filter.
+              {filters.status !== "Gebucht" &&
+                /* the Ist scope honors the status filter, but matching is
+                   gebucht-only (lib/planning/service.ts): a pending bank row
+                   that matches a plan is counted as Ist AND as planned */
+                " Pläne werden nur gegen gebuchte Buchungen abgeglichen — bei Status „Alle“/„Nicht gebucht“ kann eine offene Zahlung doppelt zählen (Ist-Balken + geplanter Termin)."}
             </span>
           )}
         </div>

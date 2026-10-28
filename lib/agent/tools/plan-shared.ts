@@ -234,6 +234,26 @@ export function planIdFromArgs(args: unknown): string {
 }
 
 /**
+ * delete_plan takes ONLY the id — extra keys rejected loudly, like
+ * planInputFromArgs on the write tools and assertNoArgs on list_plans
+ * (planIdFromArgs alone is not strict enough for delete: the model may
+ * pass a leftover "confirm": true or a typo, and silent acceptance would
+ * read back as a successful delete "with" that argument — and unlike
+ * update_plan there is no later layer that rejects the key). The check
+ * runs BEFORE the service call, so a rejected call deletes nothing.
+ */
+export function planIdOnlyFromArgs(args: unknown): string {
+  const raw = assertArgsObject(args)
+  const extra = Object.keys(raw).filter((k) => k !== "id")
+  if (extra.length > 0) {
+    throw new Error(
+      `unknown field${extra.length > 1 ? "s" : ""}: ${extra.join(", ")} (delete_plan takes only id)`
+    )
+  }
+  return planIdFromArgs(raw)
+}
+
+/**
  * Re-throws a PlanValidationError as `code: message` so the model sees
  * the machine code (the same code the REST answers carry) AND the human
  * hint, and can self-correct from either; other errors propagate

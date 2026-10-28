@@ -1,6 +1,6 @@
 import type { AgentTool } from "@/lib/agent/types"
 import { deletePlan } from "@/lib/planning/service"
-import { planIdFromArgs } from "./plan-shared"
+import { planIdOnlyFromArgs } from "./plan-shared"
 
 /**
  * The `delete_plan` tool (ADR-0036): hard delete over the exact
@@ -31,7 +31,7 @@ export const delete_plan = {
     additionalProperties: false,
   },
   async execute(args: unknown, ctx): Promise<unknown> {
-    const id = planIdFromArgs(args ?? null)
+    const id = planIdOnlyFromArgs(args ?? null)
     const deleted = deletePlan(ctx.uid, id)
     if (!deleted) {
       throw new Error(

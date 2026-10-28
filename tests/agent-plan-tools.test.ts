@@ -419,6 +419,20 @@ describe("delete_plan", () => {
     ).rejects.toThrow("not_found")
     expect(getPlan(otherUserId, foreign.id)).not.toBeNull()
   })
+
+  it("rejects extra args loudly instead of silently deleting", async () => {
+    const plan = seedPlan({ userId })
+
+    await expect(
+      delete_plan.execute({ id: plan.id, confirm: true }, ctx(userId))
+    ).rejects.toThrow("unknown field: confirm (delete_plan takes only id)")
+    // the rejection fired BEFORE the service call — nothing was deleted
+    expect(getPlan(userId, plan.id)).not.toBeNull()
+    const res = (await delete_plan.execute({ id: plan.id }, ctx(userId))) as {
+      deleted: boolean
+    }
+    expect(res.deleted).toBe(true)
+  })
 })
 
 describe("system prompt integration", () => {

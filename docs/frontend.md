@@ -304,7 +304,10 @@ projection line** (anchored at the last real point; suppressed when
 imported future bookings already extend the series beyond today, which
 would make the merged line run backwards), the cashflow chart stacks
 **planned bars** (translucent; monthly planned sums exclude matched
-occurrences so Ist + Geplant never double-count; planned expenses carry the
+occurrences so Ist + Geplant never double-count — at the default
+Status = gebucht scope; with Status „Alle“/„Nicht gebucht“ a pending bank
+row matching a plan counts in BOTH bars, matching is gebucht-only by
+design (see the dashboard hint); planned expenses carry the
 Ist outflow's negative sign so the `stackOffset: "sign"` stack places them
 below the Ist expenses, planned income above the Ist income; the current
 month stacks the real partial with the remaining plans, future months are
