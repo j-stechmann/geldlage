@@ -56,8 +56,11 @@ function isoOf(date: Date): string {
  * whose slice-based day extraction truncates into strings noonUtc cannot
  * parse (Invalid Date → rrule.between throws). dtstart above this bound
  * is already rejected by validation, so occurrence horizons clamp here.
+ * Exported so consumers that WALK occurrence dates (the dialog's 3-slot
+ * preview) can stop at the same boundary — a cursor past it is not a
+ * comparable ISO date.
  */
-const MAX_ISO_DATE = "9999-12-31"
+export const MAX_ISO_DATE = "9999-12-31"
 
 /** Rung window end, clamped at the last storable ISO date. */
 function ladderWindowEnd(

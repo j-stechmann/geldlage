@@ -4,6 +4,7 @@ import {
   parseByMonthDay,
   parseRruleToForm,
   yearlyNoMonthHint,
+  freqPickPatch,
 } from "@/components/planning/plan-dialog"
 import { describeRrule } from "@/components/planning/api"
 
@@ -284,6 +285,52 @@ describe("yearlyNoMonthHint (mode-accurate engine semantics)", () => {
     expect(hint).toContain("erster Montag des Jahres")
     expect(hint).toContain("letzter Freitag")
     expect(hint).not.toContain("jedem Monat")
+  })
+
+  it("mday with the Tag field still empty describes the bare FREQ=YEARLY (anniversary), not 12×/year", () => {
+    // with no day text the builder composes a bare FREQ=YEARLY — its
+    // expansion is the DTSTART anniversary (1×/year, engine-verified:
+    // "2026-06-15" → 2026/27/28-06-15) — the old copy claimed the not-yet-
+    // true "12× pro Jahr" right above a preview showing the anniversary
+    const hint = yearlyNoMonthHint("mday", false)
+    expect(hint).toContain("Startdatum")
+    expect(hint).not.toContain("kehrt dann in jedem Monat")
+    // the day-set copy (above) and the wday copy are unaffected
+    expect(yearlyNoMonthHint("mday", true)).toContain("12× pro Jahr")
+    expect(yearlyNoMonthHint("wday", false)).toContain("ganze Jahr")
+  })
+})
+
+describe("freqPickPatch (same-value select taps stay no-ops)", () => {
+  /**
+   * Base UI fires the select's onValueChange on EVERY item press — also
+   * on re-picking the already-displayed value. The handler used to
+   * unconditionally clear rawDirty, so tapping the currently displayed
+   * "Monatlich" on a raw-authoritative rule (e.g. the builder-
+   * unrepresentable "FREQ=MONTHLY;BYDAY=1FR,-1FR") left raw mode with the
+   * STALE builder state, the save button armed on the rebuilt rule and an
+   * untouched-looking edit-save silently rewrote the recurrence to plain
+   * FREQ=MONTHLY. A same-value pick must be a no-op.
+   */
+  it("a same-value pick returns null (raw mode stays authoritative)", () => {
+    expect(freqPickPatch("MONTHLY", "MONTHLY")).toBeNull()
+    expect(freqPickPatch("once", "once")).toBeNull()
+    expect(freqPickPatch("DAILY", "DAILY")).toBeNull()
+    // the no-args/clear shapes: a null pick maps to "once" — no-op when
+    // "once" is already displayed
+    expect(freqPickPatch("once", null)).toBeNull()
+    expect(freqPickPatch("once", undefined)).toBeNull()
+  })
+
+  it("a genuine switch exits raw mode and maps the display value", () => {
+    expect(freqPickPatch("MONTHLY", "once")).toEqual({
+      freq: "",
+      rawDirty: false,
+    })
+    expect(freqPickPatch("once", "DAILY")).toEqual({
+      freq: "DAILY",
+      rawDirty: false,
+    })
   })
 })
 

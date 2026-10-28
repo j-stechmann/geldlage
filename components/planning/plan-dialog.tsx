@@ -42,6 +42,7 @@ import {
   expandOccurrenceDates,
   isValidIsoDate,
   isoDatePlus,
+  MAX_ISO_DATE,
   nextOccurrenceDate,
   noonUtc,
   validateRrule,
@@ -626,25 +627,64 @@ function describePlanError(err: unknown): string {
 }
 
 /**
+ * The Wiederholung select's pick → builder patch, or null for a NO-OP.
+ * Base UI fires onValueChange on EVERY item press — including re-picking
+ * the already-displayed value (SelectItem commits unconditionally, no
+ * equality check). A same-value tap must therefore NOT leave raw mode:
+ * resuming the builder from its stale field state would silently rewrite
+ * exactly the recurrence that routed raw (rawDirty stays authoritative
+ * until the user genuinely switches to another frequency). Exported for
+ * the dialog regression tests.
+ */
+export function freqPickPatch(
+  display: "once" | FormState["freq"],
+  picked: string | null | undefined
+): Pick<FormState, "freq" | "rawDirty"> | null {
+  const normalized =
+    picked === null || picked === undefined || picked === "once"
+      ? "once"
+      : picked
+  if (normalized === display) return null
+  return {
+    freq: normalized === "once" ? "" : (normalized as FormState["freq"]),
+    rawDirty: false,
+  }
+}
+
+/**
  * Hint for YEARLY rules with no month chips — mode-accurate per the rrule
  * engine: without BYMONTH, BYMONTHDAY repeats the day every month (12×/year),
  * while ordinal BYDAY counts across the YEAR (1st–4th weekday → January,
- * last → December). Extracted pure so the regression tests can lock the
- * semantics — the copy used to describe the two modes swapped.
+ * last → December). In mday mode that 12×-copy is only truthful once a day
+ * text is entered: with the day field still empty the rule is a bare
+ * FREQ=YEARLY, whose expansion is the start-date ANNIVERSARY (1×/year) —
+ * a contradicting hint would sit right above a preview showing it.
+ * Extracted pure so the regression tests can lock the semantics — the copy
+ * used to describe the two modes swapped.
  */
-export function yearlyNoMonthHint(yearlyMode: FormState["yearlyMode"]): string {
-  if (yearlyMode === "mday") {
+export function yearlyNoMonthHint(
+  yearlyMode: FormState["yearlyMode"],
+  dayChosen = true
+): string {
+  if (yearlyMode === "wday") {
     return (
-      "Kein Monat gewählt — der gewählte Tag kehrt dann in jedem Monat " +
-      "wieder (12× pro Jahr); wähle Monate, wenn der Termin nur einmal " +
-      "jährlich kommen soll."
+      "Kein Monat gewählt — die Ordnungszahl zählt über das ganze Jahr " +
+      "(„1. Mo“ = erster Montag des Jahres; „letzte Fr“ = letzter Freitag " +
+      "des Jahres); wähle Monate, wenn der Termin in einem bestimmten " +
+      "Monat kommen soll."
+    )
+  }
+  if (!dayChosen) {
+    return (
+      "Kein Monat gewählt — jährlich am Startdatum. Sobald ein Tag " +
+      "eingetragen ist, kehrt er in jedem Monat wieder (12× pro Jahr); " +
+      "wähle Monate, wenn der Termin nur einmal jährlich kommen soll."
     )
   }
   return (
-    "Kein Monat gewählt — die Ordnungszahl zählt über das ganze Jahr " +
-    "(„1. Mo“ = erster Montag des Jahres; „letzte Fr“ = letzter Freitag " +
-    "des Jahres); wähle Monate, wenn der Termin in einem bestimmten " +
-    "Monat kommen soll."
+    "Kein Monat gewählt — der gewählte Tag kehrt dann in jedem Monat " +
+    "wieder (12× pro Jahr); wähle Monate, wenn der Termin nur einmal " +
+    "jährlich kommen soll."
   )
 }
 
@@ -756,6 +796,35 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
         : form.freq
   }, [form.rawDirty, form.rawRrule, form.freq])
 
+  // rawDirty=false display: the built rule text, HELD over transient
+  // builder errors — clearing the end date or typing an out-of-range
+  // interval must not visually wipe the RRULE field (it reappears once a
+  // repair clears effective.error). A genuine one-off (rrule null, error
+  // null) still clears the field — that empty value IS the "Einmalig"
+  // display. The hold must be READABLE in render, so it lives in state
+  // guarded by the equality check — the react.dev "set state during
+  // render" pattern (same as the renderedKey reset above and
+  // transactions-table's focus sync; refs are unreadable at render,
+  // setState-in-effect is forbidden). The hold never needs a
+  // per-dialog-open reset: initialForm never produces a builder-error
+  // state (parseRruleToForm routes unfaithful rules raw), so a held text
+  // can only surface for an error the CURRENT dialog interaction produced.
+  const [lastBuiltRrule, setLastBuiltRrule] = React.useState("")
+  if (
+    !form.rawDirty &&
+    effectiveRrule !== null &&
+    lastBuiltRrule !== effectiveRrule
+  ) {
+    setLastBuiltRrule(effectiveRrule)
+  }
+  const rruleDisplay = form.rawDirty
+    ? form.rawRrule
+    : effectiveRrule !== null
+      ? effectiveRrule
+      : effective.error !== null
+        ? lastBuiltRrule
+        : ""
+
   // text byte caps (server mirror — see textLimitError): the memo never
   // throws, each exceeded field gets an inline hint and disarms the save
   const textErrors = React.useMemo(
@@ -818,12 +887,15 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
       let cursor = dtstart
       for (let i = 0; i < 3; i++) {
         const next = nextOccurrenceDate(dtstart, effective.rrule, cursor)
-        // A repeat can only mean the cursor left the storable 4-digit year
-        // range (next at 9999-12-31 → isoDatePlus crosses into the extended
-        // "+010001-…" form): the ladder clamps at the same boundary and
-        // re-answers the unchanged date — stop instead of printing it again
-        if (next === null || next === dates[dates.length - 1]) break
+        if (next === null) break
         dates.push(next)
+        // The ladder and this cursor walk share the 9999-12-31 storable
+        // boundary: isoDatePlus past it overflows into the extended
+        // "+010001-…" form, and nextOccurrenceDate's dtstart-vs-afterIso
+        // string compare orders "+" before "9" — the next call re-anchors
+        // at DTSTART and would replay the FIRST occurrence, not repeat the
+        // last. Nothing storable lies beyond the boundary; stop there.
+        if (next >= MAX_ISO_DATE) break
         cursor = isoDatePlus(next, 1)
       }
       if (dates.length === 0) {
@@ -1097,15 +1169,15 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
                 "Wiederholung",
                 <Select
                   value={freqDisplay}
-                  onValueChange={(v) =>
-                    set({
-                      freq:
-                        v === null || v === "once"
-                          ? ""
-                          : (v as FormState["freq"]),
-                      rawDirty: false,
-                    })
-                  }
+                  onValueChange={(v) => {
+                    // a same-value re-pick is a no-op: Base UI fires
+                    // onValueChange on every item press, also on the value
+                    // already displayed — leaving raw mode there would
+                    // resume the builder on stale field state (see
+                    // freqPickPatch)
+                    const patch = freqPickPatch(freqDisplay, v)
+                    if (patch !== null) set(patch)
+                  }}
                   items={{
                     once: "Einmalig",
                     DAILY: "Täglich",
@@ -1351,7 +1423,10 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
                 </div>
                 {form.byMonth.length === 0 && (
                   <p className="text-xs text-muted-foreground">
-                    {yearlyNoMonthHint(form.yearlyMode)}
+                    {yearlyNoMonthHint(
+                      form.yearlyMode,
+                      form.yearlyMonthDayText.trim() !== ""
+                    )}
                   </p>
                 )}
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -1446,7 +1521,7 @@ export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
             <Input
               className="font-mono text-xs"
               spellCheck={false}
-              value={form.rawDirty ? form.rawRrule : (effectiveRrule ?? "")}
+              value={rruleDisplay}
               onChange={(e) =>
                 set({ rawRrule: e.target.value, rawDirty: true })
               }

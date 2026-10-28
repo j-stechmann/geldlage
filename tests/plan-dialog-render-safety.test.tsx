@@ -221,6 +221,48 @@ describe("plan dialog: invalid builder input must not crash the page", () => {
     await waitFor(() => expect(saveButton()).toBeEnabled())
   })
 
+  it("a transient builder error holds the RRULE field text instead of wiping it", async () => {
+    // builder-mode errors (cleared end date, out-of-range interval) used to
+    // blank the "RRULE (erweitert)" input while the memo answered null —
+    // the last valid composition must stay visible (it reappears once the
+    // error clears anyway)
+    renderWithQuery(
+      <PlanDialog
+        open
+        onOpenChange={() => {}}
+        plan={{
+          ...BASE_PLAN,
+          rrule: "FREQ=MONTHLY;BYMONTHDAY=1;UNTIL=20261231T120000Z",
+        }}
+      />
+    )
+    const rruleInput = await waitFor(() => inputByLabel("RRULE"))
+    // the built rule is displayed before the error
+    await waitFor(() => {
+      expect(rruleInput.value).toBe(
+        "FREQ=MONTHLY;BYMONTHDAY=1;UNTIL=20261231T120000Z"
+      )
+    })
+
+    // clearing the end date disarms the dialog — but the field keeps
+    // showing the last valid built rule
+    const endInput = inputByLabel("Enddatum")
+    fireEvent.change(endInput, { target: { value: "" } })
+    await waitFor(() => {
+      expect(document.body.textContent).toContain(
+        "Enddatum fehlt oder ist ungültig"
+      )
+    })
+    expect(saveButton()).toBeDisabled()
+    expect(rruleInput.value).toBe(
+      "FREQ=MONTHLY;BYMONTHDAY=1;UNTIL=20261231T120000Z"
+    )
+
+    // repair re-arms and refreshes the display
+    fireEvent.change(endInput, { target: { value: "2026-12-31" } })
+    await waitFor(() => expect(saveButton()).toBeEnabled())
+  })
+
   it("an 'Alle' interval beyond 100 fails inline, not as a save-time 400", async () => {
     // the input handler clamps only the low end; a typed 500 used to leave a
     // green preview while the server capped INTERVAL at 100 — save then
@@ -336,6 +378,64 @@ describe("plan dialog: invalid builder input must not crash the page", () => {
     })
     expect(document.body.textContent).not.toContain("nur im Januar")
   })
+
+  it("an empty 'Tag im Monat' field hints the bare FREQ=YEARLY anniversary, not the 12×-per-year copy", async () => {
+    // the 12×-per-year copy is only truthful once the day text is set —
+    // with the Tag still empty the rule is a bare FREQ=YEARLY whose
+    // expansion is the start-date anniversary (the preview below the old
+    // hint showed exactly those contradicting dates)
+    renderWithQuery(
+      <PlanDialog
+        open
+        onOpenChange={() => {}}
+        plan={{
+          ...BASE_PLAN,
+          dtstart: "2026-06-15",
+          rrule: "FREQ=YEARLY;BYMONTHDAY=15",
+        }}
+      />
+    )
+    const input = await waitFor(() => inputByLabel("Tag im Monat"))
+
+    // the stored day shows the 12× copy…
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("jedem Monat wieder")
+    })
+    // …clearing it switches the hint to the anniversary copy
+    fireEvent.change(input, { target: { value: "" } })
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("jährlich am Startdatum")
+    })
+    expect(document.body.textContent).not.toContain("kehrt dann in jedem Monat")
+  })
+
+  it("the 3-slot preview stops at the 9999-12-31 boundary instead of replaying dtstart", async () => {
+    // past the last storable ISO date, isoDatePlus overflows into the
+    // extended "+010001-…" form; the old cursor walk then re-anchored
+    // nextOccurrenceDate at DTSTART (its "+" < "9" string compare) and
+    // replayed the FIRST occurrence as a third preview slot
+    renderWithQuery(
+      <PlanDialog
+        open
+        onOpenChange={() => {}}
+        plan={{
+          ...BASE_PLAN,
+          dtstart: "9999-12-30",
+          rrule: "FREQ=DAILY;COUNT=2",
+        }}
+      />
+    )
+    const text = await waitFor(() => {
+      const t = document.body.textContent ?? ""
+      expect(t).toContain("31.12.9999")
+      return t
+    })
+    // both occurrences render, the first exactly ONCE (the old bug: a
+    // third slot repeating "30.12.9999" out of order)
+    expect(text.match(/30\.12\.9999/g)).toHaveLength(1)
+    expect(text.match(/31\.12\.9999/g)).toHaveLength(1)
+    expect(saveButton()).toBeEnabled()
+  })
 })
 
 describe("plan dialog: raw RRULE mode validates exactly like the server", () => {
@@ -447,6 +547,58 @@ describe("plan dialog: raw RRULE mode validates exactly like the server", () => 
     })
     // one-off with valid amount/dtstart stays saveable
     expect(saveButton()).toBeEnabled()
+  })
+
+  it("re-picking the DISPLAYED frequency keeps the raw rule authoritative", async () => {
+    // Base UI fires onValueChange on every item press — also on a re-pick
+    // of the already-displayed value. The handler used to leave raw mode
+    // with the stale builder state there, arming the save on the rebuilt
+    // rule: an untouched-looking tap + save silently rewrote the stored
+    // recurrence (here: dropping both BYDAY ordinals). The raw text must
+    // stay the display source and the rule untouched.
+    renderWithQuery(
+      <PlanDialog
+        open
+        onOpenChange={() => {}}
+        plan={{
+          ...BASE_PLAN,
+          rrule: "FREQ=MONTHLY;BYDAY=1FR,-1FR",
+        }}
+      />
+    )
+    const raw = await waitFor(() => inputByLabel("RRULE"))
+    expect(raw.value).toBe("FREQ=MONTHLY;BYDAY=1FR,-1FR")
+    // the raw rule is valid and productive — save is armed in raw mode
+    expect(saveButton()).toBeEnabled()
+
+    // open the "Wiederholung" select …
+    const labelEl = Array.from(document.body.querySelectorAll("label")).find(
+      (el) => el.textContent?.startsWith("Wiederholung")
+    )
+    expect(labelEl, "Wiederholung field should be rendered").toBeTruthy()
+    const trigger = labelEl!.querySelector(
+      '[data-slot="select-trigger"]'
+    ) as HTMLElement
+    expect(trigger).toBeTruthy()
+    fireEvent.click(trigger)
+    // …and re-pick the already-displayed "Monatlich"
+    const monthItem = await waitFor(() => {
+      const items = Array.from(
+        document.body.querySelectorAll('[data-slot="select-item"]')
+      )
+      const found = items.find(
+        (el) => el.textContent?.trim() === "Monatlich"
+      )
+      expect(found, "Monatlich item should be rendered").toBeTruthy()
+      return found as HTMLElement
+    })
+    fireEvent.click(monthItem)
+
+    // NO raw-mode exit: the field still shows the stored rule verbatim
+    expect(raw.value).toBe("FREQ=MONTHLY;BYDAY=1FR,-1FR")
+    expect(saveButton()).toBeEnabled()
+    // and the select still reads the raw rule's frequency
+    expect(selectTriggerText("Wiederholung")).toContain("Monatlich")
   })
 })
 
