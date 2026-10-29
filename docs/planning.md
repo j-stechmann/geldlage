@@ -192,8 +192,11 @@ amount, booking date, account/category) with a monthly
 `BYMONTHDAY=<day-of-month>` recurrence guess; the transaction itself is
 never modified and **no linkage is stored** — future occurrences pair up
 read-time via matching. The same conversion entry sits in the expanded
-detail row of the transactions table. The dashboard gains the "Geplant
-einblenden"
+detail row of the transactions table. A booking the matching engine
+already claims is offered **plan edit** instead (`useMatchedPlanForTx`
+reverse-lookup over the ± posting-drift window; failure modes resolve as
+unmatched, keeping convert available) — converting would only duplicate
+the plan. The dashboard gains the "Geplant einblenden"
 planned-vs-actual mode. Details in [frontend.md](frontend.md#planung).
 
 ## Tests

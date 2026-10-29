@@ -2,6 +2,8 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "@/lib/api-fetch"
+import { isValidIsoDate, isoDatePlus } from "@/lib/planning/recurrence"
+import { MATCH_DAYS_BEFORE, MATCH_DAYS_AFTER } from "@/lib/planning/matching"
 
 // ── DTOs (mirror the server contract in lib/planning/service.ts) ──────────
 
@@ -222,6 +224,100 @@ export function useCalendarTransactions(
     enabled: from !== null && to !== null,
     placeholderData: (prev) => prev,
   })
+}
+
+/** Minimal booking reference for the read-time match reverse lookup. */
+export interface MatchedTxRef {
+  id: string
+  bookingDate: string
+}
+
+/**
+ * Reverse lookup of the read-time match: the plan whose occurrence the
+ * server paired with this booking (the same authoritative engine the
+ * calendar's "✓" chips render — nothing is stored, so this queries the
+ * occurrences of the ± posting-drift window around the booking date
+ * [−MATCH_DAYS_AFTER, +MATCH_DAYS_BEFORE], lib/planning/matching.ts).
+ *
+ * Callers turn a resolved match into an "edit plan" affordance instead of a
+ * convert one: offering "umwandeln" for an already-matched booking would
+ * create a duplicate plan whose occurrences both target the same cadence.
+ *
+ * Failure modes all resolve as UNMATCHED (convert stays offered): a
+ * booking outside ±MAX_WINDOW_DISTANCE_DAYS of today gets window_too_far —
+ * the matching engine could not be consulted for it either — and a
+ * transient read error must not permanently hide the affordance. A matched
+ * plan deleted between the two reads likewise reads as unmatched;
+ * invalidatePlans refetches both keys on the next plan mutation.
+ */
+export function useMatchedPlanForTx(ref: MatchedTxRef | null): {
+  /** the matching plan, or null when unmatched (or unresolved) */
+  matchedPlan: PlanRow | null
+  /** false while the reverse lookup is still in flight */
+  resolved: boolean
+} {
+  const valid = ref !== null && isValidIsoDate(ref.bookingDate)
+  const key =
+    valid && ref !== null
+      ? planOccurrencesKey(
+          isoDatePlus(ref.bookingDate, -MATCH_DAYS_AFTER),
+          isoDatePlus(ref.bookingDate, MATCH_DAYS_BEFORE),
+          null
+        )
+      : planOccurrencesKey("", "", null)
+  const occurrencesQuery = useQuery<{ occurrences: PlanOccurrence[] }>({
+    queryKey: key,
+    queryFn: async () => {
+      const res = await apiFetch(`/api/plans/occurrences?${key[1]}`)
+      if (!res.ok) {
+        throw await parseError(res, "Termine konnten nicht geladen werden")
+      }
+      return res.json()
+    },
+    enabled: valid,
+    // NO placeholderData (unlike the calendar hooks): while a different
+    // expanded row's window loads, its cached occurrences must not briefly
+    // read as THIS row's match state — the flip between "In Planung
+    // umwandeln" and "Plan bearbeiten" is decision-relevant
+  })
+  const occurrence =
+    valid && ref !== null && occurrencesQuery.data !== undefined
+      ? (occurrencesQuery.data.occurrences.find(
+          (o) => o.matched?.transactionId === ref.id
+        ) ?? null)
+      : null
+  const planId = occurrence?.planId ?? null
+  // the plans list only matters once a match was found — no dead request
+  // per expanded unmatched row (PLANS_KEY is the cache the board and the
+  // plan dialog already share)
+  const plansQuery = useQuery<{ plans: PlanListRow[] }>({
+    queryKey: PLANS_KEY,
+    queryFn: async () => {
+      const res = await apiFetch("/api/plans")
+      if (!res.ok)
+        throw await parseError(res, "Pläne konnten nicht geladen werden")
+      return res.json()
+    },
+    enabled: planId !== null,
+  })
+
+  if (!valid) {
+    return { matchedPlan: null, resolved: true }
+  }
+  if (occurrencesQuery.isError) {
+    return { matchedPlan: null, resolved: true }
+  }
+  if (
+    occurrencesQuery.isPending ||
+    (occurrence !== null && plansQuery.isPending)
+  ) {
+    return { matchedPlan: null, resolved: false }
+  }
+  const matchedPlan =
+    occurrence === null
+      ? null
+      : (plansQuery.data?.plans.find((p) => p.id === occurrence.planId) ?? null)
+  return { matchedPlan, resolved: true }
 }
 
 export function useForecast(

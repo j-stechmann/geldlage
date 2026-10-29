@@ -1,7 +1,13 @@
 "use client"
 
 import * as React from "react"
-import { ChevronDown, CalendarClock, CircleDashed, Tag } from "lucide-react"
+import {
+  ChevronDown,
+  CalendarClock,
+  CircleDashed,
+  Pencil,
+  Tag,
+} from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { TableRow, TableCell } from "@/components/ui/table"
@@ -10,7 +16,11 @@ import { euro } from "@/lib/money"
 import { cn } from "@/lib/utils"
 import type { ColumnKey } from "@/components/table-columns"
 import type { RowActivation } from "@/hooks/use-row-activation"
-import type { PlanPrefill } from "@/components/planning/api"
+import {
+  useMatchedPlanForTx,
+  type PlanPrefill,
+  type PlanRow,
+} from "@/components/planning/api"
 
 /**
  * Client-side DTO mirroring the /api/transactions row — single source,
@@ -323,19 +333,28 @@ export const TransactionRow = React.memo(function TransactionRow({
 /** The expanded detail row: the visible cell values as a definition list,
  * multi-line Verwendungszweck included (whitespace-pre-wrap). Optional
  * fields are hidden when empty via DetailField. An optional action footer
- * carries the "convert to planned transaction" entry (the plan dialog opens
- * pre-filled with this row's data).
+ * carries the convert-to-plan entry: a booking whose occurrence is already
+ * claimed by a plan (read-time match) offers "Plan bearbeiten" for that
+ * plan instead — converting would only duplicate it.
  */
 export function TransactionDetailRow({
   row,
   colSpan,
   onConvertToPlan,
+  onEditPlan,
 }: {
   row: TxRow
   colSpan: number
   onConvertToPlan?: (row: TxRow) => void
+  onEditPlan?: (plan: PlanRow) => void
 }) {
   const counterparty = counterpartyOf(row)
+  // The affordance follows the authoritative read-time match:
+  // resolved + matched → the matching plan's edit dialog; resolved +
+  // unmatched → convert; the button stays disarmed while the lookup is
+  // in flight (see useMatchedPlanForTx).
+  const match = useMatchedPlanForTx(row)
+  const matchedPlan = match.resolved ? match.matchedPlan : null
   return (
     <TableRow className="hover:bg-transparent" id={detailRowId(row.id)}>
       <TableCell colSpan={colSpan} className="p-0 whitespace-normal">
@@ -367,21 +386,30 @@ export function TransactionDetailRow({
           </dl>
           {onConvertToPlan && (
             <div className="mt-3 flex justify-end border-t border-border/50 pt-3">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={(e) => {
-                  // the detail <tr> sits in the main row's click handling
-                  // scope only optically — no accordion toggle should fire
-                  e.stopPropagation()
-                  onConvertToPlan(row)
-                }}
-                title="Aus dieser Buchung eine geplante Transaktion mit einem monatlichen Takt anlegen"
-              >
-                <CalendarClock data-icon="inline-start" />
-                In Planung umwandeln
-              </Button>
+              {matchedPlan !== null && onEditPlan !== undefined ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onEditPlan(matchedPlan)}
+                  title="Diese Buchung ist bereits einem Plan zugeordnet — den Plan bearbeiten"
+                >
+                  <Pencil data-icon="inline-start" />
+                  Plan bearbeiten
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={!match.resolved}
+                  onClick={() => onConvertToPlan(row)}
+                  title="Aus dieser Buchung eine geplante Transaktion mit einem monatlichen Takt anlegen"
+                >
+                  <CalendarClock data-icon="inline-start" />
+                  In Planung umwandeln
+                </Button>
+              )}
             </div>
           )}
         </div>

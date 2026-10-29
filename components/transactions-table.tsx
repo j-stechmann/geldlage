@@ -49,6 +49,7 @@ import {
   type TxRow,
 } from "@/components/transaction-row"
 import { PlanDialog } from "@/components/planning/plan-dialog"
+import type { PlanRow } from "@/components/planning/api"
 import { AssignLabelDialog } from "@/components/assign-label-dialog"
 import { useRowActivation } from "@/hooks/use-row-activation"
 
@@ -137,6 +138,9 @@ export function TransactionsTable({
   const [assignTarget, setAssignTarget] = React.useState<TxRow | null>(null)
   // convert-to-plan target: the plan dialog opens pre-filled from this row
   const [converting, setConverting] = React.useState<TxRow | null>(null)
+  // matched-plan edit target: "Plan bearbeiten" opens the plan dialog in
+  // edit mode for the plan the row is already read-time matched to
+  const [editingPlan, setEditingPlan] = React.useState<PlanRow | null>(null)
   // one expanded detail row at a time (accordion); collapses on context
   // changes via the value-based reset below
   const [expandedId, setExpandedId] = React.useState<string | null>(null)
@@ -161,6 +165,9 @@ export function TransactionsTable({
   }, [])
   const openConvertDialog = React.useCallback((row: TxRow) => {
     setConverting(row)
+  }, [])
+  const openEditPlanDialog = React.useCallback((plan: PlanRow) => {
+    setEditingPlan(plan)
   }, [])
   const activation = useRowActivation()
 
@@ -462,6 +469,7 @@ export function TransactionsTable({
                         row={row}
                         colSpan={totalColumns}
                         onConvertToPlan={openConvertDialog}
+                        onEditPlan={openEditPlanDialog}
                       />
                     )}
                   </React.Fragment>
@@ -516,6 +524,16 @@ export function TransactionsTable({
             if (!open) setConverting(null)
           }}
           prefill={planPrefillFromTx(converting)}
+        />
+      )}
+
+      {editingPlan && (
+        <PlanDialog
+          open
+          plan={editingPlan}
+          onOpenChange={(open) => {
+            if (!open) setEditingPlan(null)
+          }}
         />
       )}
     </div>

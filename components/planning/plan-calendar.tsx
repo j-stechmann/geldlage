@@ -37,6 +37,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { PlanDialog } from "@/components/planning/plan-dialog"
+import { useMatchedPlanForTx, type PlanRow } from "@/components/planning/api"
 
 function localMidnight(iso: string): Date {
   const [y, m, d] = iso.split("-").map(Number)
@@ -64,7 +65,8 @@ function washedColor(color: string, keep: number): string {
 interface CalendarChipData {
   /** planned occurrence (own dialog opens on click) */
   occurrence?: PlanOccurrence
-  /** real bank transaction (booked or pending); click opens the action dialog */
+  /** real bank transaction (booked or pending); click opens the action dialog,
+   * whose second action is the matched plan's edit (or the convert entry) */
   transaction?: CalendarTransaction
   /**
    * "pending" = Nicht gebucht rows: the default chip draws them with the
@@ -146,9 +148,10 @@ export interface PlanCalendarProps {
  * when überfällig) and REAL booked transactions washed toward muted
  * (color-mix). Clicks open plans; booked chips open an action dialog with
  * the transactions deep link and the convert-to-plan entry (the plan
- * dialog opens pre-filled from the clicked transaction). Interactions stay
- * off by design: editing an occurrence means editing its plan, never
- * dragging (a drag would ambiguously rewrite DTSTART).
+ * dialog opens pre-filled from the clicked transaction) — or the matched
+ * plan's edit entry when the booking is already read-time matched.
+ * Interactions stay off by design: editing an occurrence means editing its
+ * plan, never dragging (a drag would ambiguously rewrite DTSTART).
  */
 export function PlanCalendar({ accountId, onEventClick }: PlanCalendarProps) {
   const router = useRouter()
@@ -157,6 +160,19 @@ export function PlanCalendar({ accountId, onEventClick }: PlanCalendarProps) {
   )
   const [convertPrefill, setConvertPrefill] =
     React.useState<PlanPrefill | null>(null)
+  // matched-plan edit target: a clicked chip whose booking the read-time
+  // match already assigned to a plan opens that plan's edit dialog instead
+  // of offering a convert that would duplicate it
+  const [editingPlan, setEditingPlan] = React.useState<PlanRow | null>(null)
+  // The chip action's plan affordance uses the same authoritative reverse
+  // lookup as the transactions-table rows (window around the booking date,
+  // ± posting drift) — the visible window's occurrences could miss a match
+  // whose occurrence fell outside the loaded range (booking at the edge).
+  // null ref → resolved unmatched: the dialog is closed.
+  const actionMatch = useMatchedPlanForTx(
+    txAction === null ? null : { id: txAction.id, bookingDate: txAction.date }
+  )
+  const actionPlan = actionMatch.resolved ? actionMatch.matchedPlan : null
   // named calendarWindow (not `window`): shadowing the browser global is a
   // foot-gun for anything later reading window.* in this scope
   const [calendarWindow, setCalendarWindow] = React.useState<{
@@ -367,28 +383,54 @@ export function PlanCalendar({ accountId, onEventClick }: PlanCalendarProps) {
             >
               Buchung ansehen
             </Button>
-            <Button
-              onClick={() => {
-                const tx = txAction
-                setTxAction(null)
-                if (tx) {
-                  setConvertPrefill(planPrefillFromCalendarTx(tx))
-                }
-              }}
-            >
-              In Planung umwandeln
-            </Button>
+            {actionPlan !== null ? (
+              <Button
+                onClick={() => {
+                  setEditingPlan(actionPlan)
+                  setTxAction(null)
+                }}
+              >
+                Plan bearbeiten
+              </Button>
+            ) : (
+              <Button
+                // disarmed while the match lookup resolves: a convert click
+                // on a matched booking would create a duplicate plan
+                disabled={!actionMatch.resolved}
+                onClick={() => {
+                  const tx = txAction
+                  setTxAction(null)
+                  if (tx) {
+                    setConvertPrefill(planPrefillFromCalendarTx(tx))
+                  }
+                }}
+              >
+                In Planung umwandeln
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <PlanDialog
-        open={convertPrefill !== null}
-        onOpenChange={(open) => {
-          if (!open) setConvertPrefill(null)
-        }}
-        prefill={convertPrefill}
-      />
+      {convertPrefill && (
+        <PlanDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setConvertPrefill(null)
+          }}
+          prefill={convertPrefill}
+        />
+      )}
+
+      {editingPlan && (
+        <PlanDialog
+          open
+          plan={editingPlan}
+          onOpenChange={(open) => {
+            if (!open) setEditingPlan(null)
+          }}
+        />
+      )}
     </>
   )
 }
