@@ -196,4 +196,38 @@ describe("TransactionsTable plan-affordance entry", () => {
     fireEvent.click(convert)
     await inputByLabel("Vertragspartner")
   })
+
+  it("a failed plans read on a matched booking keeps convert disarmed", async () => {
+    stubFetch([
+      {
+        url: /\/api\/transactions$/,
+        json: { rows: [ROW_A], total: 1, page: 1, pageCount: 1 },
+      },
+      // the occurrences lookup resolves the match, but the plan list the
+      // edit affordance needs fails to load — the row must NOT read as
+      // unmatched (offering convert would duplicate the plan): it stays
+      // disarmed until a refetch resolves the plans query
+      {
+        url: /\/api\/plans\/occurrences$/,
+        json: { occurrences: [matchedOccurrence()] },
+      },
+      { url: /\/api\/plans$/, json: {}, status: 500 },
+      { url: /\/api\/accounts$/, json: { accounts: [] } },
+      { url: /\/api\/labels$/, json: { labels: [] } },
+    ])
+    renderTable()
+    const convert = await affordanceButton("In Planung umwandeln")
+    await vi.waitFor(
+      () => {
+        // no edit target (plans failed) and convert never arms (matched)
+        expect(convert.disabled).toBe(true)
+        expect(
+          Array.from(document.body.querySelectorAll("button")).find((b) =>
+            b.textContent?.includes("Plan bearbeiten")
+          )
+        ).toBeUndefined()
+      },
+      { timeout: 500, interval: 20 }
+    )
+  })
 })

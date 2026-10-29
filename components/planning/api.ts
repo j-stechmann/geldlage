@@ -243,10 +243,14 @@ export interface MatchedTxRef {
  * convert one: offering "umwandeln" for an already-matched booking would
  * create a duplicate plan whose occurrences both target the same cadence.
  *
- * Failure modes all resolve as UNMATCHED (convert stays offered): a
- * booking outside ±MAX_WINDOW_DISTANCE_DAYS of today gets window_too_far —
- * the matching engine could not be consulted for it either — and a
- * transient read error must not permanently hide the affordance. A matched
+ * Failure modes: an OCCURRENCES read failure — a booking outside
+ * ±MAX_WINDOW_DISTANCE_DAYS of today gets window_too_far (the matching
+ * engine could not be consulted for it either), or a transient read error —
+ * resolves as UNMATCHED, so the affordance must not hide away permanently.
+ * A PLANS read failure on a found match must NOT read as unmatched
+ * (offering convert there would create a duplicate plan): it stays
+ * UNRESOLVED — the affordance keeps disarmed until a refetch (the next
+ * invalidatePlans, or the row's remount) resolves the plan list. A matched
  * plan deleted between the two reads likewise reads as unmatched;
  * invalidatePlans refetches both keys on the next plan mutation.
  */
@@ -309,8 +313,12 @@ export function useMatchedPlanForTx(ref: MatchedTxRef | null): {
   }
   if (
     occurrencesQuery.isPending ||
-    (occurrence !== null && plansQuery.isPending)
+    (occurrence !== null && (plansQuery.isPending || plansQuery.isError))
   ) {
+    // a found match whose plan list failed to load must NOT read as
+    // unmatched — offering convert would create a duplicate plan. It
+    // stays unresolved (affordance disarmed) until a refetch resolves
+    // the plan list (see the failure-mode doc above).
     return { matchedPlan: null, resolved: false }
   }
   const matchedPlan =

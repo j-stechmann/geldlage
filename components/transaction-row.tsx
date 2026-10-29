@@ -402,7 +402,10 @@ export function TransactionDetailRow({
                   type="button"
                   variant="ghost"
                   size="sm"
-                  disabled={!match.resolved}
+                  // matched and no edit handler → the caller cannot show the
+                  // safe "Plan bearbeiten" affordance; a convert click would
+                  // duplicate the plan the read-time match already assigned
+                  disabled={!match.resolved || matchedPlan !== null}
                   onClick={() => onConvertToPlan(row)}
                   title="Aus dieser Buchung eine geplante Transaktion mit einem monatlichen Takt anlegen"
                 >
