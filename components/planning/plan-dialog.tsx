@@ -36,6 +36,7 @@ import {
   invalidatePlans,
   ApiError,
   type PlanFormValues,
+  type PlanPrefill,
   type PlanRow,
 } from "@/components/planning/api"
 import {
@@ -595,7 +596,10 @@ export function parseRruleToForm(
 }
 
 /** Build the fully-initialized form for a dialog open (edit plan or new). */
-function initialForm(plan: PlanRow | null | undefined): FormState {
+function initialForm(
+  plan: PlanRow | null | undefined,
+  prefill?: PlanPrefill | null
+): FormState {
   if (plan) {
     const overrides = parseRruleToForm(plan.rrule, plan.dtstart)
     return {
@@ -611,7 +615,52 @@ function initialForm(plan: PlanRow | null | undefined): FormState {
       ...overrides,
     }
   }
+  if (prefill) return planFormFromPrefill(prefill)
   return { ...EMPTY_FORM, dtstart: todayLocal() }
+}
+
+/**
+ * The monthly guess for a prefill open: the day-of-month of the source
+ * (booking) date as a BYMONTHDAY rule — the same field the builder writes
+ * in "Am Tag des Monats" mode, so parseRruleToForm round-trips it. Days
+ * ≥ 29 skip short months; the dialog's monthDayHint documents that
+ * already. A source date that is not a valid ISO date leaves the form at
+ * its one-off default instead of a half-parsed rule.
+ */
+function monthlyGuessOverrides(dtstart: string): Partial<FormState> {
+  const day = Number.parseInt(dtstart.slice(8, 10), 10)
+  if (!isValidIsoDate(dtstart) || !Number.isInteger(day) || day < 1) {
+    return {}
+  }
+  return {
+    freq: "MONTHLY",
+    monthlyMode: "mday",
+    byMonthDayText: String(day),
+  }
+}
+
+/**
+ * Build the form for a dialog open from a prefill source (PlanPrefill —
+ * e.g. converting a booked transaction): direction from the amount sign,
+ * the source's attributes into the plan fields, and a monthly recurrence
+ * guessed from the day-of-month (the most common real-world case: every
+ * bill/salary repeats monthly — the user can switch the frequency freely
+ * before saving). Exported for the prefill regression tests.
+ */
+export function planFormFromPrefill(prefill: PlanPrefill): FormState {
+  return {
+    ...EMPTY_FORM,
+    // the amount sign drives the direction exactly like a stored plan's
+    direction: prefill.amountCents > 0 ? "Eingang" : "Ausgang",
+    amountText: formatCentsAsGerman(Math.abs(prefill.amountCents)),
+    counterparty: prefill.counterparty ?? "",
+    purpose: prefill.purpose ?? "",
+    accountId: prefill.accountId === null ? "all" : String(prefill.accountId),
+    categoryId:
+      prefill.categoryId === null ? "none" : String(prefill.categoryId),
+    dtstart: isValidIsoDate(prefill.dtstart) ? prefill.dtstart : "",
+    ...monthlyGuessOverrides(prefill.dtstart),
+  }
 }
 
 function describePlanError(err: unknown): string {
@@ -702,22 +751,39 @@ export interface PlanDialogProps {
   onOpenChange: (open: boolean) => void
   /** set = edit existing plan; null/undefined = create */
   plan?: PlanRow | null
+  /**
+   * create-mode prefill source (e.g. converting a booked transaction) —
+   * pre-fills the form with the source's data and a monthly recurrence
+   * guess. Ignored while `plan` is set (edit mode always pre-draws from the
+   * stored plan).
+   */
+  prefill?: PlanPrefill | null
 }
 
-export function PlanDialog({ open, onOpenChange, plan }: PlanDialogProps) {
+export function PlanDialog({
+  open,
+  onOpenChange,
+  plan,
+  prefill,
+}: PlanDialogProps) {
   const isEdit = plan !== null && plan !== undefined
   const [busy, setBusy] = React.useState(false)
   const queryClient = useQueryClient()
 
-  // initial state is derived per dialog open (plan/new); adjusting state
-  // during render ("adjusting state when a prop change", react.dev) avoids
-  // an effect entirely
-  const initKey = `${open ? "open" : "closed"}|${plan?.id ?? "new"}`
-  const [form, setForm] = React.useState<FormState>(() => initialForm(plan))
+  // initial state is derived per dialog open (plan/new/prefill); adjusting
+  // state during render ("adjusting state when a prop change", react.dev)
+  // avoids an effect entirely. The prefill contributes a serialized
+  // identity: callers rebuild the prefill object each render, so object
+  // identity would reset the form once per parent render.
+  const prefillKey = prefill ? JSON.stringify(prefill) : ""
+  const initKey = `${open ? "open" : "closed"}|${plan?.id ?? "new"}|${prefillKey}`
+  const [form, setForm] = React.useState<FormState>(() =>
+    initialForm(plan, prefill)
+  )
   const [renderedKey, setRenderedKey] = React.useState(initKey)
   if (renderedKey !== initKey) {
     setRenderedKey(initKey)
-    setForm(initialForm(plan))
+    setForm(initialForm(plan, prefill))
   }
 
   const set = React.useCallback(

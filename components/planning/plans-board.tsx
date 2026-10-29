@@ -286,7 +286,8 @@ export function PlansBoard() {
             </CardTitle>
             <CardDescription>
               Monatsübersicht oder Liste — Pläne und echte Buchungen; Plan
-              klicken = bearbeiten, Buchung klicken = in Transaktionen öffnen.
+              klicken = bearbeiten, Buchung klicken = in Transaktionen öffnen
+              oder in einen Plan umwandeln.
             </CardDescription>
           </CardHeader>
           <CardContent>

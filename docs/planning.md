@@ -182,10 +182,18 @@ resolve ids via `list_plans`/`query_data` first, confirm in chat before
 German UI. `/planung` composes the ReUI EventCalendar
 ([ADR-0024](adr/adr-0024-ui-stack-tailwind-shadcn-base-ui.md) Base UI twin),
 the plan list and the plan dialog. Click semantics: a **plan chip** opens
-its edit dialog; a **bank chip** navigates to `/transactions?tx=<id>` —
-the transactions table queries that single row by id (user-scoped,
-independent of any filter state) and expands, highlights and scrolls to
-it. The dashboard gains the "Geplant einblenden"
+its edit dialog; a **bank chip** opens an action dialog with the
+transactions deep link (`/transactions?tx=<id>` — the transactions table
+queries that single row by id, user-scoped and independent of any filter
+state, then expands, highlights and scrolls to it) and the
+**convert-to-plan** entry. Converting opens the plan dialog pre-filled
+from the booked transaction (`PlanPrefill` — counterparty, purpose,
+amount, booking date, account/category) with a monthly
+`BYMONTHDAY=<day-of-month>` recurrence guess; the transaction itself is
+never modified and **no linkage is stored** — future occurrences pair up
+read-time via matching. The same conversion entry sits in the expanded
+detail row of the transactions table. The dashboard gains the "Geplant
+einblenden"
 planned-vs-actual mode. Details in [frontend.md](frontend.md#planung).
 
 ## Tests

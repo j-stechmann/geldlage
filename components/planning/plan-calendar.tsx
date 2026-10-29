@@ -15,16 +15,28 @@ import type {
 } from "@/components/reui/event-calendar/event-calendar-types"
 import {
   ApiError,
+  germanDate,
   useCalendarTransactions,
   usePlanOccurrences,
   transactionDeepLink,
   type CalendarTransaction,
   type PlanOccurrence,
+  type PlanPrefill,
 } from "@/components/planning/api"
 import { ErrorState } from "@/components/error-state"
 import { isoDateLocal, todayLocal } from "@/lib/analytics/date"
 import { euro } from "@/lib/money"
 import { resolveCategoryColor } from "@/lib/category-colors"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { PlanDialog } from "@/components/planning/plan-dialog"
 
 function localMidnight(iso: string): Date {
   const [y, m, d] = iso.split("-").map(Number)
@@ -52,7 +64,7 @@ function washedColor(color: string, keep: number): string {
 interface CalendarChipData {
   /** planned occurrence (own dialog opens on click) */
   occurrence?: PlanOccurrence
-  /** real bank transaction (booked or pending); no dialog opens */
+  /** real bank transaction (booked or pending); click opens the action dialog */
   transaction?: CalendarTransaction
   /**
    * "pending" = Nicht gebucht rows: the default chip draws them with the
@@ -105,6 +117,23 @@ const CALENDAR_INTERACTIONS: Partial<EventCalendarInteractions> = {
 }
 const CALENDAR_EVENT_TOOLTIP = { delay: 300 }
 
+/**
+ * Derive the plan dialog's create prefill from a calendar-booked
+ * transaction (counterparty is precomputed by the API here, unlike the
+ * transactions-table rows which derive it from type). accountId stays null
+ * for legacy rows → the dialog selects "any account".
+ */
+function planPrefillFromCalendarTx(tx: CalendarTransaction): PlanPrefill {
+  return {
+    counterparty: tx.counterparty,
+    purpose: tx.purpose,
+    amountCents: tx.amountCents,
+    dtstart: tx.date,
+    accountId: tx.accountId,
+    categoryId: tx.categoryId,
+  }
+}
+
 export interface PlanCalendarProps {
   accountId: number | null
   onEventClick: (occurrence: PlanOccurrence) => void
@@ -115,12 +144,19 @@ export interface PlanCalendarProps {
  * expansion + matching (ADR-0035); the calendar renders two chip families:
  * planned occurrences (full color — muted when paused/matched, destructive
  * when überfällig) and REAL booked transactions washed toward muted
- * (color-mix). Clicks only open plans; booked chips carry no dialog.
- * Interactions stay off by design: editing an occurrence means editing its
- * plan, never dragging (a drag would ambiguously rewrite DTSTART).
+ * (color-mix). Clicks open plans; booked chips open an action dialog with
+ * the transactions deep link and the convert-to-plan entry (the plan
+ * dialog opens pre-filled from the clicked transaction). Interactions stay
+ * off by design: editing an occurrence means editing its plan, never
+ * dragging (a drag would ambiguously rewrite DTSTART).
  */
 export function PlanCalendar({ accountId, onEventClick }: PlanCalendarProps) {
   const router = useRouter()
+  const [txAction, setTxAction] = React.useState<CalendarTransaction | null>(
+    null
+  )
+  const [convertPrefill, setConvertPrefill] =
+    React.useState<PlanPrefill | null>(null)
   // named calendarWindow (not `window`): shadowing the browser global is a
   // foot-gun for anything later reading window.* in this scope
   const [calendarWindow, setCalendarWindow] = React.useState<{
@@ -290,10 +326,9 @@ export function PlanCalendar({ accountId, onEventClick }: PlanCalendarProps) {
             // plan chips open the plan dialog
             onEventClick(data.occurrence)
           } else if (data?.transaction) {
-            // bank chips deep-link into the transactions table with the row
-            // surfaced (expanded, highlighted) — the id lookup is user-scoped
-            // and independent of any filter state
-            router.push(transactionDeepLink(data.transaction))
+            // bank chips open an action dialog: view in the transactions
+            // table, or convert into a planned transaction (pre-filled)
+            setTxAction(data.transaction)
           }
         }}
         className="h-[70vh] min-h-[540px] rounded-lg border"
@@ -301,6 +336,59 @@ export function PlanCalendar({ accountId, onEventClick }: PlanCalendarProps) {
         <EventCalendarNav />
         <EventCalendarContent />
       </EventCalendar>
+
+      {/* booked-transaction chip action: deep-link into the transactions
+          table, or convert the booking into a planned transaction */}
+      <Dialog
+        open={txAction !== null}
+        onOpenChange={(open) => {
+          if (!open) setTxAction(null)
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Buchung umwandeln oder öffnen</DialogTitle>
+            <DialogDescription>
+              {txAction
+                ? `${txAction.counterparty ?? "Buchung"} · ${euro(txAction.amountCents)} · ${germanDate(txAction.date)}`
+                : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                // capture before clearing: the deep link needs the id, the
+                // chip deep-link keeps its original user-scoped behavior
+                const tx = txAction
+                setTxAction(null)
+                if (tx) router.push(transactionDeepLink(tx))
+              }}
+            >
+              Buchung ansehen
+            </Button>
+            <Button
+              onClick={() => {
+                const tx = txAction
+                setTxAction(null)
+                if (tx) {
+                  setConvertPrefill(planPrefillFromCalendarTx(tx))
+                }
+              }}
+            >
+              In Planung umwandeln
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <PlanDialog
+        open={convertPrefill !== null}
+        onOpenChange={(open) => {
+          if (!open) setConvertPrefill(null)
+        }}
+        prefill={convertPrefill}
+      />
     </>
   )
 }

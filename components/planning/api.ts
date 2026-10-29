@@ -23,6 +23,23 @@ export interface PlanRow {
   updatedAt: string
 }
 
+/**
+ * Prefill source for the plan dialog's create mode — built from an
+ * existing context (e.g. a booked transaction being "umgewandelt"). Pure
+ * data: the dialog derives the direction from the amount sign and guesses
+ * a monthly recurrence from the dtstart day-of-month. No linkage is
+ * stored — plans keep being read-time matched against bookings
+ * (lib/planning/matching.ts).
+ */
+export interface PlanPrefill {
+  amountCents: number
+  dtstart: string
+  counterparty: string | null
+  purpose: string | null
+  accountId: number | null
+  categoryId: number | null
+}
+
 export interface PlanListRow extends PlanRow {
   nextDueDate: string | null
 }

@@ -1,14 +1,16 @@
 "use client"
 
 import * as React from "react"
-import { ChevronDown, CircleDashed, Tag } from "lucide-react"
+import { ChevronDown, CalendarClock, CircleDashed, Tag } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { TableRow, TableCell } from "@/components/ui/table"
 import { resolveCategoryColor } from "@/lib/category-colors"
 import { euro } from "@/lib/money"
 import { cn } from "@/lib/utils"
 import type { ColumnKey } from "@/components/table-columns"
 import type { RowActivation } from "@/hooks/use-row-activation"
+import type { PlanPrefill } from "@/components/planning/api"
 
 /**
  * Client-side DTO mirroring the /api/transactions row — single source,
@@ -39,6 +41,24 @@ export interface TxRow {
 /** Counterparty in row direction: the payee of outgoing, payer of incoming. */
 export function counterpartyOf(row: TxRow): string | null {
   return row.type === "Ausgang" ? row.payee : row.payer
+}
+
+/**
+ * Derive the plan dialog's create prefill from a booked transaction: the
+ * counterparty in row direction (payee of outgoing / payer of incoming),
+ * purpose, amount, booking date and account/category. Pure data — the
+ * dialog derives direction from the amount sign and guesses a monthly
+ * recurrence; no linkage between plan and transaction is stored.
+ */
+export function planPrefillFromTx(row: TxRow): PlanPrefill {
+  return {
+    counterparty: counterpartyOf(row),
+    purpose: row.purpose,
+    amountCents: row.amountCents,
+    dtstart: row.bookingDate,
+    accountId: row.accountId,
+    categoryId: row.categoryId,
+  }
 }
 
 /**
@@ -302,14 +322,18 @@ export const TransactionRow = React.memo(function TransactionRow({
 
 /** The expanded detail row: the visible cell values as a definition list,
  * multi-line Verwendungszweck included (whitespace-pre-wrap). Optional
- * fields are hidden when empty via DetailField.
+ * fields are hidden when empty via DetailField. An optional action footer
+ * carries the "convert to planned transaction" entry (the plan dialog opens
+ * pre-filled with this row's data).
  */
 export function TransactionDetailRow({
   row,
   colSpan,
+  onConvertToPlan,
 }: {
   row: TxRow
   colSpan: number
+  onConvertToPlan?: (row: TxRow) => void
 }) {
   const counterparty = counterpartyOf(row)
   return (
@@ -341,6 +365,25 @@ export function TransactionDetailRow({
               <CategoryCell row={row} />
             </DetailField>
           </dl>
+          {onConvertToPlan && (
+            <div className="mt-3 flex justify-end border-t border-border/50 pt-3">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={(e) => {
+                  // the detail <tr> sits in the main row's click handling
+                  // scope only optically — no accordion toggle should fire
+                  e.stopPropagation()
+                  onConvertToPlan(row)
+                }}
+                title="Aus dieser Buchung eine geplante Transaktion mit einem monatlichen Takt anlegen"
+              >
+                <CalendarClock data-icon="inline-start" />
+                In Planung umwandeln
+              </Button>
+            </div>
+          )}
         </div>
       </TableCell>
     </TableRow>

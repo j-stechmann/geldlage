@@ -45,8 +45,10 @@ import {
 import {
   TransactionDetailRow,
   TransactionRow,
+  planPrefillFromTx,
   type TxRow,
 } from "@/components/transaction-row"
+import { PlanDialog } from "@/components/planning/plan-dialog"
 import { AssignLabelDialog } from "@/components/assign-label-dialog"
 import { useRowActivation } from "@/hooks/use-row-activation"
 
@@ -133,6 +135,8 @@ export function TransactionsTable({
     desc: true,
   })
   const [assignTarget, setAssignTarget] = React.useState<TxRow | null>(null)
+  // convert-to-plan target: the plan dialog opens pre-filled from this row
+  const [converting, setConverting] = React.useState<TxRow | null>(null)
   // one expanded detail row at a time (accordion); collapses on context
   // changes via the value-based reset below
   const [expandedId, setExpandedId] = React.useState<string | null>(null)
@@ -154,6 +158,9 @@ export function TransactionsTable({
   }, [])
   const openAssignDialog = React.useCallback((row: TxRow) => {
     setAssignTarget(row)
+  }, [])
+  const openConvertDialog = React.useCallback((row: TxRow) => {
+    setConverting(row)
   }, [])
   const activation = useRowActivation()
 
@@ -451,7 +458,11 @@ export function TransactionsTable({
                       focus={focusId != null && row.id === focusId}
                     />
                     {isExpanded && (
-                      <TransactionDetailRow row={row} colSpan={totalColumns} />
+                      <TransactionDetailRow
+                        row={row}
+                        colSpan={totalColumns}
+                        onConvertToPlan={openConvertDialog}
+                      />
                     )}
                   </React.Fragment>
                 )
@@ -495,6 +506,16 @@ export function TransactionsTable({
         <AssignLabelDialog
           row={assignTarget}
           onClose={() => setAssignTarget(null)}
+        />
+      )}
+
+      {converting && (
+        <PlanDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setConverting(null)
+          }}
+          prefill={planPrefillFromTx(converting)}
         />
       )}
     </div>
