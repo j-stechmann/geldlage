@@ -202,7 +202,11 @@ read — `window_too_far` or a transient error — resolves as unmatched,
 keeping convert available, while a failed plans read on a _found_ match
 leaves the affordance disarmed until a refetch resolves the plan list —
 the same hold covers the stale-cache window, where the app's 5s-stale
-plans snapshot renders while its invalidated refetch is in flight) —
+plans snapshot renders while its invalidated refetch is in flight, and
+the occurrence lookup holds on its in-flight read the same way: an
+invalidated `["plan-occurrences"]` entry serves its pre-plan snapshot
+(no match) while the invalidated refetch runs, and reading "unmatched"
+from it would re-arm convert against the just-created plan) —
 converting would only duplicate the plan. Read-time matches are
 window-scoped: with near-duplicate plans, the reverse lookup and the
 calendar chip may disagree — a property of the design, not a bug. The

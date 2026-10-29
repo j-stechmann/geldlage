@@ -252,22 +252,36 @@ export interface MatchedTxRef {
  * convert one: offering "umwandeln" for an already-matched booking would
  * create a duplicate plan whose occurrences both target the same cadence.
  *
- * Failure modes: an OCCURRENCES read failure — a booking outside
- * ±MAX_WINDOW_DISTANCE_DAYS of today gets window_too_far (the matching
- * engine could not be consulted for it either), or a transient read error —
- * resolves as UNMATCHED, so the affordance must not hide away permanently.
- * A PLANS read failure on a found match must NOT read as unmatched
- * (offering convert there would create a duplicate plan): it stays
- * UNRESOLVED — the affordance keeps disarmed until a refetch (the next
- * invalidatePlans, or the row's remount) resolves the plan list. The same
- * hold covers the STALE-SERVE window: the PLANS_KEY cache (staleTime 5s,
+ * Failure modes: an OCCURRENCES read failure — window_too_far (the queried
+ * window [booking−7, booking+5] must lie within the route's
+ * ±MAX_WINDOW_DISTANCE_DAYS of today, which fails for bookings older than
+ * ~1819 days or newer than ~1821) or a transient read error — resolves as
+ * UNMATCHED, so the affordance must not hide away permanently. Note the
+ * window_too_far boundary is the tighter one derived from this hook's own
+ * window edges, not ±MAX_WINDOW_DISTANCE_DAYS itself — and for a booking in
+ * that far-back strip an occurrence (up to booking+5) could in principle
+ * still lie inside a server-allowed window, but no client surface queries
+ * occurrences anywhere near that distance, so none could ever have paired
+ * the booking: unmatched stays the honest answer there. A PLANS read
+ * failure on a found match must NOT read as unmatched (offering convert
+ * there would create a duplicate plan): it stays UNRESOLVED — the
+ * affordance keeps disarmed until a refetch (the next invalidatePlans, or
+ * the row's remount) resolves the plan list. The same hold covers the
+ * STALE-SERVE window: the PLANS_KEY cache (staleTime 5s,
  * refetchOnWindowFocus:false) renders its snapshot while the invalidated
  * refetch is in flight, and a plan created after that snapshot would miss
  * the find below — so a found match also waits out the in-flight plans
- * read (isFetching, NOT isStale: staleness alone must not disarm, because
- * stale-and-idle data has no automatic refetch coming to resolve it). A
- * matched plan deleted between the two reads likewise reads as unmatched;
- * invalidatePlans refetches both keys on the next plan mutation.
+ * read. And the OCCURRENCES read holds the same way: an invalidated
+ * ["plan-occurrences"] entry serves its pre-plan snapshot — no match —
+ * while the invalidated refetch runs (e.g. the invalidatePlans fan-out
+ * right after a plan was created from this very affordance), so resolving
+ * "unmatched" from it would re-arm convert against the just-created plan.
+ * Both holds key on isFetching, NOT isStale: staleness alone must not
+ * disarm, because stale-and-idle data has no automatic refetch coming to
+ * resolve it — an in-flight read, by contrast, always settles (into
+ * success or the documented isError answer). A matched plan deleted
+ * between the two reads likewise reads as unmatched; invalidatePlans
+ * refetches both keys on the next plan mutation.
  */
 export function useMatchedPlanForTx(ref: MatchedTxRef | null): {
   /** the matching plan, or null when unmatched (or unresolved) */
@@ -329,14 +343,23 @@ export function useMatchedPlanForTx(ref: MatchedTxRef | null): {
   }
   if (
     occurrencesQuery.isPending ||
+    occurrencesQuery.isFetching ||
     (occurrence !== null &&
       (plansQuery.isPending || plansQuery.isError || plansQuery.isFetching))
   ) {
-    // a found match whose plan list is not reliably loaded must NOT read as
-    // unmatched — offering convert would create a duplicate plan. Beyond
-    // the failure cases this also waits out the stale-serve window (see the
-    // failure-mode doc above) instead of arming convert on a cached
-    // plans snapshot that may predate the matching plan.
+    // an unresolved or refetching occurrence read must NOT read as
+    // unmatched — resolving from a served stale snapshot would arm convert
+    // against a duplicate plan:
+    // - a found match whose plan list is not reliably loaded waits out the
+    //   in-flight plans read (see the failure-mode doc above) instead of
+    //   reading as unmatched on a plans cache that may predate the plan.
+    // - an invalidated occurrences entry (e.g. the invalidatePlans fan-out
+    //   right after a plan was created from this very affordance) serves
+    //   its pre-plan snapshot — no match — while the invalidated refetch
+    //   runs; "unmatched" from it would re-arm convert against the
+    //   just-created plan.
+    // isFetching, NOT isStale: staleness alone must not disarm (see the
+    // failure-mode doc above).
     return { matchedPlan: null, resolved: false }
   }
   const matchedPlan =

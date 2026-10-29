@@ -4,7 +4,13 @@ import { fireEvent, waitFor } from "@testing-library/react"
 import { TransactionsTable } from "@/components/transactions-table"
 import { EMPTY_FILTERS } from "@/lib/filters"
 import { renderWithQuery, stubFetch, stubLocalStorage } from "./helpers-dom"
-import { PLANS_KEY, type PlanOccurrence } from "@/components/planning/api"
+import {
+  PLANS_KEY,
+  planOccurrencesKey,
+  type PlanOccurrence,
+} from "@/components/planning/api"
+import { isoDatePlus } from "@/lib/planning/recurrence"
+import { MATCH_DAYS_AFTER, MATCH_DAYS_BEFORE } from "@/lib/planning/matching"
 
 const ROW_A = {
   id: "tx-1",
@@ -308,6 +314,62 @@ describe("TransactionsTable plan-affordance entry", () => {
     expect(convert.disabled).toBe(true)
     // no edit target either: the plan list the edit affordance needs
     // never resolves while the refetch hangs
+    expect(
+      Array.from(document.body.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Plan bearbeiten")
+      )
+    ).toBeUndefined()
+  })
+
+  it("convert stays disarmed while a stale OCCURRENCES snapshot serves during its refetch", async () => {
+    // mirror of the stale-PLANS race for the occurrence lookup itself: an
+    // invalidated ["plan-occurrences"] entry (e.g. the invalidatePlans
+    // fan-out right after a plan was created from this very affordance)
+    // serves its pre-plan snapshot — no match for the row — while the
+    // invalidated refetch runs. Resolving "unmatched" from that snapshot
+    // would re-arm convert against the just-created plan, so the hook must
+    // hold unresolved on the in-flight occurrences read as well. The
+    // refetch here never resolves, stretching the stale-serve window for
+    // as long as this test asserts.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input).split("?")[0]
+        if (/\/api\/plans\/occurrences$/.test(path)) {
+          return new Promise<Response>(() => {})
+        }
+        if (/\/api\/transactions$/.test(path)) {
+          return Response.json({
+            rows: [ROW_A],
+            total: 1,
+            page: 1,
+            pageCount: 1,
+          })
+        }
+        if (path === "/api/accounts") return Response.json({ accounts: [] })
+        if (path === "/api/labels") return Response.json({ labels: [] })
+        throw new TypeError(`fetch mocked out — no script for ${path}`)
+      })
+    )
+    const { queryClient } = renderTable()
+    // seed the stale pre-plan snapshot mid-flight: the occurrences mount
+    // fetch is hung by the stub above, so the observer now sits with
+    // fetchStatus=fetching over the seeded (matchless) data for as long as
+    // the refetch stays unresolved
+    queryClient.setQueryData(
+      planOccurrencesKey(
+        isoDatePlus("2026-11-04", -MATCH_DAYS_AFTER),
+        isoDatePlus("2026-11-04", MATCH_DAYS_BEFORE),
+        null
+      ),
+      { occurrences: [] }
+    )
+    const convert = await affordanceButton("In Planung umwandeln")
+    // what must hold AFTER the stale snapshot serves (data present, refetch
+    // in flight) is that the button NEVER arms from it
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    expect(convert.disabled).toBe(true)
+    // no match seen from the hung refetch → no edit affordance either
     expect(
       Array.from(document.body.querySelectorAll("button")).find((b) =>
         b.textContent?.includes("Plan bearbeiten")
