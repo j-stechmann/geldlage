@@ -1,5 +1,48 @@
 # Changelog
 
+## v1.22.0
+
+### Added
+
+- **planning — turn a booked transaction into a planned transaction**
+  ("In Planung umwandeln"): the expanded detail row of **booked** rows in
+  the transactions table gains a convert button, and the `/planung`
+  calendar's bank chips open an action dialog ("Buchung ansehen" deep
+  link plus the convert entry for Gebucht chips — "Nicht gebucht"
+  rows/chips carry no affordance, the matching engine pairs only Gebucht
+  rows). The plan dialog gains a create-mode **prefill**: direction from
+  the amount sign, counterparty/purpose/account/category mapped from the
+  source, and a monthly recurrence guess (`FREQ=MONTHLY;BYMONTHDAY=` day
+  of the booking — builder-ownable so an untouched save stores the rule;
+  day ≥ 29 keeps the existing short-month hint; a non-ISO source date
+  degrades to an empty one-off draft). A booking the read-time match
+  already claims offers **"Plan bearbeiten"** for that plan instead of a
+  duplicate-producing convert: the new `useMatchedPlanForTx` reverse
+  lookup queries the ± posting-drift occurrence window around the
+  booking date and holds the affordance disarmed across stale-cache
+  serves and failed plan-list reads (keyed on `isFetching`, not
+  `isStale`). No linkage is stored and transactions are untouched —
+  future occurrences pair up read-time via the matching engine.
+  Tests: plan-dialog-prefill (form mapping + dialog render),
+  transactions-table-convert (affordance wiring, matched-row edit switch,
+  the failed-plans/stale-cache holds, no occurrences call for pending
+  rows). Docs: planning.md frontend section updated.
+
+### Fixed
+
+- **dev-oidc — `make dev` no longer fails on the very first boot of a
+  fresh machine**: `scripts/dev-oidc-provision.ts` gated its API calls
+  only on `/-/health/ready/`, which returns 200 while Authentik is still
+  applying the system blueprints that create the default flows and scope
+  property mappings — the first look found an empty list, the script
+  died (and the make target tore the stack down), every later run passed.
+  The blueprint-managed lookups (implicit-consent authorization flow,
+  default invalidation flow, openid/profile/email scope mappings) now
+  poll until the object appears (2 s interval, 120 s deadline),
+  `apiList` throws on non-200 instead of exiting so a transient API
+  hiccup is retried as "not yet", and a genuinely absent object still
+  fails the run — now naming what it waited for.
+
 ## v1.21.0
 
 ### Added
