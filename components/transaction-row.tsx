@@ -1,14 +1,26 @@
 "use client"
 
 import * as React from "react"
-import { ChevronDown, CircleDashed, Tag } from "lucide-react"
+import {
+  ChevronDown,
+  CalendarClock,
+  CircleDashed,
+  Pencil,
+  Tag,
+} from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { TableRow, TableCell } from "@/components/ui/table"
 import { resolveCategoryColor } from "@/lib/category-colors"
 import { euro } from "@/lib/money"
 import { cn } from "@/lib/utils"
 import type { ColumnKey } from "@/components/table-columns"
 import type { RowActivation } from "@/hooks/use-row-activation"
+import {
+  useMatchedPlanForTx,
+  type PlanPrefill,
+  type PlanRow,
+} from "@/components/planning/api"
 
 /**
  * Client-side DTO mirroring the /api/transactions row — single source,
@@ -39,6 +51,24 @@ export interface TxRow {
 /** Counterparty in row direction: the payee of outgoing, payer of incoming. */
 export function counterpartyOf(row: TxRow): string | null {
   return row.type === "Ausgang" ? row.payee : row.payer
+}
+
+/**
+ * Derive the plan dialog's create prefill from a booked transaction: the
+ * counterparty in row direction (payee of outgoing / payer of incoming),
+ * purpose, amount, booking date and account/category. Pure data — the
+ * dialog derives direction from the amount sign and guesses a monthly
+ * recurrence; no linkage between plan and transaction is stored.
+ */
+export function planPrefillFromTx(row: TxRow): PlanPrefill {
+  return {
+    counterparty: counterpartyOf(row),
+    purpose: row.purpose,
+    amountCents: row.amountCents,
+    dtstart: row.bookingDate,
+    accountId: row.accountId,
+    categoryId: row.categoryId,
+  }
 }
 
 /**
@@ -302,16 +332,35 @@ export const TransactionRow = React.memo(function TransactionRow({
 
 /** The expanded detail row: the visible cell values as a definition list,
  * multi-line Verwendungszweck included (whitespace-pre-wrap). Optional
- * fields are hidden when empty via DetailField.
+ * fields are hidden when empty via DetailField. An optional action footer
+ * carries the convert-to-plan entry (booked rows only — "Nicht gebucht"
+ * rows are never paired by the matching engine, which pulls only Gebucht
+ * rows): a booking whose occurrence is already claimed by a plan (read-time
+ * match) offers "Plan bearbeiten" for that plan instead — converting would
+ * only duplicate it.
  */
 export function TransactionDetailRow({
   row,
   colSpan,
+  onConvertToPlan,
+  onEditPlan,
 }: {
   row: TxRow
   colSpan: number
+  onConvertToPlan?: (row: TxRow) => void
+  onEditPlan?: (plan: PlanRow) => void
 }) {
   const counterparty = counterpartyOf(row)
+  // "Nicht gebucht" rows sit outside the matching engine entirely (it
+  // queries status = 'Gebucht') — pass null so no reverse lookup fires and
+  // the affordance footer stays hidden
+  const booked = row.status === "Gebucht"
+  // The affordance follows the authoritative read-time match:
+  // resolved + matched → the matching plan's edit dialog; resolved +
+  // unmatched → convert; the button stays disarmed while the lookup is
+  // in flight (see useMatchedPlanForTx).
+  const match = useMatchedPlanForTx(booked ? row : null)
+  const matchedPlan = match.resolved ? match.matchedPlan : null
   return (
     <TableRow className="hover:bg-transparent" id={detailRowId(row.id)}>
       <TableCell colSpan={colSpan} className="p-0 whitespace-normal">
@@ -341,6 +390,37 @@ export function TransactionDetailRow({
               <CategoryCell row={row} />
             </DetailField>
           </dl>
+          {onConvertToPlan && booked && (
+            <div className="mt-3 flex justify-end border-t border-border/50 pt-3">
+              {matchedPlan !== null && onEditPlan !== undefined ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onEditPlan(matchedPlan)}
+                  title="Diese Buchung ist bereits einem Plan zugeordnet — den Plan bearbeiten"
+                >
+                  <Pencil data-icon="inline-start" />
+                  Plan bearbeiten
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  // matched and no edit handler → the caller cannot show the
+                  // safe "Plan bearbeiten" affordance; a convert click would
+                  // duplicate the plan the read-time match already assigned
+                  disabled={!match.resolved || matchedPlan !== null}
+                  onClick={() => onConvertToPlan(row)}
+                  title="Aus dieser Buchung eine geplante Transaktion mit einem monatlichen Takt anlegen"
+                >
+                  <CalendarClock data-icon="inline-start" />
+                  In Planung umwandeln
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       </TableCell>
     </TableRow>
