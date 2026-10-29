@@ -259,14 +259,21 @@ export interface MatchedTxRef {
  * A PLANS read failure on a found match must NOT read as unmatched
  * (offering convert there would create a duplicate plan): it stays
  * UNRESOLVED — the affordance keeps disarmed until a refetch (the next
- * invalidatePlans, or the row's remount) resolves the plan list. A matched
- * plan deleted between the two reads likewise reads as unmatched;
+ * invalidatePlans, or the row's remount) resolves the plan list. The same
+ * hold covers the STALE-SERVE window: the PLANS_KEY cache (staleTime 5s,
+ * refetchOnWindowFocus:false) renders its snapshot while the invalidated
+ * refetch is in flight, and a plan created after that snapshot would miss
+ * the find below — so a found match also waits out the in-flight plans
+ * read (isFetching, NOT isStale: staleness alone must not disarm, because
+ * stale-and-idle data has no automatic refetch coming to resolve it). A
+ * matched plan deleted between the two reads likewise reads as unmatched;
  * invalidatePlans refetches both keys on the next plan mutation.
  */
 export function useMatchedPlanForTx(ref: MatchedTxRef | null): {
   /** the matching plan, or null when unmatched (or unresolved) */
   matchedPlan: PlanRow | null
-  /** false while the reverse lookup is still in flight */
+  /** false while the reverse lookup (or a matched plan's list refetch) is
+   * still in flight */
   resolved: boolean
 } {
   const valid = ref !== null && isValidIsoDate(ref.bookingDate)
@@ -322,12 +329,14 @@ export function useMatchedPlanForTx(ref: MatchedTxRef | null): {
   }
   if (
     occurrencesQuery.isPending ||
-    (occurrence !== null && (plansQuery.isPending || plansQuery.isError))
+    (occurrence !== null &&
+      (plansQuery.isPending || plansQuery.isError || plansQuery.isFetching))
   ) {
-    // a found match whose plan list failed to load must NOT read as
-    // unmatched — offering convert would create a duplicate plan. It
-    // stays unresolved (affordance disarmed) until a refetch resolves
-    // the plan list (see the failure-mode doc above).
+    // a found match whose plan list is not reliably loaded must NOT read as
+    // unmatched — offering convert would create a duplicate plan. Beyond
+    // the failure cases this also waits out the stale-serve window (see the
+    // failure-mode doc above) instead of arming convert on a cached
+    // plans snapshot that may predate the matching plan.
     return { matchedPlan: null, resolved: false }
   }
   const matchedPlan =

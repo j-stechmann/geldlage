@@ -192,12 +192,17 @@ amount, booking date, account/category) with a monthly
 `BYMONTHDAY=<day-of-month>` recurrence guess; the transaction itself is
 never modified and **no linkage is stored** — future occurrences pair up
 read-time via matching. The same conversion entry sits in the expanded
-detail row of the transactions table. A booking the matching engine
+detail row of the transactions table's booked rows (`Nicht gebucht`
+rows/chips carry no convert entry — the matching engine pairs only
+`Gebucht` rows, so a plan built from a pending booking would sit
+unmatched until the booked version posts). A booking the matching engine
 already claims is offered **plan edit** instead (`useMatchedPlanForTx`
 reverse-lookup over the ± posting-drift window; a failed occurrences
 read — `window_too_far` or a transient error — resolves as unmatched,
 keeping convert available, while a failed plans read on a _found_ match
-leaves the affordance disarmed until a refetch resolves the plan list) —
+leaves the affordance disarmed until a refetch resolves the plan list —
+the same hold covers the stale-cache window, where the app's 5s-stale
+plans snapshot renders while its invalidated refetch is in flight) —
 converting would only duplicate the plan. Read-time matches are
 window-scoped: with near-duplicate plans, the reverse lookup and the
 calendar chip may disagree — a property of the design, not a bug. The

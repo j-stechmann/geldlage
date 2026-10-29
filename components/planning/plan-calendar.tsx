@@ -66,7 +66,8 @@ interface CalendarChipData {
   /** planned occurrence (own dialog opens on click) */
   occurrence?: PlanOccurrence
   /** real bank transaction (booked or pending); click opens the action dialog,
-   * whose second action is the matched plan's edit (or the convert entry) */
+   * whose second action (BOOKED chips only) is the matched plan's edit (or
+   * the convert entry) */
   transaction?: CalendarTransaction
   /**
    * "pending" = Nicht gebucht rows: the default chip draws them with the
@@ -168,9 +169,13 @@ export function PlanCalendar({ accountId, onEventClick }: PlanCalendarProps) {
   // lookup as the transactions-table rows (window around the booking date,
   // ± posting drift) — the visible window's occurrences could miss a match
   // whose occurrence fell outside the loaded range (booking at the edge).
-  // null ref → resolved unmatched: the dialog is closed.
+  // "Nicht gebucht" chips sit outside the matching engine entirely (it
+  // queries status = 'Gebucht') — null ref → resolved unmatched, and the
+  // dialog keeps only the deep link below.
   const actionMatch = useMatchedPlanForTx(
-    txAction === null ? null : { id: txAction.id, bookingDate: txAction.date }
+    txAction !== null && txAction.status === "Gebucht"
+      ? { id: txAction.id, bookingDate: txAction.date }
+      : null
   )
   const actionPlan = actionMatch.resolved ? actionMatch.matchedPlan : null
   // named calendarWindow (not `window`): shadowing the browser global is a
@@ -383,31 +388,37 @@ export function PlanCalendar({ accountId, onEventClick }: PlanCalendarProps) {
             >
               Buchung ansehen
             </Button>
-            {actionPlan !== null ? (
-              <Button
-                onClick={() => {
-                  setEditingPlan(actionPlan)
-                  setTxAction(null)
-                }}
-              >
-                Plan bearbeiten
-              </Button>
-            ) : (
-              <Button
-                // disarmed while the match lookup resolves: a convert click
-                // on a matched booking would create a duplicate plan
-                disabled={!actionMatch.resolved}
-                onClick={() => {
-                  const tx = txAction
-                  setTxAction(null)
-                  if (tx) {
-                    setConvertPrefill(planPrefillFromCalendarTx(tx))
-                  }
-                }}
-              >
-                In Planung umwandeln
-              </Button>
-            )}
+            {/* the plan affordance lives on BOOKED chips only — "Nicht
+                gebucht" chips are never paired by the matching engine, so
+                converting there would orphan the plan until the booked
+                version posts */}
+            {txAction !== null && txAction.status === "Gebucht" ? (
+              actionPlan !== null ? (
+                <Button
+                  onClick={() => {
+                    setEditingPlan(actionPlan)
+                    setTxAction(null)
+                  }}
+                >
+                  Plan bearbeiten
+                </Button>
+              ) : (
+                <Button
+                  // disarmed while the match lookup resolves: a convert click
+                  // on a matched booking would create a duplicate plan
+                  disabled={!actionMatch.resolved}
+                  onClick={() => {
+                    const tx = txAction
+                    setTxAction(null)
+                    if (tx) {
+                      setConvertPrefill(planPrefillFromCalendarTx(tx))
+                    }
+                  }}
+                >
+                  In Planung umwandeln
+                </Button>
+              )
+            ) : null}
           </DialogFooter>
         </DialogContent>
       </Dialog>

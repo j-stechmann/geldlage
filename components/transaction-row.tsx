@@ -333,9 +333,11 @@ export const TransactionRow = React.memo(function TransactionRow({
 /** The expanded detail row: the visible cell values as a definition list,
  * multi-line Verwendungszweck included (whitespace-pre-wrap). Optional
  * fields are hidden when empty via DetailField. An optional action footer
- * carries the convert-to-plan entry: a booking whose occurrence is already
- * claimed by a plan (read-time match) offers "Plan bearbeiten" for that
- * plan instead — converting would only duplicate it.
+ * carries the convert-to-plan entry (booked rows only — "Nicht gebucht"
+ * rows are never paired by the matching engine, which pulls only Gebucht
+ * rows): a booking whose occurrence is already claimed by a plan (read-time
+ * match) offers "Plan bearbeiten" for that plan instead — converting would
+ * only duplicate it.
  */
 export function TransactionDetailRow({
   row,
@@ -349,11 +351,15 @@ export function TransactionDetailRow({
   onEditPlan?: (plan: PlanRow) => void
 }) {
   const counterparty = counterpartyOf(row)
+  // "Nicht gebucht" rows sit outside the matching engine entirely (it
+  // queries status = 'Gebucht') — pass null so no reverse lookup fires and
+  // the affordance footer stays hidden
+  const booked = row.status === "Gebucht"
   // The affordance follows the authoritative read-time match:
   // resolved + matched → the matching plan's edit dialog; resolved +
   // unmatched → convert; the button stays disarmed while the lookup is
   // in flight (see useMatchedPlanForTx).
-  const match = useMatchedPlanForTx(row)
+  const match = useMatchedPlanForTx(booked ? row : null)
   const matchedPlan = match.resolved ? match.matchedPlan : null
   return (
     <TableRow className="hover:bg-transparent" id={detailRowId(row.id)}>
@@ -384,7 +390,7 @@ export function TransactionDetailRow({
               <CategoryCell row={row} />
             </DetailField>
           </dl>
-          {onConvertToPlan && (
+          {onConvertToPlan && booked && (
             <div className="mt-3 flex justify-end border-t border-border/50 pt-3">
               {matchedPlan !== null && onEditPlan !== undefined ? (
                 <Button

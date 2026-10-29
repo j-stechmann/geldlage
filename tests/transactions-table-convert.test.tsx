@@ -4,7 +4,7 @@ import { fireEvent, waitFor } from "@testing-library/react"
 import { TransactionsTable } from "@/components/transactions-table"
 import { EMPTY_FILTERS } from "@/lib/filters"
 import { renderWithQuery, stubFetch, stubLocalStorage } from "./helpers-dom"
-import type { PlanOccurrence } from "@/components/planning/api"
+import { PLANS_KEY, type PlanOccurrence } from "@/components/planning/api"
 
 const ROW_A = {
   id: "tx-1",
@@ -229,5 +229,89 @@ describe("TransactionsTable plan-affordance entry", () => {
       },
       { timeout: 500, interval: 20 }
     )
+  })
+
+  it("a Nicht gebucht row carries no plan affordance — the engine pairs only Gebucht rows", async () => {
+    stubFetch([
+      {
+        url: /\/api\/transactions$/,
+        json: {
+          rows: [{ ...ROW_A, status: "Nicht gebucht" }],
+          total: 1,
+          page: 1,
+          pageCount: 1,
+        },
+      },
+      // deliberately NO occurrences script: the reverse lookup must not
+      // even fire for a pending row — stubFetch throws on any unscripted
+      // call, and an unscripted call here MUST be a thrown-at-queryFn
+      // bug rather than silently treated as "unmatched"
+      { url: /\/api\/accounts$/, json: { accounts: [] } },
+      { url: /\/api\/labels$/, json: { labels: [] } },
+    ])
+    renderTable()
+    // the detail row renders (focus mode expands it)…
+    await waitFor(() =>
+      expect(document.body.textContent).toContain("Mietwerk GmbH")
+    )
+    // …yet stays free of both plan-affordance labels
+    expect(
+      Array.from(document.body.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("In Planung umwandeln")
+      )
+    ).toBeUndefined()
+    expect(
+      Array.from(document.body.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Plan bearbeiten")
+      )
+    ).toBeUndefined()
+  })
+
+  it("convert stays disarmed while a stale PLANS snapshot serves during its refetch", async () => {
+    // replicate the app-cache race (staleTime 5s, refetchOnWindowFocus
+    // false): a PLANS_KEY snapshot taken BEFORE the matching plan existed
+    // renders instantly while the invalidated refetch runs — resolving
+    // "unmatched" from it would arm a convert that duplicates the matching
+    // plan. The plans refetch here never resolves, so the stale-serve
+    // window is stretched for as long as this test asserts.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input).split("?")[0]
+        if (path === "/api/plans") return new Promise<Response>(() => {})
+        if (/\/api\/plans\/occurrences$/.test(path)) {
+          return Response.json({ occurrences: [matchedOccurrence()] })
+        }
+        if (/\/api\/transactions$/.test(path)) {
+          return Response.json({
+            rows: [ROW_A],
+            total: 1,
+            page: 1,
+            pageCount: 1,
+          })
+        }
+        if (path === "/api/accounts") return Response.json({ accounts: [] })
+        if (path === "/api/labels") return Response.json({ labels: [] })
+        throw new TypeError(`fetch mocked out — no script for ${path}`)
+      })
+    )
+    const { queryClient } = renderTable()
+    // seed the stale snapshot synchronously after mount (no fetch resolved
+    // yet): the plans observer only enables once the occurrences lookup
+    // resolves, so the snapshot is in place before it can serve
+    queryClient.setQueryData(PLANS_KEY, { plans: [] })
+    const convert = await affordanceButton("In Planung umwandeln")
+    // the button already renders disarmed while the lookup is in flight —
+    // what must hold AFTER the occurrences resolved is that it NEVER arms
+    // from the stale snapshot (the hung refetch = isFetching hold)
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    expect(convert.disabled).toBe(true)
+    // no edit target either: the plan list the edit affordance needs
+    // never resolves while the refetch hangs
+    expect(
+      Array.from(document.body.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Plan bearbeiten")
+      )
+    ).toBeUndefined()
   })
 })
