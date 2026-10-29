@@ -194,9 +194,14 @@ never modified and **no linkage is stored** — future occurrences pair up
 read-time via matching. The same conversion entry sits in the expanded
 detail row of the transactions table. A booking the matching engine
 already claims is offered **plan edit** instead (`useMatchedPlanForTx`
-reverse-lookup over the ± posting-drift window; failure modes resolve as
-unmatched, keeping convert available) — converting would only duplicate
-the plan. The dashboard gains the "Geplant einblenden"
+reverse-lookup over the ± posting-drift window; a failed occurrences
+read — `window_too_far` or a transient error — resolves as unmatched,
+keeping convert available, while a failed plans read on a _found_ match
+leaves the affordance disarmed until a refetch resolves the plan list) —
+converting would only duplicate the plan. Read-time matches are
+window-scoped: with near-duplicate plans, the reverse lookup and the
+calendar chip may disagree — a property of the design, not a bug. The
+dashboard gains the "Geplant einblenden"
 planned-vs-actual mode. Details in [frontend.md](frontend.md#planung).
 
 ## Tests

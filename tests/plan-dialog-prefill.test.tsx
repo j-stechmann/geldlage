@@ -104,7 +104,7 @@ describe("planFormFromPrefill", () => {
   })
 })
 
-describe("plan dialog pre-fill from a pref source (render)", () => {
+describe("plan dialog pre-fill from a prefill source (render)", () => {
   it("shows the guessed monthly rule and stays saveable for day ≥ 29", async () => {
     // the 31st skips short months — the dialog hints that (same UX as a
     // hand-built monthly rule) instead of silently guessing a broken one

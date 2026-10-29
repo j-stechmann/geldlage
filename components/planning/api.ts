@@ -234,10 +234,19 @@ export interface MatchedTxRef {
 
 /**
  * Reverse lookup of the read-time match: the plan whose occurrence the
- * server paired with this booking (the same authoritative engine the
- * calendar's "✓" chips render — nothing is stored, so this queries the
- * occurrences of the ± posting-drift window around the booking date
+ * server paired with this booking (the same engine the calendar's "✓"
+ * chips render — nothing is stored, so this queries the occurrences of
+ * the ± posting-drift window around the booking date
  * [−MATCH_DAYS_AFTER, +MATCH_DAYS_BEFORE], lib/planning/matching.ts).
+ * That window provably contains every occurrence that could ever claim
+ * this booking (viable()'s date bound). The greedy pairing itself is,
+ * however, a function of the whole queried input: with near-duplicate
+ * plans, the pair assigned here can differ from what the calendar's
+ * wider (and possibly account-filtered) window computed — read-time
+ * matches are WINDOW-SCOPED, so a cross-surface mismatch between this
+ * affordance and a calendar chip is a property of ADR-0035, not an
+ * engine bug to chase. Nothing is stored, so there is no persisted
+ * truth a differing answer could contradict.
  *
  * Callers turn a resolved match into an "edit plan" affordance instead of a
  * convert one: offering "umwandeln" for an already-matched booking would
