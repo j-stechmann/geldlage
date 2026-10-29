@@ -2,6 +2,8 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "@/lib/api-fetch"
+import { isValidIsoDate, isoDatePlus } from "@/lib/planning/recurrence"
+import { MATCH_DAYS_BEFORE, MATCH_DAYS_AFTER } from "@/lib/planning/matching"
 
 // ── DTOs (mirror the server contract in lib/planning/service.ts) ──────────
 
@@ -21,6 +23,23 @@ export interface PlanRow {
   notes: string | null
   createdAt: string
   updatedAt: string
+}
+
+/**
+ * Prefill source for the plan dialog's create mode — built from an
+ * existing context (e.g. a booked transaction being "umgewandelt"). Pure
+ * data: the dialog derives the direction from the amount sign and guesses
+ * a monthly recurrence from the dtstart day-of-month. No linkage is
+ * stored — plans keep being read-time matched against bookings
+ * (lib/planning/matching.ts).
+ */
+export interface PlanPrefill {
+  amountCents: number
+  dtstart: string
+  counterparty: string | null
+  purpose: string | null
+  accountId: number | null
+  categoryId: number | null
 }
 
 export interface PlanListRow extends PlanRow {
@@ -205,6 +224,149 @@ export function useCalendarTransactions(
     enabled: from !== null && to !== null,
     placeholderData: (prev) => prev,
   })
+}
+
+/** Minimal booking reference for the read-time match reverse lookup. */
+export interface MatchedTxRef {
+  id: string
+  bookingDate: string
+}
+
+/**
+ * Reverse lookup of the read-time match: the plan whose occurrence the
+ * server paired with this booking (the same engine the calendar's "✓"
+ * chips render — nothing is stored, so this queries the occurrences of
+ * the ± posting-drift window around the booking date
+ * [−MATCH_DAYS_AFTER, +MATCH_DAYS_BEFORE], lib/planning/matching.ts).
+ * That window provably contains every occurrence that could ever claim
+ * this booking (viable()'s date bound). The greedy pairing itself is,
+ * however, a function of the whole queried input: with near-duplicate
+ * plans, the pair assigned here can differ from what the calendar's
+ * wider (and possibly account-filtered) window computed — read-time
+ * matches are WINDOW-SCOPED, so a cross-surface mismatch between this
+ * affordance and a calendar chip is a property of ADR-0035, not an
+ * engine bug to chase. Nothing is stored, so there is no persisted
+ * truth a differing answer could contradict.
+ *
+ * Callers turn a resolved match into an "edit plan" affordance instead of a
+ * convert one: offering "umwandeln" for an already-matched booking would
+ * create a duplicate plan whose occurrences both target the same cadence.
+ *
+ * Failure modes: an OCCURRENCES read failure — window_too_far (the queried
+ * window [booking−7, booking+5] must lie within the route's
+ * ±MAX_WINDOW_DISTANCE_DAYS of today, which fails for bookings older than
+ * ~1819 days or newer than ~1821) or a transient read error — resolves as
+ * UNMATCHED, so the affordance must not hide away permanently. Note the
+ * window_too_far boundary is the tighter one derived from this hook's own
+ * window edges, not ±MAX_WINDOW_DISTANCE_DAYS itself — and for a booking in
+ * that far-back strip an occurrence (up to booking+5) could in principle
+ * still lie inside a server-allowed window, but no client surface queries
+ * occurrences anywhere near that distance, so none could ever have paired
+ * the booking: unmatched stays the honest answer there. A PLANS read
+ * failure on a found match must NOT read as unmatched (offering convert
+ * there would create a duplicate plan): it stays UNRESOLVED — the
+ * affordance keeps disarmed until a refetch (the next invalidatePlans, or
+ * the row's remount) resolves the plan list. The same hold covers the
+ * STALE-SERVE window: the PLANS_KEY cache (staleTime 5s,
+ * refetchOnWindowFocus:false) renders its snapshot while the invalidated
+ * refetch is in flight, and a plan created after that snapshot would miss
+ * the find below — so a found match also waits out the in-flight plans
+ * read. And the OCCURRENCES read holds the same way: an invalidated
+ * ["plan-occurrences"] entry serves its pre-plan snapshot — no match —
+ * while the invalidated refetch runs (e.g. the invalidatePlans fan-out
+ * right after a plan was created from this very affordance), so resolving
+ * "unmatched" from it would re-arm convert against the just-created plan.
+ * Both holds key on isFetching, NOT isStale: staleness alone must not
+ * disarm, because stale-and-idle data has no automatic refetch coming to
+ * resolve it — an in-flight read, by contrast, always settles (into
+ * success or the documented isError answer). A matched plan deleted
+ * between the two reads likewise reads as unmatched; invalidatePlans
+ * refetches both keys on the next plan mutation.
+ */
+export function useMatchedPlanForTx(ref: MatchedTxRef | null): {
+  /** the matching plan, or null when unmatched (or unresolved) */
+  matchedPlan: PlanRow | null
+  /** false while the reverse lookup (or a matched plan's list refetch) is
+   * still in flight */
+  resolved: boolean
+} {
+  const valid = ref !== null && isValidIsoDate(ref.bookingDate)
+  const key =
+    valid && ref !== null
+      ? planOccurrencesKey(
+          isoDatePlus(ref.bookingDate, -MATCH_DAYS_AFTER),
+          isoDatePlus(ref.bookingDate, MATCH_DAYS_BEFORE),
+          null
+        )
+      : planOccurrencesKey("", "", null)
+  const occurrencesQuery = useQuery<{ occurrences: PlanOccurrence[] }>({
+    queryKey: key,
+    queryFn: async () => {
+      const res = await apiFetch(`/api/plans/occurrences?${key[1]}`)
+      if (!res.ok) {
+        throw await parseError(res, "Termine konnten nicht geladen werden")
+      }
+      return res.json()
+    },
+    enabled: valid,
+    // NO placeholderData (unlike the calendar hooks): while a different
+    // expanded row's window loads, its cached occurrences must not briefly
+    // read as THIS row's match state — the flip between "In Planung
+    // umwandeln" and "Plan bearbeiten" is decision-relevant
+  })
+  const occurrence =
+    valid && ref !== null && occurrencesQuery.data !== undefined
+      ? (occurrencesQuery.data.occurrences.find(
+          (o) => o.matched?.transactionId === ref.id
+        ) ?? null)
+      : null
+  const planId = occurrence?.planId ?? null
+  // the plans list only matters once a match was found — no dead request
+  // per expanded unmatched row (PLANS_KEY is the cache the board and the
+  // plan dialog already share)
+  const plansQuery = useQuery<{ plans: PlanListRow[] }>({
+    queryKey: PLANS_KEY,
+    queryFn: async () => {
+      const res = await apiFetch("/api/plans")
+      if (!res.ok)
+        throw await parseError(res, "Pläne konnten nicht geladen werden")
+      return res.json()
+    },
+    enabled: planId !== null,
+  })
+
+  if (!valid) {
+    return { matchedPlan: null, resolved: true }
+  }
+  if (occurrencesQuery.isError) {
+    return { matchedPlan: null, resolved: true }
+  }
+  if (
+    occurrencesQuery.isPending ||
+    occurrencesQuery.isFetching ||
+    (occurrence !== null &&
+      (plansQuery.isPending || plansQuery.isError || plansQuery.isFetching))
+  ) {
+    // an unresolved or refetching occurrence read must NOT read as
+    // unmatched — resolving from a served stale snapshot would arm convert
+    // against a duplicate plan:
+    // - a found match whose plan list is not reliably loaded waits out the
+    //   in-flight plans read (see the failure-mode doc above) instead of
+    //   reading as unmatched on a plans cache that may predate the plan.
+    // - an invalidated occurrences entry (e.g. the invalidatePlans fan-out
+    //   right after a plan was created from this very affordance) serves
+    //   its pre-plan snapshot — no match — while the invalidated refetch
+    //   runs; "unmatched" from it would re-arm convert against the
+    //   just-created plan.
+    // isFetching, NOT isStale: staleness alone must not disarm (see the
+    // failure-mode doc above).
+    return { matchedPlan: null, resolved: false }
+  }
+  const matchedPlan =
+    occurrence === null
+      ? null
+      : (plansQuery.data?.plans.find((p) => p.id === occurrence.planId) ?? null)
+  return { matchedPlan, resolved: true }
 }
 
 export function useForecast(
