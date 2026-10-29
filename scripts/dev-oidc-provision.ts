@@ -77,7 +77,9 @@ async function apiList<T>(path: string): Promise<T[]> {
     const { status, data }: { status: number; data: Paginated<T> | null } =
       await api<Paginated<T>>(current)
     if (status !== 200 || !data || !Array.isArray(data.results)) {
-      die(`listing ${current} failed (status ${status})`)
+      // thrown (not die) so the waitFor lookups catch a transient API
+      // failure during first boot as "not yet" instead of exiting mid-poll
+      throw new Error(`listing ${current} failed (status ${status})`)
     }
     out.push(...data.results)
     url = data.next
@@ -112,7 +114,43 @@ interface PropertyMapping {
   scope_name: string
 }
 
-async function scopeMappingPks(): Promise<string[]> {
+/**
+ * First-boot race: /-/health/ready/ answers 200 while Authentik is still
+ * applying the system blueprints that create the default flows and scope
+ * property mappings — the very first (fresh volume) provisioning run found
+ * its lookups empty and died, while every re-run passed. Poll until the
+ * object appears (blueprints apply within seconds of readiness) instead of
+ * trusting a single successful HTTP status; a genuinely absent object (or
+ * a broken tenant) only fails after the timeout.
+ */
+async function waitFor<T>(
+  label: string,
+  lookup: () => Promise<T | null>,
+  timeoutSeconds = 120
+): Promise<T> {
+  process.stdout.write(`[dev-oidc] waiting for ${label}`)
+  const deadline = Date.now() + timeoutSeconds * 1000
+  for (;;) {
+    try {
+      const found = await lookup()
+      if (found !== null) {
+        console.log(" ok")
+        return found
+      }
+    } catch {
+      // transient network/API hiccups during first boot count as "not yet"
+    }
+    if (Date.now() >= deadline) {
+      console.log("")
+      die(`${label} not found within ${timeoutSeconds}s`)
+    }
+    process.stdout.write(".")
+    await new Promise((r) => setTimeout(r, 2000))
+  }
+}
+
+/** All three scopes mapped, or null (during blueprint application). */
+async function scopeMappingPkLookup(): Promise<string[] | null> {
   const scopes = ["openid", "profile", "email"]
   const mappings = await apiList<PropertyMapping>(
     "/propertymappings/provider/scope/"
@@ -120,9 +158,7 @@ async function scopeMappingPks(): Promise<string[]> {
   const pks: string[] = []
   for (const scope of scopes) {
     const found = mappings.find((m) => m.scope_name === scope)
-    if (!found) {
-      die(`scope property mapping not found for scope "${scope}"`)
-    }
+    if (!found) return null
     pks.push(found.pk)
   }
   return pks
@@ -158,26 +194,29 @@ async function main(): Promise<void> {
   // Authorization flow: default "implicit consent" — one login screen, no
   // extra consent prompt (dev convenience; explicit consent is a
   // homelab-hardening choice, not a dev requirement).
-  const flows = await apiList<{ pk: string; slug: string }>(
-    "/flows/instances/?designation=authorization"
+  const authorizationFlow = await waitFor(
+    "implicit-consent authorization flow",
+    async () => {
+      const flows = await apiList<{ pk: string; slug: string }>(
+        "/flows/instances/?designation=authorization"
+      )
+      return flows.find((f) => f.slug.includes("implicit-consent")) ?? null
+    }
   )
-  const authorizationFlow = flows.find((f) =>
-    f.slug.includes("implicit-consent")
+  const invalidationFlow = await waitFor(
+    "default invalidation flow",
+    async () => {
+      const flows = await apiList<{ pk: string; slug: string }>(
+        "/flows/instances/?designation=invalidation"
+      )
+      return flows.find((f) => f.slug === "default-invalidation-flow") ?? null
+    }
   )
-  if (!authorizationFlow) {
-    die("default implicit-consent authorization flow not found")
-  }
-  const invalidationFlows = await apiList<{ pk: string; slug: string }>(
-    "/flows/instances/?designation=invalidation"
-  )
-  const invalidationFlow = invalidationFlows.find(
-    (f) => f.slug === "default-invalidation-flow"
-  )
-  if (!invalidationFlow) {
-    die("default invalidation flow not found")
-  }
 
-  const mappings = await scopeMappingPks()
+  const mappings = await waitFor(
+    "scope property mappings",
+    scopeMappingPkLookup
+  )
   const providerPayload = {
     name: "geldlage",
     client_id: clientId,
