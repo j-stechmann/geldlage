@@ -265,7 +265,7 @@ describe("get_category_totals", () => {
       userId: uid1,
       categoryId: cat1,
       amountCents: -5000,
-      bookingDate: dayFromToday(-2),
+      bookingDate: firstOfThisMonth(),
     })
     seedTx({
       userId: uid1,
@@ -277,7 +277,7 @@ describe("get_category_totals", () => {
       userId: uid1,
       categoryId: cat2,
       amountCents: -20000,
-      bookingDate: dayFromToday(-1),
+      bookingDate: firstOfThisMonth(),
     })
     // before this_month → must not count (Jan 1 style guard: use last month's first)
     seedTx({
@@ -388,13 +388,13 @@ describe("get_category_totals", () => {
       userId: uid1,
       categoryId: cat1,
       amountCents: -50,
-      bookingDate: dayFromToday(-1),
+      bookingDate: firstOfThisMonth(),
     })
     seedTx({
       userId: uid2,
       categoryId: cat1,
       amountCents: -9999,
-      bookingDate: dayFromToday(-1),
+      bookingDate: firstOfThisMonth(),
     })
 
     const r1 = (await tool.execute(
@@ -492,7 +492,7 @@ describe("get_category_totals", () => {
       userId: uid1,
       categoryId: cat1,
       amountCents: -1000,
-      bookingDate: dayFromToday(-1),
+      bookingDate: firstOfThisMonth(),
       status: "Gebucht",
     })
     // pending row in-window with a category: dashboards don't count it by
@@ -501,7 +501,7 @@ describe("get_category_totals", () => {
       userId: uid1,
       categoryId: cat1,
       amountCents: -40000,
-      bookingDate: dayFromToday(-1),
+      bookingDate: firstOfThisMonth(),
       status: "Nicht gebucht",
     })
 
@@ -519,14 +519,14 @@ describe("get_category_totals", () => {
       userId: uid1,
       categoryId: cat1,
       amountCents: -1000,
-      bookingDate: dayFromToday(-1),
+      bookingDate: firstOfThisMonth(),
       status: "Gebucht",
     })
     seedTx({
       userId: uid1,
       categoryId: cat2,
       amountCents: -40000,
-      bookingDate: dayFromToday(-1),
+      bookingDate: firstOfThisMonth(),
       status: "Nicht gebucht",
     })
 
@@ -549,14 +549,14 @@ describe("get_category_totals", () => {
       userId: uid1,
       categoryId: cat1,
       amountCents: -1000,
-      bookingDate: dayFromToday(-1),
+      bookingDate: firstOfThisMonth(),
       status: "Gebucht",
     })
     seedTx({
       userId: uid1,
       categoryId: cat1,
       amountCents: -40000,
-      bookingDate: dayFromToday(-1),
+      bookingDate: firstOfThisMonth(),
       status: "Nicht gebucht",
     })
 
