@@ -24,7 +24,10 @@ const MAX_PAGE_SIZE = 100
 
 function positiveInt(raw: string | null, fallback: number): number {
   const n = Number.parseInt(raw ?? "", 10)
-  return Number.isInteger(n) && n > 0 ? n : fallback
+  // Safe integers keep (page - 1) * pageSize representable. A larger OFFSET
+  // is bound as a REAL past SQLite's int64 range, which fails with
+  // "datatype mismatch" (an unhandled 500) instead of an empty page.
+  return Number.isSafeInteger(n) && n > 0 ? n : fallback
 }
 
 function parseStatus(raw: string | null): PlanStatus | "all" {
@@ -49,6 +52,11 @@ export async function GET(request: NextRequest) {
     positiveInt(sp.get("pageSize"), DEFAULT_PAGE_SIZE),
     MAX_PAGE_SIZE
   )
+  // The full-list lookups (calendar chip → plan row, matched-plan reverse
+  // lookup) never read `nextDueDate`, and the per-plan recurrence walk is the
+  // expensive part of a list read (docs/planning.md cost note): let them opt
+  // out explicitly instead of paying it for every plan.
+  const includeNextDue = sp.get("includeNextDue") !== "0"
 
   // Backward-compatible shape: callers that only need the full list (the
   // calendar's plan lookup and the read-time match reverse lookup) send no
@@ -70,10 +78,12 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     ...result,
-    plans: result.plans.map((plan) => ({
-      ...plan,
-      nextDueDate: nextDueDate(plan, today),
-    })),
+    plans: includeNextDue
+      ? result.plans.map((plan) => ({
+          ...plan,
+          nextDueDate: nextDueDate(plan, today),
+        }))
+      : result.plans,
   })
 }
 

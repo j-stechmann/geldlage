@@ -103,4 +103,42 @@ describe("PlansList", () => {
       expect(stub.calls.some((c) => c.url.includes("page=2"))).toBe(true)
     })
   })
+
+  it("follows the server's pageCount when the current page disappears", async () => {
+    const stub = stubFetch([
+      {
+        url: /\/api\/plans$/,
+        json: { plans: [], total: 21, page: 1, pageCount: 2 },
+        once: true,
+      },
+      {
+        // e.g. the last plan on page 2 was just deleted — page 2 is gone
+        url: /\/api\/plans$/,
+        json: { plans: [], total: 20, page: 2, pageCount: 1 },
+        once: true,
+      },
+      {
+        url: /\/api\/plans$/,
+        json: { plans: [], total: 20, page: 1, pageCount: 1 },
+      },
+    ])
+    const { container, getByRole } = renderWithQuery(<PlansList />)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("21 Pläne")
+    })
+
+    fireEvent.click(getByRole("button", { name: /Weiter/ }))
+
+    // the page-2 response reports pageCount 1 → re-request page 1 rather than
+    // rendering a permanently empty page
+    await waitFor(() => {
+      const pages = stub.calls.map((c) =>
+        new URL(c.url, "http://localhost").searchParams.get("page")
+      )
+      const pageTwo = pages.lastIndexOf("2")
+      expect(pageTwo).toBeGreaterThan(-1)
+      expect(pages.slice(pageTwo + 1)).toContain("1")
+    })
+  })
 })

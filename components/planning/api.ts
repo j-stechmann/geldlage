@@ -180,11 +180,19 @@ async function parseError(res: Response, fallback: string): Promise<ApiError> {
 
 // ── hooks ─────────────────────────────────────────────────────────────────
 
+/**
+ * Full plan list (no paging), shared by the calendar's chip → plan lookup and
+ * the matched-plan reverse lookup. `includeNextDue=0` skips the server's
+ * per-plan recurrence walk: neither consumer reads `nextDueDate`, and the
+ * paged /plans table computes it from its own page response.
+ */
+const PLANS_LOOKUP_URL = "/api/plans?includeNextDue=0"
+
 export function usePlans() {
-  return useQuery<{ plans: PlanListRow[] }>({
+  return useQuery<{ plans: PlanRow[] }>({
     queryKey: PLANS_KEY,
     queryFn: async () => {
-      const res = await apiFetch("/api/plans")
+      const res = await apiFetch(PLANS_LOOKUP_URL)
       if (!res.ok)
         throw await parseError(res, "Pläne konnten nicht geladen werden")
       return res.json()
@@ -374,12 +382,12 @@ export function useMatchedPlanForTx(ref: MatchedTxRef | null): {
       : null
   const planId = occurrence?.planId ?? null
   // the plans list only matters once a match was found — no dead request
-  // per expanded unmatched row (PLANS_KEY is the cache the board and the
+  // per expanded unmatched row (PLANS_KEY is the cache the calendar and the
   // plan dialog already share)
-  const plansQuery = useQuery<{ plans: PlanListRow[] }>({
+  const plansQuery = useQuery<{ plans: PlanRow[] }>({
     queryKey: PLANS_KEY,
     queryFn: async () => {
-      const res = await apiFetch("/api/plans")
+      const res = await apiFetch(PLANS_LOOKUP_URL)
       if (!res.ok)
         throw await parseError(res, "Pläne konnten nicht geladen werden")
       return res.json()

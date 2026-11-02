@@ -87,8 +87,12 @@ function StatusBadge({ status }: { status: PlanRow["status"] }) {
   )
 }
 
+function planTitle(plan: PlanRow): string {
+  return plan.counterparty ?? plan.purpose ?? "Geplante Transaktion"
+}
+
 function PlanName({ plan }: { plan: PlanRow }) {
-  const title = plan.counterparty ?? plan.purpose ?? "Geplante Transaktion"
+  const title = planTitle(plan)
   // only show a second line when it carries information the title doesn't
   const subtitle =
     plan.counterparty !== null && plan.purpose !== null
@@ -127,7 +131,7 @@ function PlanActions({
           <Button
             variant="ghost"
             size="icon"
-            aria-label="Aktionen"
+            aria-label={`Aktionen für ${planTitle(plan)}`}
             disabled={busy}
           >
             <MoreHorizontal className="size-4" />

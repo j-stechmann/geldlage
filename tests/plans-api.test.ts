@@ -436,6 +436,49 @@ describe("GET /api/plans", () => {
     expect((await miss.json()).total).toBe(0)
   })
 
+  it("treats LIKE metacharacters in the query as literals", async () => {
+    await seedSimplePlan({ counterparty: "Zins 2,5 % p.a." })
+    await seedSimplePlan({ counterparty: "Zinsgutschrift" })
+    await seedSimplePlan({ counterparty: "IBAN_DE02" })
+    await seedSimplePlan({ counterparty: "IBANXDE02" })
+
+    // unescaped, "%" would match every plan and "_" any single character
+    const percent = await getPlansQuery(
+      `page=1&pageSize=20&q=${encodeURIComponent("%")}`
+    )
+    const percentData = await percent.json()
+    expect(percentData.total).toBe(1)
+    expect(percentData.plans[0].counterparty).toBe("Zins 2,5 % p.a.")
+
+    const underscore = await getPlansQuery(
+      `page=1&pageSize=20&q=${encodeURIComponent("_")}`
+    )
+    const underscoreData = await underscore.json()
+    expect(underscoreData.total).toBe(1)
+    expect(underscoreData.plans[0].counterparty).toBe("IBAN_DE02")
+  })
+
+  it("skips the per-plan next-date walk when includeNextDue=0", async () => {
+    await seedSimplePlan({ counterparty: "A" })
+
+    const withNext = await (await getPlansQuery("includeNextDue=1")).json()
+    expect("nextDueDate" in withNext.plans[0]).toBe(true)
+
+    const without = await (await getPlansQuery("includeNextDue=0")).json()
+    expect(without.total).toBe(1)
+    expect("nextDueDate" in without.plans[0]).toBe(false)
+  })
+
+  it("falls back to page 1 for an unsafe page number", async () => {
+    await seedSimplePlan({ counterparty: "A" })
+    // (page - 1) * pageSize would exceed SQLite's int64 OFFSET range
+    const res = await getPlansQuery("page=1000000000000000000&pageSize=20")
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(data.page).toBe(1)
+    expect(data.plans).toHaveLength(1)
+  })
+
   it("filters by status and paginates with a stable total/pageCount", async () => {
     await seedSimplePlan({ counterparty: "A", status: "active" })
     await seedSimplePlan({ counterparty: "B", status: "paused" })

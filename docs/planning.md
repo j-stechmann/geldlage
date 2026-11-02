@@ -75,10 +75,11 @@ Indexes: `planned_transactions_user_status_idx` `(user_id, status)` and
   the 1900 floor — ~0.5 ms per year of plan age, linear in plan count per
   read (`GET /api/plans` + agent `list_plans` next-dates, calendar
   occurrences, forecast) — so the planning reads scale with the OLDEST live
-  plan rather than with plan count. The paged `/plans` table limits the
-  walk to the rows on screen (the count query computes no `nextDueDate`). If that grows: persist `next_due_date` at
-  write time and refresh drifted rows in a bounded worker-tick trickle,
-  instead of expanding per read.
+  plan rather than with plan count. The paged `/plans` table limits the walk
+  to the rows on screen (the count query computes no `nextDueDate`), and the
+  calendar/matched-plan lookups pass `includeNextDue=0`. If that grows:
+  persist `next_due_date` at write time and refresh drifted rows in a bounded
+  worker-tick trickle, instead of expanding per read.
 
 ## Occurrence matching (`lib/planning/matching.ts`)
 
@@ -150,7 +151,7 @@ writes ([api.md](api.md)):
 
 | Route                                              | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `GET /api/plans`                                   | list + `nextDueDate` per plan; `q`/`status` filter, `page`/`pageSize` (≤ 100) page the table — without paging params the full list is returned for existing consumers                                                                                                                                                                                                                                                                            |
+| `GET /api/plans`                                   | list + `nextDueDate` per plan; `q`/`status` filter, `page`/`pageSize` (≤ 100) page the table — without paging params the full list is returned for existing consumers, and `includeNextDue=0` skips the per-plan next-date walk for lookups that never read it                                                                                                                                                                                   |
 | `POST /api/plans`                                  | create; validates `amountCents ≠ 0`, `dtstart` ISO (not before 1900), RRULE allowlist + first occurrence within the bounded next-date ladder (five rungs, closing rung ≥ one Gregorian 400-year cycle — sparse-but-live rules like leap-day yearly pass; rung ends clamp at the last storable ISO date `9999-12-31`), ownership of account/category                                                                                              |
 | `PATCH /api/plans/[id]`                            | partial update; dtstart/rule changes re-check occurrence productivity                                                                                                                                                                                                                                                                                                                                                                            |
 | `DELETE /api/plans/[id]`                           | delete (no other data references plans)                                                                                                                                                                                                                                                                                                                                                                                                          |
