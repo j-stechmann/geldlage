@@ -1,5 +1,55 @@
 # Changelog
 
+## v1.23.0
+
+### Added
+
+- **planning — split `/planung` into `/calendar` and a searchable,
+  server-paged `/plans` list**: the combined planning board becomes two
+  top-level views. **`/calendar`** is the full-width plan/booking calendar
+  with the existing chip semantics (planned / booked / nicht gebucht /
+  überfällig) and error/far-window handling; its planned chips edit through
+  the shared plan dialog, "Plan anlegen" still starts a new plan there, and
+  a failed plan-list read keeps the calendar usable while chip clicks
+  refetch instead of editing stale data. **`/plans`** is a compact plan
+  table (20 rows/page, sticky header) with a debounced search over
+  counterparty/purpose/notes/account/category (case-insensitive beyond
+  ASCII via the registered `search_fold` SQL function; LIKE metacharacters
+  are literal), a status filter (Alle/Aktiv/Pausiert/Beendet) and row
+  actions (edit, pause/activate/finish, delete with confirm).
+  `GET /api/plans` accepts `q`, `status`, `page` and `pageSize` (capped at
+  100); an unknown status is a 400 instead of an unfiltered read, calls
+  without paging params keep the full-list contract for the calendar and
+  matched-plan lookups, and the count query skips the `nextDueDate`
+  recurrence walk for rows outside the returned page (`includeNextDue=0`
+  opts the lookups out entirely). `/planung` redirects to `/plans` so
+  existing links and bookmarks keep working; the nav gains Kalender and
+  Planung entries (mobile nav inherits them). The 12-month forecast summary
+  moved from the planning board to the dashboard, where it renders as a
+  card behind "Geplant einblenden" and keeps the last figures readable
+  under a failed background refetch.
+  Tests: plans-api (paging, filters, search folding/escaping, status
+  validation, safe page/offset), plans-list (empty vs. filtered, placeholder
+  and refetch guards, page follow, reset), plan-calendar-view(+chip),
+  plan-dialog-onsaved, dashboard forecast card. Docs: frontend.md,
+  planning.md, api.md, testing.md, README.
+
+### Fixed
+
+- **plan search treats `%`/`_` literally** (`GET /api/plans`, and the
+  identical helper now backs the transactions search): drizzle's `like()`
+  cannot emit an ESCAPE clause, so the shared `likeEscaped` helper matches
+  with an explicit `ESCAPE '\'` instead of letting user input act as a
+  wildcard.
+- **paging — unsafe `page`/`pageSize` values no longer reach SQLite**:
+  `/api/plans` (and the transactions list, previously `Number.isInteger`)
+  reject values outside the safe-integer range and clamp the paging window,
+  so a huge requested page cannot bind an out-of-range REAL and 500.
+- **agent-tools test — `this_month` fixtures are date-independent**: the
+  category-totals test seeded `dayFromToday(-1/-2)`, which on the 1st/2nd of
+  a month falls into the previous month; the fixtures now anchor on the
+  first of the month.
+
 ## v1.22.0
 
 ### Added
