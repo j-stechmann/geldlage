@@ -104,9 +104,11 @@ function seedPlan(overrides: Partial<typeof plannedTransactions.$inferInsert>) {
 // April planned: 1.500,00 income; 95,00 + 4×12,34 = 143,36 € (expenses)
 describe("computeForecast", () => {
   let computeForecast: (typeof import("@/lib/planning/service"))["computeForecast"]
+  let listOccurrences: (typeof import("@/lib/planning/service"))["listOccurrences"]
 
   beforeEach(async () => {
-    ;({ computeForecast } = await import("@/lib/planning/service"))
+    ;({ computeForecast, listOccurrences } =
+      await import("@/lib/planning/service"))
   })
 
   it("projects balance and planned sums to the cent", () => {
@@ -488,7 +490,7 @@ describe("computeForecast", () => {
   // and be counted ON TOP of the real-future booking — a double count.
   it("does not let a paused occurrence consume an active plan's match", () => {
     seedBatch({ snapshotDate: "2026-01-31", snapshotAmountCents: 100_000 })
-    seedTx("2026-03-20", -5_000, { payee: "Mietwerk GmbH" })
+    const txId = seedTx("2026-03-20", -5_000, { payee: "Mietwerk GmbH" })
     seedPlan({
       id: "a-paused",
       dtstart: "2026-03-20",
@@ -506,6 +508,34 @@ describe("computeForecast", () => {
       status: "active",
     })
 
+    // Direct oracle for the invariant, instead of inferring it from an empty
+    // planned sum: in the default (calendar) read the exact-date paused copy
+    // wins the booking and the active occurrence stays unmatched…
+    const withPaused = listOccurrences(userId, {
+      from: "2026-03-15",
+      to: "2026-03-31",
+    })
+    expect(
+      withPaused.find((o) => o.id === "a-paused::2026-03-20")?.matched
+    ).toMatchObject({ transactionId: txId })
+    expect(
+      withPaused.find((o) => o.id === "z-active::2026-03-21")?.matched
+    ).toBeNull()
+
+    // …while the forecast-scoped read contains ONLY the active occurrence,
+    // matched to that same booking.
+    const forecastOccurrences = listOccurrences(
+      userId,
+      { from: "2026-03-15", to: "2026-03-31" },
+      undefined,
+      { includePaused: false }
+    )
+    expect(forecastOccurrences).toHaveLength(1)
+    expect(forecastOccurrences[0]).toMatchObject({
+      id: "z-active::2026-03-21",
+      matched: { transactionId: txId },
+    })
+
     const forecast = computeForecast(userId, { months: 1, today: "2026-03-15" })
     // the active occurrence matches the real booking (−1 day, inside the
     // tolerance) → only the booking moves the projection; the paused copy is
@@ -514,6 +544,30 @@ describe("computeForecast", () => {
     expect(forecast.projectedBalance).toEqual([
       { date: "2026-03-15", balanceCents: 100_000 },
       { date: "2026-03-20", balanceCents: 95_000 },
+    ])
+  })
+
+  // Paused plans are removed before matching, so even the horizon-edge
+  // branch cannot resurrect a paused amount when its booking posts after
+  // horizonEnd (the old paused-inclusive read counted that occurrence).
+  it("drops a paused occurrence whose booking posts past horizonEnd", () => {
+    seedBatch({ snapshotDate: "2026-01-31", snapshotAmountCents: 100_000 })
+    seedPlan({
+      dtstart: "2026-01-27",
+      amountCents: -95_000,
+      rrule: "FREQ=MONTHLY;BYMONTHDAY=27",
+      counterparty: "Mietwerk GmbH",
+      status: "paused",
+    })
+    // booking posts 2026-04-02 (+6 days from the 03-27 occurrence, inside
+    // the +7 match window) — after the horizon end 2026-03-31
+    seedTx("2026-04-02", -95_000, { payee: "Mietwerk GmbH" })
+
+    const forecast = computeForecast(userId, { months: 1, today: "2026-03-15" })
+    expect(forecast.monthlyPlanned).toEqual([])
+    expect(forecast.plannedCategories).toEqual([])
+    expect(forecast.projectedBalance).toEqual([
+      { date: "2026-03-15", balanceCents: 100_000 },
     ])
   })
 
