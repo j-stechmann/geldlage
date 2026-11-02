@@ -380,6 +380,7 @@ describe("computeForecast", () => {
       dtstart: "2026-03-20",
       amountCents: -5_000,
       rrule: null,
+      categoryId: pausedCategory.id,
       status: "finished",
     })
     seedPlan({
@@ -389,15 +390,95 @@ describe("computeForecast", () => {
       categoryId: pausedCategory.id,
       status: "paused",
     })
+    // income must be excluded too — an "expenses only" filter would pass the
+    // negative fixtures above and still inflate the projection
+    seedPlan({
+      dtstart: "2026-03-22",
+      amountCents: 7_000,
+      rrule: null,
+      status: "paused",
+    })
 
     const forecast = computeForecast(userId, { months: 1, today: "2026-03-15" })
     // paused plans stay visible on the calendar but are not expected money —
-    // neither in the monthly sums nor in the category stack/shares
+    // neither in the monthly sums, the category stack nor the projection
     expect(forecast.monthlyPlanned).toEqual([])
     expect(forecast.plannedCategories).toEqual([])
     expect(forecast.projectedBalance).toEqual([
       { date: "2026-03-15", balanceCents: 100_000 },
     ])
+  })
+
+  it("computes planned category shares from active plans only", () => {
+    seedBatch({ snapshotDate: "2026-01-31", snapshotAmountCents: 100_000 })
+    const activeCategory = db
+      .insert(categories)
+      .values({
+        userId,
+        name: "Miete",
+        nameKey: "miete",
+        language: "de",
+        origin: "manual",
+        color: "#ff0000",
+      })
+      .returning()
+      .get()
+    const pausedCategory = db
+      .insert(categories)
+      .values({
+        userId,
+        name: "Pausiert",
+        nameKey: "pausiert",
+        language: "de",
+        origin: "manual",
+        color: "#999999",
+      })
+      .returning()
+      .get()
+    seedPlan({
+      dtstart: "2026-03-20",
+      amountCents: -3_000,
+      rrule: null,
+      categoryId: activeCategory.id,
+      status: "active",
+    })
+    seedPlan({
+      dtstart: "2026-03-21",
+      amountCents: -9_000,
+      rrule: null,
+      categoryId: pausedCategory.id,
+      status: "paused",
+    })
+
+    const forecast = computeForecast(userId, { months: 1, today: "2026-03-15" })
+    // the share denominator sees only the active 3.000 € — the paused 9.000 €
+    // would otherwise hold 75 % of the stack and shrink the active share
+    expect(forecast.monthlyPlanned).toEqual([
+      {
+        month: "2026-03",
+        incomeCents: 0,
+        expensesCents: 3_000,
+        netCents: -3_000,
+      },
+    ])
+    expect(forecast.plannedCategories).toEqual([
+      {
+        categoryId: activeCategory.id,
+        name: "Miete",
+        color: "#ff0000",
+        totalCents: 3_000,
+        share: 1,
+      },
+    ])
+
+    // account scoping does not bypass the paused filter: the scoped read
+    // returns the same active-only category set
+    const scoped = computeForecast(userId, {
+      months: 1,
+      today: "2026-03-15",
+      accountId,
+    })
+    expect(scoped.plannedCategories).toEqual(forecast.plannedCategories)
   })
 
   // A paused occurrence must not participate in the forecast's matching at
