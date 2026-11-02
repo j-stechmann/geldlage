@@ -1,9 +1,9 @@
 # Planning (geplante Transaktionen)
 
-Future money, planned by hand: the `/planung` page manages **virtual
-plans** — recurring (full RFC 5545 RRULE) or one-off — renders their
-occurrences on a calendar, checks them off against real bookings, and
-projects the balance. Implemented per
+Future money, planned by hand: the `/plans` page manages **virtual plans**
+— recurring (full RFC 5545 RRULE) or one-off — and `/calendar` renders their
+occurrences next to real bookings, checks them off, and projects the balance
+on the dashboard. Implemented per
 [ADR-0035](adr/adr-0035-planned-transactions-rrule.md); the design invariant
 is _not touching a single line of the analytics/import/labelling core_:
 plans are virtual, matching is read-time, the forecast is its own endpoint.
@@ -74,10 +74,12 @@ Indexes: `planned_transactions_user_status_idx` `(user_id, status)` and
   ~4 ms per read window when young, ~14 ms at a 2006 dtstart and ~68 ms at
   the 1900 floor — ~0.5 ms per year of plan age, linear in plan count per
   read (`GET /api/plans` + agent `list_plans` next-dates, calendar
-  occurrences, forecast) — so `/planung` scales with its OLDEST live plan
-  rather than with plan count. If that grows: persist `next_due_date` at
-  write time and refresh drifted rows in a bounded worker-tick trickle,
-  instead of expanding per read.
+  occurrences, forecast) — so the planning reads scale with the OLDEST live
+  plan rather than with plan count. The paged `/plans` table limits the walk
+  to the rows on screen (the count query computes no `nextDueDate`), and the
+  calendar/matched-plan lookups pass `includeNextDue=0`. If that grows:
+  persist `next_due_date` at write time and refresh drifted rows in a bounded
+  worker-tick trickle, instead of expanding per read.
 
 ## Occurrence matching (`lib/planning/matching.ts`)
 
@@ -147,15 +149,15 @@ All routes `runtime = "nodejs"`, `dynamic = "force-dynamic"`, hand-rolled
 validation (error `{error: "code", message}`), session-scoped, CSRF on
 writes ([api.md](api.md)):
 
-| Route                                              | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/plans`                                   | list + `nextDueDate` per plan                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `POST /api/plans`                                  | create; validates `amountCents ≠ 0`, `dtstart` ISO (not before 1900), RRULE allowlist + first occurrence within the bounded next-date ladder (five rungs, closing rung ≥ one Gregorian 400-year cycle — sparse-but-live rules like leap-day yearly pass; rung ends clamp at the last storable ISO date `9999-12-31`), ownership of account/category                                                                                             |
-| `PATCH /api/plans/[id]`                            | partial update; dtstart/rule changes re-check occurrence productivity                                                                                                                                                                                                                                                                                                                                                                           |
-| `DELETE /api/plans/[id]`                           | delete (no other data references plans)                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `GET /api/plans/occurrences?from&to&accountId`     | expanded window + match states; window ≤ 400 days apart _and_ within ±60 months of today (rrule expansion walks from dtstart occurrence-by-occurrence — no seek — so far windows cost CPU linear in that distance)                                                                                                                                                                                                                              |
-| `GET /api/plans/forecast?months&accountId`         | projection envelope                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `GET /api/transactions/calendar?from&to&accountId` | compact bank rows (Gebucht **and** Nicht gebucht — pending rows carry a Buchungsdatum and show dashed/hollow) for the same window; counterparty = payee (Ausgang) / payer (Eingang); same far-window contract as /occurrences (window ≤ 400 days apart _and_ within ±60 months of today, so the two /planung window reads fail together — at that distance the calendar answers with a navigation hint instead of the retry that can't succeed) |
+| Route                                              | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /api/plans`                                   | list + `nextDueDate` per plan; `q`/`status` filter (case-insensitive incl. non-ASCII, metacharacters literal), `page`/`pageSize` (≤ 100) page the table — without paging params the full list is returned for existing consumers, and `includeNextDue=0` skips the per-plan next-date walk for lookups that never read it                                                                                                                        |
+| `POST /api/plans`                                  | create; validates `amountCents ≠ 0`, `dtstart` ISO (not before 1900), RRULE allowlist + first occurrence within the bounded next-date ladder (five rungs, closing rung ≥ one Gregorian 400-year cycle — sparse-but-live rules like leap-day yearly pass; rung ends clamp at the last storable ISO date `9999-12-31`), ownership of account/category                                                                                              |
+| `PATCH /api/plans/[id]`                            | partial update; dtstart/rule changes re-check occurrence productivity                                                                                                                                                                                                                                                                                                                                                                            |
+| `DELETE /api/plans/[id]`                           | delete (no other data references plans)                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `GET /api/plans/occurrences?from&to&accountId`     | expanded window + match states; window ≤ 400 days apart _and_ within ±60 months of today (rrule expansion walks from dtstart occurrence-by-occurrence — no seek — so far windows cost CPU linear in that distance)                                                                                                                                                                                                                               |
+| `GET /api/plans/forecast?months&accountId`         | projection envelope                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `GET /api/transactions/calendar?from&to&accountId` | compact bank rows (Gebucht **and** Nicht gebucht — pending rows carry a Buchungsdatum and show dashed/hollow) for the same window; counterparty = payee (Ausgang) / payer (Eingang); same far-window contract as /occurrences (window ≤ 400 days apart _and_ within ±60 months of today, so the two /calendar window reads fail together — at that distance the calendar answers with a navigation hint instead of the retry that can't succeed) |
 
 ## Agent access
 
@@ -179,9 +181,12 @@ resolve ids via `list_plans`/`query_data` first, confirm in chat before
 
 ## Frontend
 
-German UI. `/planung` composes the ReUI EventCalendar
-([ADR-0024](adr/adr-0024-ui-stack-tailwind-shadcn-base-ui.md) Base UI twin),
-the plan list and the plan dialog. Click semantics: a **plan chip** opens
+German UI. The views split into `/plans` (the server-paged plan table with
+search, status filter, row actions and the plan dialog) and `/calendar`
+(the ReUI EventCalendar, [ADR-0024](adr/adr-0024-ui-stack-tailwind-shadcn-base-ui.md)
+Base UI twin, plus the plan dialog for chip clicks); `/planung` redirects to
+`/plans`. The dashboard's "Geplant einblenden" mode gained the forecast
+summary card. Click semantics: a **plan chip** opens
 its edit dialog; a **bank chip** opens an action dialog with the
 transactions deep link (`/transactions?tx=<id>` — the transactions table
 queries that single row by id, user-scoped and independent of any filter
@@ -210,8 +215,9 @@ from it would re-arm convert against the just-created plan) —
 converting would only duplicate the plan. Read-time matches are
 window-scoped: with near-duplicate plans, the reverse lookup and the
 calendar chip may disagree — a property of the design, not a bug. The
-dashboard gains the "Geplant einblenden"
-planned-vs-actual mode. Details in [frontend.md](frontend.md#planung).
+dashboard's "Geplant einblenden" mode overlays the planned bars/line and
+shows the forecast summary card. Details in
+[frontend.md](frontend.md#plans--planung).
 
 ## Tests
 

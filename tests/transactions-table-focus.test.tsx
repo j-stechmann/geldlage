@@ -44,7 +44,7 @@ beforeEach(() => {
     vi.fn()
 })
 
-describe("TransactionsTable focusTxId (deep link from /planung)", () => {
+describe("TransactionsTable focusTxId (deep link from /calendar)", () => {
   it("queries the single row by id, then expands and highlights it", async () => {
     const stub = stubFetch([
       {
@@ -72,7 +72,7 @@ describe("TransactionsTable focusTxId (deep link from /planung)", () => {
   it("names the miss when the focused transaction does not exist", async () => {
     // a stale/deleted deep-link target must not render the generic empty
     // listing under the "nur diese Transaktion" badge — the user clicked a
-    // concrete chip in /planung and deserves to know THAT row is gone
+    // concrete chip in /calendar and deserves to know THAT row is gone
     const stub = stubFetch([
       {
         url: /\/api\/transactions$/,

@@ -3,8 +3,9 @@
 Every page is a **client component**: the entire UI is a live dashboard
 driven by filters, polling, and toasts, with no server-rendered data
 ([ADR-0023](adr/adr-0023-client-components-react-query.md)). The only Server
-Component is `app/layout.tsx` (static shell hosting client islands: nav,
-LLM health badge, theme toggle). This Next.js version has breaking changes
+Components are `app/layout.tsx` (static shell hosting client islands: nav,
+LLM health badge, theme toggle) and the legacy `app/planung/page.tsx`
+redirect to `/plans`. This Next.js version has breaking changes
 vs. common knowledge — the vendored docs under
 `node_modules/next/dist/docs/` are the authoritative reference (see
 `AGENTS.md`).
@@ -122,20 +123,20 @@ and replaced by the persisted rows.
 Global defaults: `staleTime: 5_000`, `refetchOnWindowFocus: false` —
 deliberately conservative; only three things poll:
 
-| Query key                            | Fetches                  | Polling                                                  |
-| ------------------------------------ | ------------------------ | -------------------------------------------------------- |
-| `["analytics", params]`              | `/api/analytics?…`       | — (invalidation-driven)                                  |
-| `["transactions", params]`           | `/api/transactions?…`    | —                                                        |
-| `["labels"]`, `["categories"]`       | label/category lists     | —                                                        |
-| `["accounts"]`                       | account list (FilterBar) | —                                                        |
-| `["label-rules", labelId]`           | rules per label          | —                                                        |
-| `["label-rules", ruleId, "matches"]` | rule match preview       | live: refetched by invalidation while the dialog is open |
-| `["imports"]`                        | import history           | 5 s                                                      |
-| `["import", batchId]`                | active batch status      | **1 s, only while non-terminal**                         |
-| `["llm-health"]`                     | LLM reachability         | 30 s                                                     |
-| `["plans"]`                          | plan list                | —                                                        |
-| `["plan-occurrences", params]`       | expanded occurrences     | — (fetched per visible calendar range)                   |
-| `["forecast", params]`               | projection envelope      | — (fetched while the "Geplant" toggle is on)             |
+| Query key                            | Fetches                     | Polling                                                  |
+| ------------------------------------ | --------------------------- | -------------------------------------------------------- |
+| `["analytics", params]`              | `/api/analytics?…`          | — (invalidation-driven)                                  |
+| `["transactions", params]`           | `/api/transactions?…`       | —                                                        |
+| `["labels"]`, `["categories"]`       | label/category lists        | —                                                        |
+| `["accounts"]`                       | account list (FilterBar)    | —                                                        |
+| `["label-rules", labelId]`           | rules per label             | —                                                        |
+| `["label-rules", ruleId, "matches"]` | rule match preview          | live: refetched by invalidation while the dialog is open |
+| `["imports"]`                        | import history              | 5 s                                                      |
+| `["import", batchId]`                | active batch status         | **1 s, only while non-terminal**                         |
+| `["llm-health"]`                     | LLM reachability            | 30 s                                                     |
+| `["plans"]` / `["plans", params]`    | full list / paged plan list | —                                                        |
+| `["plan-occurrences", params]`       | expanded occurrences        | — (fetched per visible calendar range)                   |
+| `["forecast", params]`               | projection envelope         | — (fetched while the "Geplant" toggle is on)             |
 
 - **Two-phase keys**: filter/page/sort state serializes into the key
   (`["transactions", params.toString()]`), so every combination gets its own
@@ -196,7 +197,7 @@ is disambiguated from text-selection drags and double-clicks by
 instance feeds every row); the `Kategorie zuweisen` button stops
 propagation so it never toggles the row.
 
-**Deep-link focus** (`?tx=<id>`): bank chips on the /planung calendar link
+**Deep-link focus** (`?tx=<id>`): bank chips on the /calendar page link
 here with only the row id in the URL. The table then switches its query to
 the id lookup (`GET /api/transactions?id=<id>` — `queryTransactionById`,
 user-scoped, ignores every other filter/pagination state, a miss is an
@@ -276,18 +277,56 @@ from the live rules list (`rules.find(...)`), so a concurrently deleted rule
 auto-closes its dialog instead of operating on stale state. Rules are only
 created implicitly — by assigning labels in the transactions table.
 
-### `/planung`
+### `/plans` — Planung
 
-Geplante Transaktionen ([ADR-0035](adr/adr-0035-planned-transactions-rrule.md),
-guide [planning.md](planning.md)) — all UI in
+The plan CRUD list (calendar and plan list were split out of the old
+combined `/planung` board; `/planung` now redirects here). Geplante
+Transaktionen ([ADR-0035](adr/adr-0035-planned-transactions-rrule.md), guide
+[planning.md](planning.md)) — all UI in
 [components/planning/](../components/planning/):
 
-| Component                               | Role                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `components/planning/api.ts`            | DTOs, typed fetchers, React Query keys + hooks (`usePlans`, `usePlanOccurrences`, `useForecast`), mutation helpers, `describeRrule` (German RRULE summary)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `components/planning/plan-calendar.tsx` | `<EventCalendar>` composition: views `month` (default)/`agenda`, drags/resizes off (plans are edited via dialog, never dragged); THREE chip families — planned occurrences (full category color — muted when paused/matched, destructive when überfällig), real booked transactions (washed toward muted via `color-mix`, `•`-prefixed) and pending `Nicht gebucht` rows (washed further, hollow `◌` + dashed provisional outline via the chip's `chipVariant` local extension, mirroring the transactions table's pending language) — planned + bank chips fetched per visible range; `onRangeChange` feeds both queries; de locale + German i18n overrides. Click semantics: a PLAN chip opens its edit dialog; a BANK chip deep-links to `/transactions?tx=<id>` — the table queries the single row by id and expands, highlights and scrolls to it (see below) |
-| `components/planning/plans-board.tsx`   | Calendar card + plan list (active/finished), pause/activate/finish/delete actions with toasts + delete-confirm dialog; forecast summary card (Guthaben heute / Projektion / geplant netto)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `components/planning/plan-dialog.tsx`   | Create/edit: amount (German text → cents via `parseGermanAmountToCents`), direction, counterparty/purpose/notes, account + category selects, and the **RRULE builder** — frequency (Einmalig/Täglich/Wöchentlich/Monatlich/Jährlich), interval, weekday chips, monthly day-list vs. weekday-ordinal (BYDAY=1FR = "1. Fr"), yearly month chips + pattern, end condition (Nie/Am Datum — noon-anchored, so the final day stays included/Nach N). A raw RRULE input is always visible (auto-synced from the builder; direct edits take over and validate exactly like the server via `validateRrule` — an invalid raw rule disarms save inline, and the Wiederholung select tracks the raw text's FREQ so clearing it reads as "Einmalig"), the live "Vorschau" shows the next ≤ 3 dates — computed by the SAME `rrule` engine as the server                          |
+| Component                                    | Role                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `components/planning/api.ts`                 | DTOs, typed fetchers, React Query keys + hooks (`usePlans`, `usePlansPage`, `usePlanOccurrences`, `useForecast`), mutation helpers, `describeRrule` (German RRULE summary)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `components/planning/plans-list.tsx`         | Server-paged plan table: debounced search over counterparty/purpose/notes/account/category, status filter (Alle/Aktiv/Pausiert/Beendet), 20 rows per page in a scrollable sticky-header table, row actions (edit, pause/activate/finish, delete with confirm) and the shared create/edit dialog. The `count(*)` runs in the same request without the row projection, so `nextDueDate` is expanded only for the rows on screen                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `components/planning/plan-calendar-view.tsx` | `/calendar` wrapper: `PlanCalendar` plus the shared plan dialog for planned chips (looked up in `usePlans`) and a "Plan anlegen" action; the plan-list read failure surfaces a retryable ErrorState but does not take the calendar down. The chip lookup requests `includeNextDue=0`, so the full list arrives without the per-plan next-date walk                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `components/planning/plan-calendar.tsx`      | `<EventCalendar>` composition: views `month` (default)/`agenda`, drags/resizes off (plans are edited via dialog, never dragged); THREE chip families — planned occurrences (full category color — muted when paused/matched, destructive when überfällig), real booked transactions (washed toward muted via `color-mix`, `•`-prefixed) and pending `Nicht gebucht` rows (washed further, hollow `◌` + dashed provisional outline via the chip's `chipVariant` local extension, mirroring the transactions table's pending language) — planned + bank chips fetched per visible range; `onRangeChange` feeds both queries; de locale + German i18n overrides. Click semantics: a PLAN chip opens its edit dialog; a BANK chip deep-links to `/transactions?tx=<id>` — the table queries the single row by id and expands, highlights and scrolls to it (see below) |
+| `components/planning/forecast-summary.tsx`   | The 12-month projection card (`Guthaben heute` / `Projektion` / `Geplant netto über Horizont`), rendered on the dashboard behind the "Geplant einblenden" toggle                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `components/planning/plan-dialog.tsx`        | Create/edit: amount (German text → cents via `parseGermanAmountToCents`), direction, counterparty/purpose/notes, account + category selects, and the **RRULE builder** — frequency (Einmalig/Täglich/Wöchentlich/Monatlich/Jährlich), interval, weekday chips, monthly day-list vs. weekday-ordinal (BYDAY=1FR = "1. Fr"), yearly month chips + pattern, end condition (Nie/Am Datum — noon-anchored, so the final day stays included/Nach N). A raw RRULE input is always visible (auto-synced from the builder; direct edits take over and validate exactly like the server via `validateRrule` — an invalid raw rule disarms save inline, and the Wiederholung select tracks the raw text's FREQ so clearing it reads as "Einmalig"), the live "Vorschau" shows the next ≤ 3 dates — computed by the SAME `rrule` engine as the server                          |
+
+**Search & paging** are server-side (`GET /api/plans?q&status&page&pageSize`,
+page size capped at 100): the list only serializes its state into the query
+string, resets to page 1 on a filter change or a successful create (clearing
+the active search/status so the new plan is visible), and follows the server's
+`pageCount` when a delete (or a status change) empties the last page. A failed
+background refetch keeps the cached rows readable but surfaces the retryable
+ErrorState rather than reading as success, and the row actions stay disarmed
+while that banner is up so a stale row cannot be mutated. The same guard
+covers the previous query's placeholder rows while a page/filter transition
+is still loading (row actions and "Weiter" are disabled, "Zurück" stays open so
+a stalled transition is escapable, and the count/pager figures show "…" until
+the new key answers), so an action can never target a row or page that belongs
+to the query being replaced. Search is
+case-insensitive across non-ASCII text too (the shared `search_fold` SQL
+function — SQLite's `LIKE` folds ASCII only), and its metacharacters (`%`/`_`)
+are literal, not wildcards. Calls without paging
+params still receive the full list — the calendar's plan lookup and the
+read-time match reverse lookup depend on that contract; those lookups add
+`includeNextDue=0` since they never read `nextDueDate`, which keeps the
+per-plan next-date walk confined to the `/plans` page rows (plus the agent's
+unpaged `list_plans`).
+
+### `/calendar` — Kalender
+
+The calendar half of the former `/planung` board, full-width. Same
+occurrence semantics as above; the legend (planned/banked/pending/overdue)
+lives in the page header, and "Plan anlegen" opens the shared plan dialog in
+create mode. Window reads are per visible range; a failed read keeps the
+retryable banner, while a window beyond ±60 months of today shows the
+navigation hint instead of a dead retry. A failed plan-list read keeps the
+calendar and "Plan anlegen" usable; a chip click then refetches instead of
+opening the editor from the stale cached list (the /plans row actions stay
+disarmed in the same situation).
 
 **Occurrence semantics**: the server expands (single source of truth); the
 calendar renders and reports states — `erwartet` (chip by category color),
@@ -319,11 +358,13 @@ Ist bars keep the pre-planning grouped layout, and segments with zero
 planned money are omitted instead of rendering 0-value bars/tooltip rows),
 and the categories chart stacks
 planned expenses (translucent, per-category color) on top of the actual
-bars. The toggle row shows the projected horizon balance. Content filters
-(q/type/category/…) stay out of the money anchored on snapshots — same
+bars. When the forecast read lands, the `ForecastSummary` card (Guthaben
+heute / Projektion / Geplant netto über Horizont) renders above the chart grid. Content
+filters (q/type/category/…) stay out of the money anchored on snapshots — same
 rationale as the balance ([analytics.md](analytics.md)). A failed forecast
 read under an active toggle surfaces the ErrorState + retry pattern
-instead of reading as silently "no plans". The forecast hook serves no
+instead of reading as silently "no plans"; the same banner appears when a
+later refetch fails over cached figures (the last card stays readable). The forecast hook serves no
 cross-account placeholder data: switching the account filter blanks the
 projection figures and chart overlay until the differently scoped read
 lands, instead of briefly attributing the previous account's numbers to

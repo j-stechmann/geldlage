@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   if (!session) return unauthorized()
   const sp = request.nextUrl.searchParams
 
-  // precise single-row lookup (deep link from /planung): short-circuits all
+  // precise single-row lookup (deep link from /calendar): short-circuits all
   // filter/pagination handling — a miss is an empty page, never a leak
   const id = sp.get("id")?.trim()
   if (id) {
@@ -24,10 +24,10 @@ export async function GET(request: NextRequest) {
   const filters = parseFilters(sp)
 
   const pageRaw = Number.parseInt(sp.get("page") ?? "1", 10)
-  const page = Number.isInteger(pageRaw) && pageRaw > 0 ? pageRaw : 1
+  const page = Number.isSafeInteger(pageRaw) && pageRaw > 0 ? pageRaw : 1
   const pageSizeRaw = Number.parseInt(sp.get("pageSize") ?? "25", 10)
   const pageSize =
-    Number.isInteger(pageSizeRaw) && pageSizeRaw > 0
+    Number.isSafeInteger(pageSizeRaw) && pageSizeRaw > 0
       ? Math.min(pageSizeRaw, 100)
       : 25
 

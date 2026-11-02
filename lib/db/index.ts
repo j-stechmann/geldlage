@@ -8,6 +8,7 @@ import { users as usersTable } from "./schema"
 import { getConfig } from "@/lib/config"
 import { pickCategoryColor } from "@/lib/category-colors"
 import { DEFAULT_THREAD_TITLE } from "@/lib/agent/constants"
+import { registerSqlFunctions } from "./search"
 
 export type Db = ReturnType<typeof createDb>
 /** Transaction callback parameter type (for helpers receiving `tx`). */
@@ -62,6 +63,10 @@ const globalRef = globalThis as unknown as {
 
 export function getDb(): Db {
   if (process.env.VITEST && globalRef.__geldlageTestDb) {
+    // injected handles normally come from createTestDb()/createSchemaSqlite,
+    // which already registered; the WeakSet makes this free and covers a raw
+    // drizzle handle injected by a future test
+    registerSqlFunctions(globalRef.__geldlageTestDb.$client)
     return globalRef.__geldlageTestDb
   }
   if (!globalRef.__geldlageDbHolder) {
@@ -72,6 +77,10 @@ export function getDb(): Db {
     holder.__geldlageDb = createDb()
     createSchemaSqlite(holder.__geldlageDb)
   }
+  // The global holder survives Next dev hot reloads, so a handle created by
+  // an older module (before search_fold existed) would otherwise never gain
+  // the function. One-time per connection via the WeakSet in search.ts.
+  registerSqlFunctions(holder.__geldlageDb.$client)
   // cheap idempotent re-check so a hot-reloaded schema heals the file DB
   migrateSchema(holder.__geldlageDb)
   return holder.__geldlageDb
@@ -97,6 +106,9 @@ export function createTestDb(): Db {
 
 /** Create all tables idempotently (drizzle-kit push equivalent, code-first). */
 export function createSchemaSqlite(db: Db) {
+  // Connection-level SQL functions (search_fold for LIKE search) must exist
+  // before the first query, not just before the first table write.
+  registerSqlFunctions(db.$client)
   dropLegacyUserlessTables(db)
   db.run(`
     CREATE TABLE IF NOT EXISTS users (

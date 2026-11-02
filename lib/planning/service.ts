@@ -3,9 +3,10 @@
  * read-time matching, and the forecast. All reads/writes are user-scoped
  * like every other domain table. Money stays integer cents (ADR-0002).
  */
-import { and, eq, inArray, sql } from "drizzle-orm"
+import { and, eq, inArray, or, sql } from "drizzle-orm"
 import type { SQL } from "drizzle-orm"
-import { getDb } from "@/lib/db"
+import { getDb, type Db } from "@/lib/db"
+import { escapeLike, likeEscapedFolded } from "@/lib/db/search"
 import {
   accounts,
   categories,
@@ -55,7 +56,7 @@ export const MAX_OCCURRENCE_WINDOW_DAYS = 400
  * window would make every recurring plan cost CPU linear in that distance
  * on every read (measured: ~0.6 s per DAILY plan for a window at year
  * 2999, ~6 s at 9999). Everything that actually queries occurrences stays
- * far inside: the /planung calendar navigates month-sized windows.
+ * far inside: the /calendar page navigates month-sized windows.
  */
 export const MAX_WINDOW_DISTANCE_DAYS = 1826
 /** forecast horizon cap (months) */
@@ -293,8 +294,7 @@ export interface PlanRow {
   updatedAt: string
 }
 
-function planRowsQuery() {
-  const db = getDb()
+function planRowsQuery(db: Db = getDb()) {
   return db
     .select({
       id: plannedTransactions.id,
@@ -318,18 +318,110 @@ function planRowsQuery() {
     .leftJoin(categories, eq(categories.id, plannedTransactions.categoryId))
 }
 
+/** Stable newest-first order shared by the full list and the paged list. */
+const PLAN_LIST_ORDER = [
+  sql`${plannedTransactions.createdAt} DESC`,
+  // stable total order: same-instant createdAt ties (two rows written
+  // within one millisecond) must not shuffle between requests — the id
+  // is unique, so this closes the tie for good. Consumed by the plan list
+  // and planSummaries' "newest-first" cap alike.
+  sql`${plannedTransactions.id} DESC`,
+] as const
+
+function planListWhere(userId: number, filters: PlanListFilters = {}): SQL {
+  const conditions: SQL[] = [eq(plannedTransactions.userId, userId)]
+  if (filters.status !== undefined && filters.status !== "all") {
+    conditions.push(eq(plannedTransactions.status, filters.status))
+  }
+  const q = filters.q?.trim()
+  if (q) {
+    // The columns' contents are free bank text (counterparty/purpose/notes);
+    // account + category names are joined in so the search can target any
+    // list column. likeEscapedFolded() folds case for the whole alphabet
+    // (SQLite's LIKE folds ASCII only) and treats "%"/"_" literally; the plan
+    // set is small, so the per-row fold is cheap.
+    const pattern = `%${escapeLike(q)}%`
+    conditions.push(
+      or(
+        likeEscapedFolded(plannedTransactions.counterparty, pattern),
+        likeEscapedFolded(plannedTransactions.purpose, pattern),
+        likeEscapedFolded(plannedTransactions.notes, pattern),
+        likeEscapedFolded(accounts.name, pattern),
+        likeEscapedFolded(categories.name, pattern)
+      )!
+    )
+  }
+  return and(...conditions)!
+}
+
+export interface PlanListFilters {
+  /** free-text search over counterparty/purpose/notes/account/category */
+  q?: string
+  status?: PlanStatus | "all"
+}
+
+export interface PlanPage {
+  plans: PlanRow[]
+  total: number
+  page: number
+  pageCount: number
+}
+
 export function listPlans(userId: number): PlanRow[] {
   return planRowsQuery()
     .where(eq(plannedTransactions.userId, userId))
-    .orderBy(
-      sql`${plannedTransactions.createdAt} DESC`,
-      // stable total order: same-instant createdAt ties (two rows written
-      // within one millisecond) must not shuffle between requests — the id
-      // is unique, so this closes the tie for good. Consumed by the board's
-      // plan cards and planSummaries' "newest-first" cap alike.
-      sql`${plannedTransactions.id} DESC`
-    )
+    .orderBy(...PLAN_LIST_ORDER)
     .all()
+}
+
+/**
+ * Filtered but unpaginated variant — the legacy `GET /api/plans` shape keeps
+ * returning the whole user's list when none of the paging params are set.
+ */
+export function listPlansFiltered(
+  userId: number,
+  filters: PlanListFilters = {}
+): PlanRow[] {
+  return planRowsQuery()
+    .where(planListWhere(userId, filters))
+    .orderBy(...PLAN_LIST_ORDER)
+    .all()
+}
+
+/**
+ * Server-side page for the /plans table. The count runs without the row
+ * projection, and `nextDueDate` is computed by the route only for the rows
+ * on the returned page — the per-plan recurrence walk is the expensive part
+ * (docs/planning.md cost note).
+ */
+export function listPlansPage(
+  userId: number,
+  filters: PlanListFilters,
+  page: number,
+  pageSize: number
+): PlanPage {
+  const db = getDb()
+  const where = planListWhere(userId, filters)
+  const total =
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(plannedTransactions)
+      .leftJoin(accounts, eq(accounts.id, plannedTransactions.accountId))
+      .leftJoin(categories, eq(categories.id, plannedTransactions.categoryId))
+      .where(where)
+      .get()?.count ?? 0
+  const plans = planRowsQuery(db)
+    .where(where)
+    .orderBy(...PLAN_LIST_ORDER)
+    .limit(pageSize)
+    .offset((page - 1) * pageSize)
+    .all()
+  return {
+    plans,
+    total,
+    page,
+    pageCount: Math.max(1, Math.ceil(total / pageSize)),
+  }
 }
 
 export function getPlan(userId: number, planId: string): PlanRow | null {

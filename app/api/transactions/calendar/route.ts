@@ -15,7 +15,7 @@ export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
 /**
- * Compact booked transactions for a calendar window — what the /planung
+ * Compact booked transactions for a calendar window — what the /calendar
  * calendar renders as "real" chips beside the planned occurrences. Not
  * paginated (the window cap bounds it); booked rows only.
  */
@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
     )
   }
   // Distance cap BEFORE the width cap — the same input contract as GET
-  // /api/plans/occurrences: the /planung calendar navigates month-sized
+  // /api/plans/occurrences: the /calendar page navigates month-sized
   // windows near today, and the two window reads must fail TOGETHER (the
   // calendar pair shares one ErrorState, so a far-enough navigation would
   // otherwise 400 the occurrences endpoint while the calendar still served

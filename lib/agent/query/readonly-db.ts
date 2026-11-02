@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3"
 import * as schema from "@/lib/db/schema"
 import { getConfig } from "@/lib/config"
 import { getDb, type Db } from "@/lib/db"
+import { registerSqlFunctions } from "@/lib/db/search"
 
 /**
  * Read-only database access for the query DSL (ADR-0034). The tool reads
@@ -31,6 +32,10 @@ export function createReadOnlyDb(dbPath: string): Db {
   // File-level `readonly: true` already refuses writes; query_only also
   // blocks pragmas/mutations through any future code path that shares it.
   sqlite.pragma("query_only = ON")
+  // Same connection-level helpers as the write handle (search_fold). Nothing
+  // on the agent query path uses it today, but a read routed here later must
+  // not 500 with "no such function".
+  registerSqlFunctions(sqlite)
   return drizzle(sqlite, { schema })
 }
 
@@ -64,6 +69,7 @@ export function getReadOnlyDb(): Db {
         "test setup: setReadOnlyTestDb(createReadOnlyDb(<file db>)) required before reading (a writable getDb() fallback would void the readonly guarantee)"
       )
     }
+    registerSqlFunctions(globalRef.__geldlageReadOnlyTestDb.$client)
     return globalRef.__geldlageReadOnlyTestDb
   }
   if (!globalRef.__geldlageReadOnlyDb) {
@@ -75,6 +81,9 @@ export function getReadOnlyDb(): Db {
     getDb()
     globalRef.__geldlageReadOnlyDb = createReadOnlyDb(dbPath)
   }
+  // Mirror getDb(): the cached handle can outlive a dev hot reload, so make
+  // sure a connection created by an older module still gets search_fold.
+  registerSqlFunctions(globalRef.__geldlageReadOnlyDb.$client)
   return globalRef.__geldlageReadOnlyDb
 }
 

@@ -73,7 +73,7 @@ function TransactionsPageInner() {
 
       <FilterBar filters={filters} onChange={setFilters} />
 
-      {/* `?tx=<id>` deep link (from the /planung calendar): the table queries
+      {/* `?tx=<id>` deep link (from the /calendar page): the table queries
           exactly that row by id (user-scoped, independent of the filters)
           and expands + highlights it */}
       <TransactionsTable filters={filters} focusTxId={searchParams.get("tx")} />
