@@ -250,7 +250,11 @@ export const queryTables: Record<string, QueryTableDef> = {
         plannedTransactions.rrule,
         "RFC-5545-RRULE ohne DTSTART; NULL = einmalig am dtstart"
       ),
-      status: col("text", plannedTransactions.status, "active|paused|finished"),
+      status: col(
+        "text",
+        plannedTransactions.status,
+        "active|paused|finished; paused: sichtbar, zählt nicht für die Prognose"
+      ),
       notes: col("text", plannedTransactions.notes),
       created_at: col("text", plannedTransactions.createdAt),
       updated_at: col("text", plannedTransactions.updatedAt),

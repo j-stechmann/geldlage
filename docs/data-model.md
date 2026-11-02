@@ -175,20 +175,20 @@ the recurrence engine, matching and forecast live in
 **Never inserted into `transactions`** — expansion + read-time matching
 compute everything per request ([ADR-0035](adr/adr-0035-planned-transactions-rrule.md)).
 
-| Column                      | Type                    | Notes                                                                               |
-| --------------------------- | ----------------------- | ----------------------------------------------------------------------------------- |
-| `id`                        | TEXT PK                 | UUID                                                                                |
-| `user_id`                   | INTEGER FK → users      | owning user                                                                         |
-| `account_id`                | INTEGER FK → accounts   | nullable — NULL = "any account"                                                     |
-| `counterparty`              | TEXT                    | free text; drives the occurrence match (normalized substring vs. payer/payee)       |
-| `purpose`                   | TEXT                    | free text                                                                           |
-| `amount_cents`              | INTEGER NOT NULL        | signed ([ADR-0002](adr/adr-0002-integer-cents.md)); CHECK `<> 0`                    |
-| `category_id`               | INTEGER FK → categories | nullable                                                                            |
-| `dtstart`                   | TEXT NOT NULL           | first occurrence, ISO `YYYY-MM-DD`                                                  |
-| `rrule`                     | TEXT                    | bare RFC 5545 RRULE (allowlisted parts, caps); **NULL = one-off on `dtstart`**      |
-| `status`                    | TEXT NOT NULL           | `active / paused / finished` — CHECK enforced (`planned_transactions_status_check`) |
-| `notes`                     | TEXT                    |                                                                                     |
-| `created_at` / `updated_at` | TEXT ISO                |                                                                                     |
+| Column                      | Type                    | Notes                                                                                                                                                                                             |
+| --------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                        | TEXT PK                 | UUID                                                                                                                                                                                              |
+| `user_id`                   | INTEGER FK → users      | owning user                                                                                                                                                                                       |
+| `account_id`                | INTEGER FK → accounts   | nullable — NULL = "any account"                                                                                                                                                                   |
+| `counterparty`              | TEXT                    | free text; drives the occurrence match (normalized substring vs. payer/payee)                                                                                                                     |
+| `purpose`                   | TEXT                    | free text                                                                                                                                                                                         |
+| `amount_cents`              | INTEGER NOT NULL        | signed ([ADR-0002](adr/adr-0002-integer-cents.md)); CHECK `<> 0`                                                                                                                                  |
+| `category_id`               | INTEGER FK → categories | nullable                                                                                                                                                                                          |
+| `dtstart`                   | TEXT NOT NULL           | first occurrence, ISO `YYYY-MM-DD`                                                                                                                                                                |
+| `rrule`                     | TEXT                    | bare RFC 5545 RRULE (allowlisted parts, caps); **NULL = one-off on `dtstart`**                                                                                                                    |
+| `status`                    | TEXT NOT NULL           | `active / paused / finished` — CHECK enforced (`planned_transactions_status_check`); paused stays visible on the calendar and plan list but is excluded from the forecast, finished never expands |
+| `notes`                     | TEXT                    |                                                                                                                                                                                                   |
+| `created_at` / `updated_at` | TEXT ISO                |                                                                                                                                                                                                   |
 
 Indexes: `planned_transactions_user_status_idx` `(user_id, status)`,
 `planned_transactions_account_idx` `(account_id)`.

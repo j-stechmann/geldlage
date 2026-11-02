@@ -356,7 +356,8 @@ describe("update_plan", () => {
     expect(res.plan.amount_cents).toBe(-90000)
     expect(res.plan.status).toBe("paused")
     expect(res.plan.counterparty).toBe("Alt GmbH")
-    // Paused plans still expand — a next date stays computed.
+    // Paused plans still expand for the calendar/list — a next date stays
+    // computed even though the forecast excludes them.
     expect(res.plan.next_due_date).not.toBeNull()
     const stored = getPlan(userId, plan.id)!
     expect(stored.amountCents).toBe(-90000)

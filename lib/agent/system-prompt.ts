@@ -47,6 +47,8 @@ export function agentSystemPrompt(
     s +=
       "- delete_plan löscht endgültig: bitte kurz bestätigen, bevor du löschst; zum nur-Beenden genügt update_plan mit status „finished“.\n"
     s +=
+      "- Pausierte Pläne bleiben sichtbar, zählen aber nicht für die Prognose; beendete Pläne haben keine weiteren Termine.\n"
+    s +=
       "- Melde nach jedem Schreibvorgang knapp, was getan wurde (Betrag, Termin, Rhythmus/Status).\n"
   }
   // query_data reference: generated from the query catalog so the prompt

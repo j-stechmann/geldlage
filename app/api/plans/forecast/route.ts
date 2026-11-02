@@ -7,8 +7,9 @@ export const dynamic = "force-dynamic"
 
 /**
  * Balance + cashflow projection from real booked data and planned
- * occurrences (ADR-0035) — the third analytics scope, deliberately its own
- * endpoint so computeAnalytics and its two-scope invariant stay untouched.
+ * occurrences of active plans (ADR-0035) — the third analytics scope,
+ * deliberately its own endpoint so computeAnalytics and its two-scope
+ * invariant stay untouched.
  */
 export async function GET(request: NextRequest) {
   const session = await requireSession(request)

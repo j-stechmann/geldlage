@@ -104,9 +104,11 @@ function seedPlan(overrides: Partial<typeof plannedTransactions.$inferInsert>) {
 // April planned: 1.500,00 income; 95,00 + 4×12,34 = 143,36 € (expenses)
 describe("computeForecast", () => {
   let computeForecast: (typeof import("@/lib/planning/service"))["computeForecast"]
+  let listOccurrences: (typeof import("@/lib/planning/service"))["listOccurrences"]
 
   beforeEach(async () => {
-    ;({ computeForecast } = await import("@/lib/planning/service"))
+    ;({ computeForecast, listOccurrences } =
+      await import("@/lib/planning/service"))
   })
 
   it("projects balance and planned sums to the cent", () => {
@@ -362,24 +364,228 @@ describe("computeForecast", () => {
     expect(forecast.startingBalanceCents).toBe(300_000 - 50_000)
   })
 
-  it("finished and paused plans behave: finished never expands, paused does", () => {
+  it("finished and paused plans never enter the projection", () => {
     seedBatch({ snapshotDate: "2026-01-31", snapshotAmountCents: 100_000 })
+    const pausedCategory = db
+      .insert(categories)
+      .values({
+        userId,
+        name: "Pausiert",
+        nameKey: "pausiert",
+        language: "de",
+        origin: "manual",
+        color: "#999999",
+      })
+      .returning()
+      .get()
     seedPlan({
       dtstart: "2026-03-20",
       amountCents: -5_000,
       rrule: null,
+      categoryId: pausedCategory.id,
       status: "finished",
     })
     seedPlan({
       dtstart: "2026-03-21",
       amountCents: -6_000,
       rrule: null,
+      categoryId: pausedCategory.id,
+      status: "paused",
+    })
+    // income must be excluded too — an "expenses only" filter would pass the
+    // negative fixtures above and still inflate the projection
+    seedPlan({
+      dtstart: "2026-03-22",
+      amountCents: 7_000,
+      rrule: null,
       status: "paused",
     })
 
     const forecast = computeForecast(userId, { months: 1, today: "2026-03-15" })
-    expect(forecast.monthlyPlanned).toHaveLength(1)
-    expect(forecast.monthlyPlanned[0]?.expensesCents).toBe(6_000)
+    // paused plans stay visible on the calendar but are not expected money —
+    // neither in the monthly sums, the category stack nor the projection
+    expect(forecast.monthlyPlanned).toEqual([])
+    expect(forecast.plannedCategories).toEqual([])
+    expect(forecast.projectedBalance).toEqual([
+      { date: "2026-03-15", balanceCents: 100_000 },
+    ])
+  })
+
+  it("computes planned category shares from active plans only", () => {
+    seedBatch({ snapshotDate: "2026-01-31", snapshotAmountCents: 100_000 })
+    const activeCategory = db
+      .insert(categories)
+      .values({
+        userId,
+        name: "Miete",
+        nameKey: "miete",
+        language: "de",
+        origin: "manual",
+        color: "#ff0000",
+      })
+      .returning()
+      .get()
+    const pausedCategory = db
+      .insert(categories)
+      .values({
+        userId,
+        name: "Pausiert",
+        nameKey: "pausiert",
+        language: "de",
+        origin: "manual",
+        color: "#999999",
+      })
+      .returning()
+      .get()
+    seedPlan({
+      dtstart: "2026-03-20",
+      amountCents: -3_000,
+      rrule: null,
+      categoryId: activeCategory.id,
+      status: "active",
+    })
+    seedPlan({
+      dtstart: "2026-03-21",
+      amountCents: -9_000,
+      rrule: null,
+      categoryId: pausedCategory.id,
+      status: "paused",
+    })
+
+    const forecast = computeForecast(userId, { months: 1, today: "2026-03-15" })
+    // the share denominator sees only the active 3.000 € — the paused 9.000 €
+    // would otherwise hold 75 % of the stack and shrink the active share
+    expect(forecast.monthlyPlanned).toEqual([
+      {
+        month: "2026-03",
+        incomeCents: 0,
+        expensesCents: 3_000,
+        netCents: -3_000,
+      },
+    ])
+    expect(forecast.plannedCategories).toEqual([
+      {
+        categoryId: activeCategory.id,
+        name: "Miete",
+        color: "#ff0000",
+        totalCents: 3_000,
+        share: 1,
+      },
+    ])
+
+    // account scoping does not bypass the paused filter: the scoped read
+    // still sees only the active category (cross-account isolation itself is
+    // covered by the dedicated account-scoping test above)
+    const scoped = computeForecast(userId, {
+      months: 1,
+      today: "2026-03-15",
+      accountId,
+    })
+    expect(scoped.monthlyPlanned).toEqual([
+      {
+        month: "2026-03",
+        incomeCents: 0,
+        expensesCents: 3_000,
+        netCents: -3_000,
+      },
+    ])
+    expect(scoped.plannedCategories).toEqual([
+      {
+        categoryId: activeCategory.id,
+        name: "Miete",
+        color: "#ff0000",
+        totalCents: 3_000,
+        share: 1,
+      },
+    ])
+  })
+
+  // A paused occurrence must not participate in the forecast's matching at
+  // all: pause its occurrence ON the booking date and give the active plan a
+  // worse +/-1-day fit, so the paused one would win on match quality alone.
+  // If it still claimed the row, the active occurrence would stay unmatched
+  // and be counted ON TOP of the real-future booking — a double count.
+  it("does not let a paused occurrence consume an active plan's match", () => {
+    seedBatch({ snapshotDate: "2026-01-31", snapshotAmountCents: 100_000 })
+    const txId = seedTx("2026-03-20", -5_000, { payee: "Mietwerk GmbH" })
+    seedPlan({
+      id: "a-paused",
+      dtstart: "2026-03-20",
+      amountCents: -5_000,
+      rrule: null,
+      counterparty: "Mietwerk GmbH",
+      status: "paused",
+    })
+    seedPlan({
+      id: "z-active",
+      dtstart: "2026-03-21",
+      amountCents: -5_000,
+      rrule: null,
+      counterparty: "Mietwerk GmbH",
+      status: "active",
+    })
+
+    // Direct oracle for the invariant, instead of inferring it from an empty
+    // planned sum: in the default (calendar) read the exact-date paused copy
+    // wins the booking and the active occurrence stays unmatched…
+    const withPaused = listOccurrences(userId, {
+      from: "2026-03-15",
+      to: "2026-03-31",
+    })
+    expect(
+      withPaused.find((o) => o.id === "a-paused::2026-03-20")?.matched
+    ).toMatchObject({ transactionId: txId })
+    expect(
+      withPaused.find((o) => o.id === "z-active::2026-03-21")?.matched
+    ).toBeNull()
+
+    // …while the forecast-scoped read contains ONLY the active occurrence,
+    // matched to that same booking.
+    const forecastOccurrences = listOccurrences(
+      userId,
+      { from: "2026-03-15", to: "2026-03-31" },
+      undefined,
+      { includePaused: false }
+    )
+    expect(forecastOccurrences).toHaveLength(1)
+    expect(forecastOccurrences[0]).toMatchObject({
+      id: "z-active::2026-03-21",
+      matched: { transactionId: txId },
+    })
+
+    const forecast = computeForecast(userId, { months: 1, today: "2026-03-15" })
+    // the active occurrence matches the real booking (−1 day, inside the
+    // tolerance) → only the booking moves the projection; the paused copy is
+    // ignored entirely
+    expect(forecast.monthlyPlanned).toEqual([])
+    expect(forecast.projectedBalance).toEqual([
+      { date: "2026-03-15", balanceCents: 100_000 },
+      { date: "2026-03-20", balanceCents: 95_000 },
+    ])
+  })
+
+  // Paused plans are removed before matching, so even the horizon-edge
+  // branch cannot resurrect a paused amount when its booking posts after
+  // horizonEnd (the old paused-inclusive read counted that occurrence).
+  it("drops a paused occurrence whose booking posts past horizonEnd", () => {
+    seedBatch({ snapshotDate: "2026-01-31", snapshotAmountCents: 100_000 })
+    seedPlan({
+      dtstart: "2026-01-27",
+      amountCents: -95_000,
+      rrule: "FREQ=MONTHLY;BYMONTHDAY=27",
+      counterparty: "Mietwerk GmbH",
+      status: "paused",
+    })
+    // booking posts 2026-04-02 (+6 days from the 03-27 occurrence, inside
+    // the +7 match window) — after the horizon end 2026-03-31
+    seedTx("2026-04-02", -95_000, { payee: "Mietwerk GmbH" })
+
+    const forecast = computeForecast(userId, { months: 1, today: "2026-03-15" })
+    expect(forecast.monthlyPlanned).toEqual([])
+    expect(forecast.plannedCategories).toEqual([])
+    expect(forecast.projectedBalance).toEqual([
+      { date: "2026-03-15", balanceCents: 100_000 },
+    ])
   })
 
   it("months clamps into [1, 60] and invalid input falls back to 12", () => {
