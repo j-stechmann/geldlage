@@ -119,10 +119,16 @@ describe("dashboard forecast toggle failure surface", () => {
       expect(container.textContent).toContain("Kontostand über Zeit")
     })
     expect(container.textContent).not.toContain(ERROR_TEXT)
+    // the summary card belongs to the planned mode only
+    expect(container.textContent).not.toContain("Guthaben heute")
     fireEvent.click(toggleButton())
     await waitFor(() => {
       expect(container.textContent).toContain("Projektion")
     })
+    // the moved ForecastSummary card carries the figure labels (the old
+    // /planung board's card now renders on the dashboard)
+    expect(container.textContent).toContain("Guthaben heute")
+    expect(container.textContent).toContain("Geplant netto über Horizont")
     expect(container.textContent).not.toContain(ERROR_TEXT)
     expect(
       stub.calls.filter((c) => c.url.split("?")[0] === "/api/plans/forecast")

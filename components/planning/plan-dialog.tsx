@@ -1042,9 +1042,9 @@ export function PlanDialog({
       }
       toast.success(isEdit ? "Plan aktualisiert" : "Plan erstellt")
       // the app runs staleTime 5s + refetchOnWindowFocus:false — without
-      // this fan-out the board, calendar chips, forecast card and the
+      // this fan-out the plan list, calendar chips, forecast card and the
       // dashboard overlay keep showing pre-mutation data until the
-      // affected queries remount (navigate away and back). The board's own
+      // affected queries remount (navigate away and back). The list's own
       // status-toggle/delete paths already fan out the same way.
       invalidatePlans(queryClient)
       onSaved?.(!isEdit)

@@ -383,7 +383,7 @@ export function useMatchedPlanForTx(ref: MatchedTxRef | null): {
   const planId = occurrence?.planId ?? null
   // the plans list only matters once a match was found — no dead request
   // per expanded unmatched row (PLANS_KEY is the cache the calendar and the
-  // plan dialog already share)
+  // transactions table already share)
   const plansQuery = useQuery<{ plans: PlanRow[] }>({
     queryKey: PLANS_KEY,
     queryFn: async () => {
