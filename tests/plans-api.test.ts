@@ -69,6 +69,9 @@ function deletePlan(id: string, uid: number = userId) {
 function getPlansRow(uid: number = userId) {
   return authedRequest(`${BASE}/api/plans`, uid).then(getPlans)
 }
+function getPlansQuery(query: string, uid: number = userId) {
+  return authedRequest(`${BASE}/api/plans?${query}`, uid).then(getPlans)
+}
 function getOccurrences(query: string, uid: number = userId) {
   return authedRequest(`${BASE}/api/plans/occurrences?${query}`, uid).then(
     getOccurrencesRoute
@@ -397,6 +400,247 @@ describe("GET /api/plans", () => {
       "plan-b-tie",
       "plan-a-tie",
     ])
+  })
+
+  it("searches counterparty, purpose, notes, account and category names", async () => {
+    await seedSimplePlan({
+      counterparty: "Mietwerk GmbH",
+      purpose: "Miete Januar",
+      notes: "Dauerauftrag",
+      accountId,
+      categoryId,
+    })
+    await seedSimplePlan({
+      counterparty: "Stadtwerke",
+      purpose: "Abschlag Strom",
+      notes: null,
+    })
+
+    for (const q of [
+      "mietwerk",
+      "MIETE JANUAR",
+      "dauerauftrag",
+      "Girokonto",
+      "Miete",
+    ]) {
+      const res = await getPlansQuery(
+        `page=1&pageSize=20&q=${encodeURIComponent(q)}`
+      )
+      expect(res.status).toBe(200)
+      const data = await res.json()
+      expect(data.total).toBe(1)
+      expect(data.plans[0].counterparty).toBe("Mietwerk GmbH")
+    }
+
+    // category-only match: the loop's "Miete" also appears in the purpose, so
+    // it would still pass if the categories join/search were removed
+    const categoryOnlyId = db
+      .insert(categories)
+      .values({
+        userId,
+        name: "Nebenkosten",
+        nameKey: "nebenkosten",
+        language: "de",
+        origin: "manual",
+      })
+      .returning()
+      .get().id
+    await seedSimplePlan({
+      counterparty: "Hausverwaltung",
+      purpose: "Abschlag",
+      categoryId: categoryOnlyId,
+    })
+    const categoryOnly = await getPlansQuery(`page=1&pageSize=20&q=Nebenkosten`)
+    const categoryOnlyData = await categoryOnly.json()
+    expect(categoryOnlyData.total).toBe(1)
+    expect(categoryOnlyData.plans[0].counterparty).toBe("Hausverwaltung")
+
+    const miss = await getPlansQuery("page=1&pageSize=20&q=Versicherung")
+    expect((await miss.json()).total).toBe(0)
+  })
+
+  it("folds case for non-ASCII text too", async () => {
+    // SQLite's LIKE is case-insensitive for ASCII only; search_fold covers
+    // the rest of the alphabet (Ü/Ö/Ä are common in German bank text)
+    await seedSimplePlan({ counterparty: "Überweisung Ölwechsel" })
+    await seedSimplePlan({ counterparty: "Stadtwerke" })
+
+    const res = await getPlansQuery(
+      `page=1&pageSize=20&q=${encodeURIComponent("überweisung ölwechsel")}`
+    )
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(data.total).toBe(1)
+    expect(data.plans[0].counterparty).toBe("Überweisung Ölwechsel")
+  })
+
+  it("treats LIKE metacharacters in the query as literals", async () => {
+    await seedSimplePlan({ counterparty: "Zins 2,5 % p.a." })
+    await seedSimplePlan({ counterparty: "Zinsgutschrift" })
+    await seedSimplePlan({ counterparty: "IBAN_DE02" })
+    await seedSimplePlan({ counterparty: "IBANXDE02" })
+
+    // unescaped, "%" would match every plan and "_" any single character
+    const percent = await getPlansQuery(
+      `page=1&pageSize=20&q=${encodeURIComponent("%")}`
+    )
+    const percentData = await percent.json()
+    expect(percentData.total).toBe(1)
+    expect(percentData.plans[0].counterparty).toBe("Zins 2,5 % p.a.")
+
+    const underscore = await getPlansQuery(
+      `page=1&pageSize=20&q=${encodeURIComponent("_")}`
+    )
+    const underscoreData = await underscore.json()
+    expect(underscoreData.total).toBe(1)
+    expect(underscoreData.plans[0].counterparty).toBe("IBAN_DE02")
+  })
+
+  it("skips the per-plan next-date walk when includeNextDue=0", async () => {
+    await seedSimplePlan({ counterparty: "A" })
+
+    const withNext = await (await getPlansQuery("includeNextDue=1")).json()
+    expect("nextDueDate" in withNext.plans[0]).toBe(true)
+
+    const without = await (await getPlansQuery("includeNextDue=0")).json()
+    expect(without.total).toBe(1)
+    expect("nextDueDate" in without.plans[0]).toBe(false)
+  })
+
+  it("falls back to page 1 for an unsafe page number", async () => {
+    await seedSimplePlan({ counterparty: "A" })
+    // (page - 1) * pageSize would exceed SQLite's int64 OFFSET range
+    const res = await getPlansQuery("page=1000000000000000000&pageSize=20")
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(data.page).toBe(1)
+    expect(data.plans).toHaveLength(1)
+
+    // non-positive / non-numeric pages fall back too (paging params are
+    // lenient, unlike the strict status allowlist)
+    for (const page of ["0", "-3", "abc"]) {
+      const fallback = await getPlansQuery(`page=${page}&pageSize=20`)
+      expect(fallback.status).toBe(200)
+      const fallbackData = await fallback.json()
+      expect(fallbackData.page).toBe(1)
+      expect(fallbackData.plans).toHaveLength(1)
+    }
+  })
+
+  it("falls back to page 1 when the OFFSET product leaves the safe range", async () => {
+    await seedSimplePlan({ counterparty: "A" })
+    // the page itself is a safe integer, but (page - 1) * 100 is not — the
+    // OFFSET would be bound as a REAL
+    const res = await getPlansQuery(
+      `page=${Number.MAX_SAFE_INTEGER}&pageSize=100`
+    )
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(data.page).toBe(1)
+    expect(data.plans).toHaveLength(1)
+  })
+
+  it("filters by status and paginates with a stable total/pageCount", async () => {
+    await seedSimplePlan({ counterparty: "A", status: "active" })
+    await seedSimplePlan({ counterparty: "B", status: "paused" })
+    await seedSimplePlan({ counterparty: "C", status: "finished" })
+
+    const activeOnly = await getPlansQuery("page=1&pageSize=20&status=active")
+    const activeData = await activeOnly.json()
+    expect(activeData.total).toBe(1)
+    expect(activeData.plans[0].counterparty).toBe("A")
+
+    const first = await getPlansQuery("page=1&pageSize=2")
+    const firstData = await first.json()
+    expect(firstData.total).toBe(3)
+    expect(firstData.page).toBe(1)
+    expect(firstData.pageCount).toBe(2)
+    expect(firstData.plans).toHaveLength(2)
+
+    const second = await getPlansQuery("page=2&pageSize=2")
+    const secondData = await second.json()
+    expect(secondData.total).toBe(3)
+    expect(secondData.page).toBe(2)
+    expect(secondData.pageCount).toBe(2)
+    expect(secondData.plans).toHaveLength(1)
+    // the two pages do not overlap
+    expect(secondData.plans[0].id).not.toBe(firstData.plans[0].id)
+    expect(secondData.plans[0].id).not.toBe(firstData.plans[1].id)
+
+    // an in-range page beyond pageCount is not clamped: it honestly returns
+    // an empty page and echoes the requested page (the UI follows pageCount)
+    const beyond = await getPlansQuery("page=99&pageSize=2")
+    const beyondData = await beyond.json()
+    expect(beyondData.total).toBe(3)
+    expect(beyondData.page).toBe(99)
+    expect(beyondData.pageCount).toBe(2)
+    expect(beyondData.plans).toHaveLength(0)
+  })
+
+  it("rejects an unknown status instead of returning the unfiltered list", async () => {
+    await seedSimplePlan({ counterparty: "A", status: "active" })
+    const res = await getPlansQuery("page=1&pageSize=20&status=actve")
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe("invalid_status")
+
+    // absent/empty/"all" mean "all" (the value the client DTO carries when
+    // unfiltered, so the API must not reject it)
+    for (const query of [
+      "page=1&pageSize=20",
+      "page=1&pageSize=20&status=",
+      "page=1&pageSize=20&status=all",
+    ]) {
+      const ok = await getPlansQuery(query)
+      expect(ok.status).toBe(200)
+      expect((await ok.json()).total).toBe(1)
+    }
+  })
+
+  it("keeps the unpaged full-list contract for existing consumers", async () => {
+    await seedSimplePlan({ counterparty: "A", status: "active" })
+    await seedSimplePlan({ counterparty: "B", status: "finished" })
+    const res = await getPlansRow(userId)
+    const data = await res.json()
+    expect(data.plans).toHaveLength(2)
+    expect(data.total).toBe(2)
+    expect(data.page).toBe(1)
+    expect(data.pageCount).toBe(1)
+  })
+
+  it("applies q/status to the unpaged full list too", async () => {
+    await seedSimplePlan({ counterparty: "Mietwerk", status: "active" })
+    await seedSimplePlan({ counterparty: "Stadtwerke", status: "finished" })
+
+    const byStatus = await (await getPlansQuery("status=active")).json()
+    expect(byStatus.plans).toHaveLength(1)
+    expect(byStatus.plans[0].counterparty).toBe("Mietwerk")
+    expect(byStatus.total).toBe(1)
+    expect(byStatus.page).toBe(1)
+    expect(byStatus.pageCount).toBe(1)
+
+    const bySearch = await (await getPlansQuery("q=stadt")).json()
+    expect(bySearch.plans).toHaveLength(1)
+    expect(bySearch.plans[0].counterparty).toBe("Stadtwerke")
+    expect(bySearch.total).toBe(1)
+  })
+
+  it("clamps pageSize to 100", async () => {
+    for (let i = 0; i < 101; i++) {
+      db.insert(plannedTransactions)
+        .values({
+          userId,
+          counterparty: `Plan ${i}`,
+          amountCents: -100,
+          dtstart: "2026-01-01",
+        })
+        .run()
+    }
+    const res = await getPlansQuery("page=1&pageSize=5000")
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(data.total).toBe(101)
+    expect(data.plans).toHaveLength(100)
+    expect(data.pageCount).toBe(2)
   })
 
   it("401 without a session", async () => {
@@ -735,7 +979,7 @@ describe("GET /api/transactions/calendar", () => {
         .status
     ).toBe(400)
     // same far-window contract as GET /api/plans/occurrences: the two
-    // /planung window reads must fail together (the calendar pair shares
+    // /calendar window reads must fail together (the calendar pair shares
     // one ErrorState — a far navigation would otherwise 400 occurrences
     // while bank chips still served beneath it)
     const farFuture = await getCalendar("from=2999-01-01&to=2999-02-10")

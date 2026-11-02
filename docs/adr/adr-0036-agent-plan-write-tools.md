@@ -92,9 +92,9 @@ domain: no other table references them, and occurrences never enter
   transactions, and the plan rules block appears whenever the quartet is
   advertised.
 - The chat can now actually maintain plans: create (one-off or RRULE),
-  patch single fields, pause/finish, delete — with `/planung` reflecting
-  every change on its next fetch (virtual plans, no data touched beyond
-  `planned_transactions`).
+  patch single fields, pause/finish, delete — with `/calendar` and `/plans`
+  reflecting every change on their next fetch (virtual plans, no data
+  touched beyond `planned_transactions`; `/planung` redirects to `/plans`).
 - Tests live in `tests/agent-plan-tools.test.ts` (validation-error
   passthrough incl. cross-user isolation, patch semantics, capped
   summaries, registry/prompt wiring).

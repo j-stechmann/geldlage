@@ -752,6 +752,13 @@ export interface PlanDialogProps {
   /** set = edit existing plan; null/undefined = create */
   plan?: PlanRow | null
   /**
+   * Called after a successful save, before the dialog closes. `created` is
+   * true for a create, false for an update. Callers that page/list can use
+   * it to return to the page that holds the newest row without also jumping
+   * when the dialog is merely cancelled.
+   */
+  onSaved?: (created: boolean) => void
+  /**
    * create-mode prefill source (e.g. converting a booked transaction) —
    * pre-fills the form with the source's data and a monthly recurrence
    * guess. Ignored while `plan` is set (edit mode always pre-draws from the
@@ -764,6 +771,7 @@ export function PlanDialog({
   open,
   onOpenChange,
   plan,
+  onSaved,
   prefill,
 }: PlanDialogProps) {
   const isEdit = plan !== null && plan !== undefined
@@ -1034,11 +1042,12 @@ export function PlanDialog({
       }
       toast.success(isEdit ? "Plan aktualisiert" : "Plan erstellt")
       // the app runs staleTime 5s + refetchOnWindowFocus:false — without
-      // this fan-out the board, calendar chips, forecast card and the
+      // this fan-out the plan list, calendar chips, forecast card and the
       // dashboard overlay keep showing pre-mutation data until the
-      // affected queries remount (navigate away and back). The board's own
+      // affected queries remount (navigate away and back). The list's own
       // status-toggle/delete paths already fan out the same way.
       invalidatePlans(queryClient)
+      onSaved?.(!isEdit)
       onOpenChange(false)
     } catch (err) {
       if (

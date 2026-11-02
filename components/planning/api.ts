@@ -46,6 +46,20 @@ export interface PlanListRow extends PlanRow {
   nextDueDate: string | null
 }
 
+export interface PlanListPage {
+  plans: PlanListRow[]
+  total: number
+  page: number
+  pageCount: number
+}
+
+export type PlanStatusFilter = PlanRow["status"] | "all"
+
+export interface PlanListFilters {
+  q: string
+  status: PlanStatusFilter
+}
+
 export interface PlanOccurrence {
   id: string
   planId: string
@@ -166,11 +180,65 @@ async function parseError(res: Response, fallback: string): Promise<ApiError> {
 
 // ── hooks ─────────────────────────────────────────────────────────────────
 
+/**
+ * Full plan list (no paging), shared by the calendar's chip → plan lookup and
+ * the matched-plan reverse lookup. `includeNextDue=0` skips the server's
+ * per-plan recurrence walk: neither consumer reads `nextDueDate`, and the
+ * paged /plans table computes it from its own page response.
+ *
+ * Both observers use the same `PLANS_KEY` cache entry, so the fetcher must be
+ * defined once — whichever observer mounts first would otherwise define the
+ * cached shape.
+ */
+const PLANS_LOOKUP_URL = "/api/plans?includeNextDue=0"
+
+const plansLookupQuery = {
+  queryKey: PLANS_KEY,
+  queryFn: async (): Promise<{ plans: PlanRow[] }> => {
+    const res = await apiFetch(PLANS_LOOKUP_URL)
+    if (!res.ok)
+      throw await parseError(res, "Pläne konnten nicht geladen werden")
+    return res.json()
+  },
+} as const
+
 export function usePlans() {
-  return useQuery<{ plans: PlanListRow[] }>({
-    queryKey: PLANS_KEY,
+  return useQuery<{ plans: PlanRow[] }>({
+    ...plansLookupQuery,
+    placeholderData: (prev) => prev,
+  })
+}
+
+/** Two-phase key: search + status + page serialize into the query string. */
+export function plansPageKey(
+  filters: PlanListFilters,
+  page: number,
+  pageSize: number
+) {
+  const sp = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize),
+  })
+  if (filters.q) sp.set("q", filters.q)
+  if (filters.status !== "all") sp.set("status", filters.status)
+  return ["plans", sp.toString()] as const
+}
+
+/**
+ * Server-side paged plan list for /plans. Deliberately a child of the
+ * `["plans"]` prefix so the shared invalidatePlans() fan-out (create/edit/
+ * delete/status change) refreshes both the full list and every cached page.
+ */
+export function usePlansPage(
+  filters: PlanListFilters,
+  page: number,
+  pageSize: number
+) {
+  const key = plansPageKey(filters, page, pageSize)
+  return useQuery<PlanListPage>({
+    queryKey: key,
     queryFn: async () => {
-      const res = await apiFetch("/api/plans")
+      const res = await apiFetch(`/api/plans?${key[1]}`)
       if (!res.ok)
         throw await parseError(res, "Pläne konnten nicht geladen werden")
       return res.json()
@@ -322,16 +390,10 @@ export function useMatchedPlanForTx(ref: MatchedTxRef | null): {
       : null
   const planId = occurrence?.planId ?? null
   // the plans list only matters once a match was found — no dead request
-  // per expanded unmatched row (PLANS_KEY is the cache the board and the
-  // plan dialog already share)
-  const plansQuery = useQuery<{ plans: PlanListRow[] }>({
-    queryKey: PLANS_KEY,
-    queryFn: async () => {
-      const res = await apiFetch("/api/plans")
-      if (!res.ok)
-        throw await parseError(res, "Pläne konnten nicht geladen werden")
-      return res.json()
-    },
+  // per expanded unmatched row (PLANS_KEY is the cache the calendar and the
+  // transactions table already share)
+  const plansQuery = useQuery<{ plans: PlanRow[] }>({
+    ...plansLookupQuery,
     enabled: planId !== null,
   })
 

@@ -192,7 +192,7 @@ export const TransactionRow = React.memo(function TransactionRow({
   activation: RowActivation
   onToggle: (id: string) => void
   onAssign: (row: TxRow) => void
-  /** deep-linked row (from the /planung calendar): highlighted + scrolled to */
+  /** deep-linked row (from the /calendar page): highlighted + scrolled to */
   focus?: boolean
 }) {
   const counterparty = counterpartyOf(row)

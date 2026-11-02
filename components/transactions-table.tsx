@@ -127,7 +127,7 @@ export function TransactionsTable({
   focusTxId,
 }: {
   filters: TableFilters
-  /** deep-linked transaction (from /planung): expanded + highlighted */
+  /** deep-linked transaction (from /calendar): expanded + highlighted */
   focusTxId?: string | null
 }) {
   const [page, setPage] = React.useState(1)
@@ -186,7 +186,7 @@ export function TransactionsTable({
   const focusMode = Boolean(focusId)
 
   const params = React.useMemo(() => {
-    // deep-linked focus (from /planung): the query fetches exactly the one
+    // deep-linked focus (from /calendar): the query fetches exactly the one
     // row via the id lookup, independent of any filter state
     if (focusId) {
       return new URLSearchParams({ id: focusId, page: "1", pageSize: "25" })
@@ -228,7 +228,7 @@ export function TransactionsTable({
     if (!focusId) setExpandedId(null)
   }
 
-  // deep-link focus (from the /planung calendar): expand the row during
+  // deep-link focus (from the /calendar page): expand the row during
   // render — after the context reset above (gated off while focused).
   // lastFocus init null so the FIRST value also fires (mount is a legitimate
   // focus event); a transition TO null (a filter edit dropping the tx param)

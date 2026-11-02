@@ -172,4 +172,39 @@ describe("queryTransactions extended fields", () => {
     expect(labeled.total).toBe(1)
     expect(labeled.rows[0]?.categoryId).not.toBeNull()
   })
+
+  it("treats LIKE metacharacters in the search as literals", () => {
+    const insert = (id: string, payee: string) =>
+      db
+        .insert(transactions)
+        .values({
+          id,
+          userId,
+          accountId,
+          bookingDate: "2026-11-02",
+          type: "Ausgang",
+          amountCents: -100,
+          payee,
+          sourceHash: `search-${id}`,
+        })
+        .run()
+    insert("tx-search-percent", "Zins 2,5 % p.a.")
+    insert("tx-search-underscore", "IBAN_DE02")
+    insert("tx-search-plain", "Zinsgutschrift")
+    insert("tx-search-lookalike", "IBANXDE02")
+
+    const search = (q: string) =>
+      queryTransactions(
+        parseFilters(new URLSearchParams(`q=${encodeURIComponent(q)}`)),
+        userId,
+        1,
+        100
+      )
+
+    // "%"/"_" are literals, not wildcards: unescaped, "%" would match every
+    // row and "_" any single character
+    expect(search("%").total).toBe(1)
+    expect(search("_").total).toBe(1)
+    expect(search("_").rows[0]?.payee).toBe("IBAN_DE02")
+  })
 })

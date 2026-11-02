@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { fireEvent, waitFor } from "@testing-library/react"
+import { act, fireEvent, waitFor } from "@testing-library/react"
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -8,7 +8,7 @@ vi.mock("next/navigation", () => ({
 }))
 
 import DashboardPage from "@/app/page"
-import { useForecast } from "@/components/planning/api"
+import { forecastKey, useForecast } from "@/components/planning/api"
 import {
   renderWithQuery,
   stubFetch,
@@ -18,7 +18,7 @@ import {
 
 /**
  * The dashboard's "Geplant einblenden" overlay must surface a failed
- * forecast read (/planung's ErrorState + retry pattern). A failed toggle
+ * forecast read (the planning pages' ErrorState + retry pattern). A failed toggle
  * once rendered as charts silently without the overlay — visually
  * identical to "no plans exist".
  *
@@ -119,14 +119,56 @@ describe("dashboard forecast toggle failure surface", () => {
       expect(container.textContent).toContain("Kontostand über Zeit")
     })
     expect(container.textContent).not.toContain(ERROR_TEXT)
+    // the summary card belongs to the planned mode only
+    expect(container.textContent).not.toContain("Guthaben heute")
     fireEvent.click(toggleButton())
     await waitFor(() => {
       expect(container.textContent).toContain("Projektion")
     })
+    // the moved ForecastSummary card carries the figure labels (the old
+    // /planung board's card now renders on the dashboard)
+    expect(container.textContent).toContain("Guthaben heute")
+    expect(container.textContent).toContain("Geplant netto über Horizont")
     expect(container.textContent).not.toContain(ERROR_TEXT)
     expect(
       stub.calls.filter((c) => c.url.split("?")[0] === "/api/plans/forecast")
     ).toHaveLength(1)
+  })
+  it("surfaces a failed refetch over cached forecast figures", async () => {
+    const stub = stubFetch([
+      { url: /\/api\/analytics/, json: OK_ANALYTICS },
+      { url: /\/api\/categories$/, json: OK_CATEGORIES },
+      { url: /\/api\/accounts$/, json: OK_ACCOUNTS },
+      {
+        url: /\/api\/plans\/forecast$/,
+        json: OK_FORECAST,
+        once: true,
+      },
+      { url: /\/api\/plans\/forecast$/, status: 500 },
+    ])
+    const { container, queryClient } = renderWithQuery(<DashboardPage />)
+    await waitFor(() => {
+      expect(container.textContent).toContain("Kontostand über Zeit")
+    })
+    fireEvent.click(toggleButton())
+    await waitFor(() => {
+      expect(container.textContent).toContain("Guthaben heute")
+    })
+    expect(container.textContent).not.toContain(ERROR_TEXT)
+
+    // a later refetch fails while the last forecast is still cached: the card
+    // may stay readable, but the failure must not read as success
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: forecastKey(12, null) })
+    })
+    await waitFor(() => {
+      expect(container.textContent).toContain(ERROR_TEXT)
+    })
+    expect(container.textContent).toContain("Guthaben heute")
+    expect(
+      stub.calls.filter((c) => c.url.split("?")[0] === "/api/plans/forecast")
+        .length
+    ).toBeGreaterThanOrEqual(2)
   })
 })
 

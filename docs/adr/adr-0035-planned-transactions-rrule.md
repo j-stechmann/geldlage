@@ -20,7 +20,7 @@ truth).
    `counterparty`/`purpose`, signed `amount_cents` (ADR-0002), optional
    `category_id`, `dtstart`, nullable `rrule` (NULL = one-off on `dtstart`),
    `status` `active|paused|finished`, `notes`). Occurrences **never enter
-   `transactions`** — plans render beside real data (calendar on `/planung`,
+   `transactions`** — plans render beside real data (calendar on `/calendar`,
    dashboard overlay), the labeller/dedupe/balance machinery stays untouched.
 
 2. **Full RRULE, allowlisted.** The rule lives as a bare RFC 5545 RRULE
