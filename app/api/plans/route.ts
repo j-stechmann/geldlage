@@ -24,10 +24,21 @@ const MAX_PAGE_SIZE = 100
 
 function positiveInt(raw: string | null, fallback: number): number {
   const n = Number.parseInt(raw ?? "", 10)
-  // Safe integers keep (page - 1) * pageSize representable. A larger OFFSET
-  // is bound as a REAL past SQLite's int64 range, which fails with
-  // "datatype mismatch" (an unhandled 500) instead of an empty page.
   return Number.isSafeInteger(n) && n > 0 ? n : fallback
+}
+
+/**
+ * Page number whose OFFSET stays a safe integer. A page that is itself safe
+ * can still produce an unsafe `(page - 1) * pageSize` (page ~2^53 with a
+ * pageSize > 1), which better-sqlite3 binds as a REAL — an unhandled
+ * "datatype mismatch" 500 once that REAL leaves SQLite's int64 range. Keep
+ * both the page and the product representable; an unsafe page falls back to
+ * 1 (an empty page is still the honest answer for a huge in-range offset).
+ */
+function safePage(raw: string | null, pageSize: number): number {
+  const n = Number.parseInt(raw ?? "", 10)
+  if (!Number.isSafeInteger(n) || n <= 0) return 1
+  return (n - 1) * pageSize <= Number.MAX_SAFE_INTEGER ? n : 1
 }
 
 function parseStatus(raw: string | null): PlanStatus | "all" {
@@ -47,11 +58,11 @@ export async function GET(request: NextRequest) {
     status: parseStatus(sp.get("status")),
   }
   const paginate = sp.has("page") || sp.has("pageSize")
-  const page = positiveInt(sp.get("page"), 1)
   const pageSize = Math.min(
     positiveInt(sp.get("pageSize"), DEFAULT_PAGE_SIZE),
     MAX_PAGE_SIZE
   )
+  const page = safePage(sp.get("page"), pageSize)
   // The full-list lookups (calendar chip → plan row, matched-plan reverse
   // lookup) never read `nextDueDate`, and the per-plan recurrence walk is the
   // expensive part of a list read (docs/planning.md cost note): let them opt

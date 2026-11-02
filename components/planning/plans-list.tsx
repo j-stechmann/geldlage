@@ -236,6 +236,12 @@ export function PlansList() {
     setDialogOpen(true)
   }
 
+  // a successful create is the newest row, i.e. page 1; editing and
+  // cancelling keep the current page so the list does not jump underfoot
+  const handleSaved = (created: boolean) => {
+    if (created) setPage(1)
+  }
+
   const toastError = (title: string, err: unknown) =>
     toast.error(title, {
       description: err instanceof Error ? err.message : "Netzwerkfehler",
@@ -287,7 +293,7 @@ export function PlansList() {
           <Input
             value={qDraft}
             onChange={(e) => setQDraft(e.target.value)}
-            placeholder="Suchen (Empfänger, Verwendungszweck, Notizen)…"
+            placeholder="Suchen (Empfänger, Zweck, Notizen, Konto, Kategorie)…"
             aria-label="Pläne durchsuchen"
             className="pl-8"
           />
@@ -318,6 +324,7 @@ export function PlansList() {
           variant="ghost"
           size="icon"
           title="Suche und Filter zurücksetzen"
+          aria-label="Suche und Filter zurücksetzen"
           onClick={() => {
             setQDraft("")
             setStatus("all")
@@ -331,6 +338,15 @@ export function PlansList() {
           Plan anlegen
         </Button>
       </div>
+
+      {/* A background refetch (invalidate after delete/status change) can
+          fail while React Query still serves the last successful page — that
+          must not read as success. The tbody branch below covers the
+          no-cached-rows case; this banner keeps the failure visible when
+          stale rows remain. */}
+      {plansQuery.isError && rows.length > 0 && (
+        <ErrorState onRetry={() => void plansQuery.refetch()} />
+      )}
 
       <div
         className={`overflow-hidden rounded-lg border transition-opacity ${plansQuery.isFetching ? "opacity-70" : ""}`}
@@ -488,12 +504,8 @@ export function PlansList() {
 
       <PlanDialog
         open={dialogOpen}
-        onOpenChange={(open) => {
-          setDialogOpen(open)
-          // a newly created plan is the newest row (page 1); a cancelled
-          // create resets too — harmless, and it keeps the list predictable
-          if (!open && editing === null) setPage(1)
-        }}
+        onOpenChange={setDialogOpen}
+        onSaved={handleSaved}
         plan={editing}
       />
 

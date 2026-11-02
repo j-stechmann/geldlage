@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react"
 import { describe, it, expect } from "vitest"
-import { fireEvent, waitFor } from "@testing-library/react"
+import { act, fireEvent, waitFor } from "@testing-library/react"
 import { PlansList } from "@/components/planning/plans-list"
 import { renderWithQuery, stubFetch } from "./helpers-dom"
 
@@ -49,6 +49,28 @@ describe("PlansList", () => {
       expect(container.textContent).toContain(ERROR_TEXT)
     })
     expect(container.textContent).not.toContain("Noch keine Pläne angelegt")
+  })
+
+  it("surfaces a failed background refetch instead of serving stale rows silently", async () => {
+    stubFetch([
+      { url: /\/api\/plans$/, json: ONE_PAGE, once: true },
+      { url: /\/api\/plans$/, status: 500 },
+    ])
+    const { container, queryClient } = renderWithQuery(<PlansList />)
+    await waitFor(() => {
+      expect(container.textContent).toContain("Mietwerk GmbH")
+    })
+
+    // an invalidate-driven refetch (delete/status change) fails while the
+    // last successful page is still cached: the stale row may stay readable,
+    // but the failure must not read as success
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ["plans"] })
+    })
+    await waitFor(() => {
+      expect(container.textContent).toContain(ERROR_TEXT)
+    })
+    expect(container.textContent).toContain("Mietwerk GmbH")
   })
 
   it("distinguishes a genuinely empty list from an empty search result", async () => {
@@ -139,6 +161,42 @@ describe("PlansList", () => {
       const pageTwo = pages.lastIndexOf("2")
       expect(pageTwo).toBeGreaterThan(-1)
       expect(pages.slice(pageTwo + 1)).toContain("1")
+    })
+  })
+
+  it("keeps the current page when a create dialog is cancelled", async () => {
+    const stub = stubFetch([
+      {
+        url: /\/api\/plans$/,
+        json: { ...ONE_PAGE, total: 21, pageCount: 2 },
+      },
+      { url: /\/api\/accounts$/, json: { accounts: [] } },
+      { url: /\/api\/labels$/, json: { labels: [] } },
+    ])
+    const { getByRole, getByText, container } = renderWithQuery(<PlansList />)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("21 Pläne")
+    })
+    fireEvent.click(getByRole("button", { name: /Weiter/ }))
+    await waitFor(() => {
+      expect(stub.calls.some((c) => c.url.includes("page=2"))).toBe(true)
+    })
+
+    fireEvent.click(getByRole("button", { name: /Plan anlegen/ }))
+    await waitFor(() => {
+      expect(getByText("Anlegen")).toBeInTheDocument()
+    })
+    fireEvent.click(getByRole("button", { name: "Abbrechen" }))
+
+    // cancelling is not a save: the table must not jump back to page 1
+    await waitFor(() => {
+      const pages = stub.calls.map((c) =>
+        new URL(c.url, "http://localhost").searchParams.get("page")
+      )
+      const pageTwo = pages.lastIndexOf("2")
+      expect(pageTwo).toBeGreaterThan(-1)
+      expect(pages.slice(pageTwo + 1)).not.toContain("1")
     })
   })
 })

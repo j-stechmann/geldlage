@@ -479,6 +479,19 @@ describe("GET /api/plans", () => {
     expect(data.plans).toHaveLength(1)
   })
 
+  it("falls back to page 1 when the OFFSET product leaves the safe range", async () => {
+    await seedSimplePlan({ counterparty: "A" })
+    // the page itself is a safe integer, but (page - 1) * 100 is not — the
+    // OFFSET would be bound as a REAL
+    const res = await getPlansQuery(
+      `page=${Number.MAX_SAFE_INTEGER}&pageSize=100`
+    )
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(data.page).toBe(1)
+    expect(data.plans).toHaveLength(1)
+  })
+
   it("filters by status and paginates with a stable total/pageCount", async () => {
     await seedSimplePlan({ counterparty: "A", status: "active" })
     await seedSimplePlan({ counterparty: "B", status: "paused" })

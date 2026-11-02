@@ -48,8 +48,8 @@ export default function RootLayout({
           <div className="flex min-h-svh flex-col">
             <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
               <div className="flex h-14 w-full items-center justify-between gap-4 px-4">
-                <div className="flex items-center gap-6">
-                  <span className="flex items-center gap-2 text-sm font-semibold tracking-tight">
+                <div className="flex min-w-0 items-center gap-6">
+                  <span className="flex shrink-0 items-center gap-2 text-sm font-semibold tracking-tight">
                     <Logo className="size-6" />
                     Geldlage
                   </span>

@@ -296,8 +296,10 @@ Transaktionen ([ADR-0035](adr/adr-0035-planned-transactions-rrule.md), guide
 
 **Search & paging** are server-side (`GET /api/plans?q&status&page&pageSize`,
 page size capped at 100): the list only serializes its state into the query
-string, resets to page 1 on a filter change, and follows the server's
-`pageCount` when a delete (or a status change) empties the last page. Search
+string, resets to page 1 on a filter change or a successful create, and
+follows the server's `pageCount` when a delete (or a status change) empties
+the last page. A failed background refetch keeps the cached rows readable but
+surfaces the retryable ErrorState rather than reading as success. Search
 metacharacters (`%`/`_`) are literal, not wildcards. Calls without paging
 params still receive the full list — the calendar's plan lookup and the
 read-time match reverse lookup depend on that contract; those lookups add
