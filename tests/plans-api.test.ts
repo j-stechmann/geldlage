@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest"
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { eq } from "drizzle-orm"
 import { NextRequest } from "next/server"
 import type { Db } from "@/lib/db"
@@ -1112,6 +1112,12 @@ describe("GET /api/transactions id lookup", () => {
 })
 
 describe("GET /api/plans/forecast", () => {
+  // safety net: the frozen-clock test below restores Date in `finally`, but a
+  // thrown setup line or timeout must never leak fake timers into later tests
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it("401 without session; 400 on garbage months", async () => {
     expect(
       (await getForecastRoute(anonRequest(`${BASE}/api/plans/forecast`))).status

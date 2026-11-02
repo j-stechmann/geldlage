@@ -474,13 +474,30 @@ describe("computeForecast", () => {
     ])
 
     // account scoping does not bypass the paused filter: the scoped read
-    // returns the same active-only category set
+    // still sees only the active category (cross-account isolation itself is
+    // covered by the dedicated account-scoping test above)
     const scoped = computeForecast(userId, {
       months: 1,
       today: "2026-03-15",
       accountId,
     })
-    expect(scoped.plannedCategories).toEqual(forecast.plannedCategories)
+    expect(scoped.monthlyPlanned).toEqual([
+      {
+        month: "2026-03",
+        incomeCents: 0,
+        expensesCents: 3_000,
+        netCents: -3_000,
+      },
+    ])
+    expect(scoped.plannedCategories).toEqual([
+      {
+        categoryId: activeCategory.id,
+        name: "Miete",
+        color: "#ff0000",
+        totalCents: 3_000,
+        share: 1,
+      },
+    ])
   })
 
   // A paused occurrence must not participate in the forecast's matching at

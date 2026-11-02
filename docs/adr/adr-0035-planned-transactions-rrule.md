@@ -1,11 +1,11 @@
 # ADR-0035: Geplante Transaktionen — virtual overlay, read-time matching, full RRULE
 
 _Status: accepted · Date: 2026-10_
-_Amended 2026-11-02: paused plans are excluded from the forecast — their
-occurrences stay visible on the calendar and plan list but never enter the
-projection, and the forecast filters paused occurrences before read-time
-matching so a paused occurrence cannot claim a booking an active plan still
-needs. See point 4._
+_Amended 2026-11-02: paused plans are excluded from the forecast — the plans
+stay visible on the calendar and in the plan list, but their occurrences
+never enter the projection, and the forecast filters paused occurrences
+before read-time matching so a paused occurrence cannot claim a booking an
+active plan still needs. See point 4._
 
 ## Context
 

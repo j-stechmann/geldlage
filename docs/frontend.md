@@ -345,11 +345,12 @@ would make the merged line run backwards), the cashflow chart stacks
 **planned bars** (translucent; monthly planned sums exclude matched
 occurrences, so Ist + Geplant never double-count at the default
 Status = gebucht scope; with Status „Alle“/„Nicht gebucht“ a pending bank
-row matching a plan counts in BOTH bars, matching is gebucht-only by
-design (see the dashboard hint); paused plans are excluded from the forecast
-entirely — they stay visible on the calendar and plan list, but their planned
-occurrences never move the projection line, bars, category stack or summary
-card; planned expenses carry the
+row matching an active plan counts in BOTH bars, matching is gebucht-only by
+design (see the dashboard hint); paused plans' planned occurrences are
+excluded from the forecast — the plans stay visible on the calendar and plan
+list, but their occurrences never move the projection line, bars, category
+stack or summary card (already-booked future rows still move the balance
+line); planned expenses carry the
 Ist outflow's negative sign so the `stackOffset: "sign"` stack places them
 below the Ist expenses, planned income above the Ist income; the current
 month stacks the real partial with the remaining plans, future months are

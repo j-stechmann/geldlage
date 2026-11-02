@@ -575,7 +575,10 @@ export interface PlanOccurrence {
   categoryName: string | null
   categoryColor: string | null
   accountId: number | null
-  /** active | paused — paused occurrences expand for calendar/list reads; forecasts exclude them */
+  /**
+   * active | paused — paused occurrences expand for calendar/list reads;
+   * forecasts exclude them.
+   */
   planStatus: "active" | "paused"
   matched: {
     transactionId: string
@@ -598,14 +601,14 @@ export function listOccurrences(
   userId: number,
   w: { from: string; to: string },
   accountId?: number | undefined,
-  options: { includePaused?: boolean } = {}
+  { includePaused = true }: { includePaused?: boolean } = {}
 ): PlanOccurrence[] {
   const db = getDb()
   const conditions: (SQL | undefined)[] = [
     eq(plannedTransactions.userId, userId),
     inArray(
       plannedTransactions.status,
-      options.includePaused === false ? ["active"] : ["active", "paused"]
+      includePaused ? ["active", "paused"] : ["active"]
     ),
   ]
   if (accountId !== undefined) {
@@ -895,11 +898,8 @@ export function computeForecast(
   }
 
   // ── planned occurrences over the horizon ──
-  // Paused plans stay visible on the calendar/list but are excluded from every
-  // projection aggregate. The filter happens BEFORE read-time matching so a
-  // paused occurrence cannot claim a booked row that an active plan needs
-  // (that would leave the active plan's occurrence unmatched and double-count
-  // its money).
+  // The paused filter must run inside the query (before matching) so a paused
+  // occurrence cannot claim an active plan's booking — see listOccurrences().
   const occurrences = listOccurrences(
     userId,
     { from: today, to: horizonEnd },

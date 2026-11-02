@@ -290,7 +290,7 @@ export function PlansList() {
                 ? "Zählt wieder für die Prognose."
                 : next === "paused"
                   ? "Termine bleiben sichtbar, zählen aber nicht für die Prognose."
-                  : "Keine weiteren Termine; zählt nicht für die Prognose.",
+                  : "Der Plan hat keine weiteren Termine und zählt nicht für die Prognose.",
           }
         )
         invalidatePlans(queryClient)
