@@ -265,7 +265,9 @@ describe("get_category_totals", () => {
       userId: uid1,
       categoryId: cat1,
       amountCents: -5000,
-      bookingDate: dayFromToday(-2),
+      // first-of-month, not dayFromToday(-2): on the 1st/2nd the relative
+      // date falls into the previous month and this_month would drop it
+      bookingDate: firstOfThisMonth(),
     })
     seedTx({
       userId: uid1,
@@ -277,7 +279,8 @@ describe("get_category_totals", () => {
       userId: uid1,
       categoryId: cat2,
       amountCents: -20000,
-      bookingDate: dayFromToday(-1),
+      // today is always inside this_month (dayFromToday(-1) is not on the 1st)
+      bookingDate: dayFromToday(0),
     })
     // before this_month → must not count (Jan 1 style guard: use last month's first)
     seedTx({
