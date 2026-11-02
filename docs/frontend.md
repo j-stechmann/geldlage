@@ -299,7 +299,9 @@ page size capped at 100): the list only serializes its state into the query
 string, resets to page 1 on a filter change or a successful create, and
 follows the server's `pageCount` when a delete (or a status change) empties
 the last page. A failed background refetch keeps the cached rows readable but
-surfaces the retryable ErrorState rather than reading as success. Search
+surfaces the retryable ErrorState rather than reading as success, and the row
+actions stay disarmed while that banner is up so a stale row cannot be
+mutated. Search
 metacharacters (`%`/`_`) are literal, not wildcards. Calls without paging
 params still receive the full list — the calendar's plan lookup and the
 read-time match reverse lookup depend on that contract; those lookups add

@@ -518,6 +518,20 @@ describe("GET /api/plans", () => {
     expect(secondData.plans[0].id).not.toBe(firstData.plans[1].id)
   })
 
+  it("rejects an unknown status instead of returning the unfiltered list", async () => {
+    await seedSimplePlan({ counterparty: "A", status: "active" })
+    const res = await getPlansQuery("page=1&pageSize=20&status=actve")
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe("invalid_status")
+
+    // absent/empty still means "all" (the calendar lookup contract)
+    for (const query of ["page=1&pageSize=20", "page=1&pageSize=20&status="]) {
+      const ok = await getPlansQuery(query)
+      expect(ok.status).toBe(200)
+      expect((await ok.json()).total).toBe(1)
+    }
+  })
+
   it("keeps the unpaged full-list contract for existing consumers", async () => {
     await seedSimplePlan({ counterparty: "A", status: "active" })
     await seedSimplePlan({ counterparty: "B", status: "finished" })

@@ -111,12 +111,15 @@ function PlanName({ plan }: { plan: PlanRow }) {
 function PlanActions({
   plan,
   busy,
+  disabled,
   onEdit,
   onToggleStatus,
   onDelete,
 }: {
   plan: PlanRow
   busy: boolean
+  /** rows from a failed background refetch must not be actionable */
+  disabled?: boolean
   onEdit: (plan: PlanRow) => void
   onToggleStatus: (
     plan: PlanRow,
@@ -132,7 +135,7 @@ function PlanActions({
             variant="ghost"
             size="icon"
             aria-label={`Aktionen für ${planTitle(plan)}`}
-            disabled={busy}
+            disabled={busy || disabled}
           >
             <MoreHorizontal className="size-4" />
           </Button>
@@ -412,7 +415,7 @@ export function PlansList() {
                       <PlanName plan={plan} />
                     </TableCell>
                     <TableCell>
-                      {plan.categoryName && plan.categoryColor ? (
+                      {plan.categoryName ? (
                         <Badge
                           variant="outline"
                           className="category-badge font-normal"
@@ -458,6 +461,7 @@ export function PlansList() {
                       <PlanActions
                         plan={plan}
                         busy={busy}
+                        disabled={plansQuery.isError}
                         onEdit={openEdit}
                         onToggleStatus={toggleStatus}
                         onDelete={setDeleting}

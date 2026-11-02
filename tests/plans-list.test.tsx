@@ -56,7 +56,7 @@ describe("PlansList", () => {
       { url: /\/api\/plans$/, json: ONE_PAGE, once: true },
       { url: /\/api\/plans$/, status: 500 },
     ])
-    const { container, queryClient } = renderWithQuery(<PlansList />)
+    const { container, getByRole, queryClient } = renderWithQuery(<PlansList />)
     await waitFor(() => {
       expect(container.textContent).toContain("Mietwerk GmbH")
     })
@@ -71,6 +71,37 @@ describe("PlansList", () => {
       expect(container.textContent).toContain(ERROR_TEXT)
     })
     expect(container.textContent).toContain("Mietwerk GmbH")
+    // …and its actions are disarmed: acting on a row the failed refetch could
+    // not confirm (deleted/changed elsewhere) would target stale state
+    expect(
+      getByRole("button", { name: "Aktionen für Mietwerk GmbH" })
+    ).toBeDisabled()
+  })
+
+  it("renders a category badge even when the stored color is missing", async () => {
+    // legacy/imported rows can carry a category name with a NULL color;
+    // resolveCategoryColor() derives a palette color from the id, so the
+    // name must still render instead of falling back to "—"
+    stubFetch([
+      {
+        url: /\/api\/plans$/,
+        json: {
+          ...ONE_PAGE,
+          plans: [
+            {
+              ...ONE_PAGE.plans[0],
+              categoryId: 7,
+              categoryName: "Nebenkosten",
+              categoryColor: null,
+            },
+          ],
+        },
+      },
+    ])
+    const { container } = renderWithQuery(<PlansList />)
+    await waitFor(() => {
+      expect(container.textContent).toContain("Nebenkosten")
+    })
   })
 
   it("distinguishes a genuinely empty list from an empty search result", async () => {

@@ -41,10 +41,17 @@ function safePage(raw: string | null, pageSize: number): number {
   return (n - 1) * pageSize <= Number.MAX_SAFE_INTEGER ? n : 1
 }
 
-function parseStatus(raw: string | null): PlanStatus | "all" {
-  return raw === "active" || raw === "paused" || raw === "finished"
-    ? raw
-    : "all"
+/**
+ * Strict `status` parsing: absent/empty = all. An unknown value is rejected
+ * (null) instead of silently falling back to the unfiltered list — a typo'd
+ * or renamed client value must not read as a successful "all" query. The
+ * other planning routes reject malformed query params the same way
+ * (invalid_account / invalid_months / invalid_window).
+ */
+function parseStatus(raw: string | null): PlanStatus | "all" | null {
+  if (raw === null || raw === "") return "all"
+  if (raw === "active" || raw === "paused" || raw === "finished") return raw
+  return null
 }
 
 export async function GET(request: NextRequest) {
@@ -53,9 +60,13 @@ export async function GET(request: NextRequest) {
   const sp = request.nextUrl.searchParams
   const today = todayLocal()
 
+  const status = parseStatus(sp.get("status"))
+  if (status === null) {
+    return NextResponse.json({ error: "invalid_status" }, { status: 400 })
+  }
   const filters: PlanListFilters = {
     q: sp.get("q")?.trim() ?? "",
-    status: parseStatus(sp.get("status")),
+    status,
   }
   const paginate = sp.has("page") || sp.has("pageSize")
   const pageSize = Math.min(
