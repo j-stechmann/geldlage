@@ -253,7 +253,7 @@ export const queryTables: Record<string, QueryTableDef> = {
       status: col(
         "text",
         plannedTransactions.status,
-        "active|paused|finished (paused: sichtbar, zählt nicht für die Prognose)"
+        "active|paused|finished; paused: sichtbar, zählt nicht für die Prognose"
       ),
       notes: col("text", plannedTransactions.notes),
       created_at: col("text", plannedTransactions.createdAt),

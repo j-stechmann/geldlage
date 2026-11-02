@@ -122,14 +122,15 @@ is left untouched; the forecast endpoint is deliberately separate.
   user whose accounts carry **per-account snapshots** enters only that one
   account's snapshot money (Σ booked stays all-account), so the starting
   balance can be understated; account-scoped forecasts are exact.
-- **Planned aggregates use only UNMATCHED occurrences of ACTIVE plans** from
-  today through `months` (clamped 1–60, default 12): matched ones are booked
-  money already inside the actuals — including them would double-count. A
-  paused plan stays visible on the calendar and plan list, but its
-  occurrences never enter the projection. The status filter runs _before_
-  read-time matching, so a paused occurrence cannot consume a booked row an
-  active plan still needs (which would leave the active occurrence unmatched
-  and count it on top of the real booking).
+- **Planned aggregates use occurrences of ACTIVE plans that are not booked
+  within the projection** from today through `months` (clamped 1–60, default
+  12): matched ones are booked money already inside the actuals — including
+  them would double-count (the one exception is a match whose booking posts
+  after `horizonEnd`, below). A paused plan stays visible on the calendar and
+  plan list, but its occurrences never enter the projection. The status
+  filter runs _before_ read-time matching, so a paused occurrence cannot
+  consume a booked row an active plan still needs (which would leave the
+  active occurrence unmatched and count it on top of the real booking).
   This deliberately prioritizes active plans: when matching is ambiguous, a
   nearby compatible active occurrence may claim a booking that "belonged" to
   a paused plan, which excludes the active occurrence from the planned sums
@@ -238,7 +239,8 @@ shows the forecast summary card. Details in
 `tests/planning-recurrence.test.ts` (validation table, window expansion,
 UTC-noon invariants, short-month skipping), `tests/planning-matching.test.ts`
 (tolerance/window/counterparty/greedy), `tests/planning-forecast.test.ts`
-(hand-computed to-the-cent scenario incl. matched-exclusion, active-only
-paused exclusion and the paused-vs-active match priority, account scoping),
+(hand-computed to-the-cent scenario incl. matched-occurrence exclusion,
+paused-plan exclusion, the paused-vs-active match priority and account
+scoping),
 `tests/plans-api.test.ts` (routes: 401/400/404 mapping, canonicalization,
 user isolation) — see [testing.md](testing.md).

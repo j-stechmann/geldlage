@@ -287,7 +287,7 @@ export function PlansList() {
           {
             description:
               next === "active"
-                ? "Zählt wieder für die Prognose."
+                ? "Zählt wieder für die Prognose, sofern noch Termine anstehen."
                 : next === "paused"
                   ? "Termine bleiben sichtbar, zählen aber nicht für die Prognose."
                   : "Der Plan hat keine weiteren Termine und zählt nicht für die Prognose.",

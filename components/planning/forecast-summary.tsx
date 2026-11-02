@@ -30,8 +30,7 @@ export function ForecastSummary({ forecast }: { forecast: ForecastResult }) {
         <CardTitle>Prognose (12 Monate)</CardTitle>
         <CardDescription>
           ab heutigem Guthaben, ohne geplante Beträge, die bereits gebucht sind;
-          pausierte Pläne zählen nicht mit; bereits gebuchte Beträge bleiben
-          enthalten
+          pausierte Pläne zählen nicht mit; echte Buchungen bleiben enthalten
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-1 text-sm">
