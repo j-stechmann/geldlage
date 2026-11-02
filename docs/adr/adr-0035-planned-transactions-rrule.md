@@ -74,8 +74,9 @@ EXDATE/RDATE` as well as multi-line/`DTSTART:` pastes (dtstart is a
    booked money never double-count. Paused plans stay visible on the calendar
    and plan list but never enter the projection, and the forecast filters
    paused occurrences before matching so a paused occurrence cannot consume a
-   booking an active plan still needs. Real amounts never enter projected
-   sums; planned amounts never enter real analytics. Monthly planned sums for
+   booking an active plan still needs. Real amounts never enter the planned
+   sums (they only move the balance line); planned amounts never enter real
+   analytics. Monthly planned sums for
    the current month count from TODAY (the dashboard merges partial actuals
    with the remaining plans).
 
@@ -87,8 +88,9 @@ EXDATE/RDATE` as well as multi-line/`DTSTART:` pastes (dtstart is a
    expansion truth. Drags/resize stay off by design: editing an occurrence
    means editing its plan (a drag would ambiguously rewrite DTSTART/RRULE).
    `rrule` also powers the client preview in the plan dialog — same engine
-   on both sides, so preview == calendar; the forecast is the same expansion
-   restricted to active plans.
+   on both sides, so the preview matches the underlying expansion (the
+   calendar additionally hides finished plans; the forecast further
+   restricts the expansion to active plans).
 
 ## Alternatives considered
 

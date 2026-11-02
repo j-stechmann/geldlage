@@ -130,6 +130,11 @@ is left untouched; the forecast endpoint is deliberately separate.
   the status filter runs _before_ read-time matching, so a paused occurrence
   cannot consume a booked row an active plan still needs (which would leave
   the active occurrence unmatched and count it on top of the real booking).
+  This deliberately prioritizes active plans: when matching is ambiguous, a
+  nearby compatible active occurrence may claim a booking that "belonged" to
+  a paused plan, which drops the active occurrence from the planned sums
+  rather than double-counting it. The calendar keeps the paused occurrence
+  (and its match) visible.
   One horizon edge stays counted: a match whose booking posts after
   `horizonEnd` (within the ± posting-drift window) is outside the
   projection's real data entirely, so the planned occurrence remains its
@@ -229,6 +234,7 @@ shows the forecast summary card. Details in
 `tests/planning-recurrence.test.ts` (validation table, window expansion,
 UTC-noon invariants, short-month skipping), `tests/planning-matching.test.ts`
 (tolerance/window/counterparty/greedy), `tests/planning-forecast.test.ts`
-(hand-computed to-the-cent scenario incl. matched-exclusion and account
-scoping), `tests/plans-api.test.ts` (routes: 401/400/404 mapping,
-canonicalization, user isolation) — see [testing.md](testing.md).
+(hand-computed to-the-cent scenario incl. matched-exclusion, active-only
+paused exclusion and the paused-vs-active match priority, account scoping),
+`tests/plans-api.test.ts` (routes: 401/400/404 mapping, canonicalization,
+user isolation) — see [testing.md](testing.md).

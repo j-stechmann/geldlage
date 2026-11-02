@@ -1093,7 +1093,7 @@ export function PlanDialog({
           </DialogTitle>
           <DialogDescription>
             Pläne sind virtuell — aktive Pläne erscheinen im Kalender und zählen
-            in der Prognose; pausierte bleiben im Kalender sichtbar, beendete
+            für die Prognose; pausierte bleiben im Kalender sichtbar, beendete
             stehen nur noch in der Planliste. Echte Buchungen berühren sie
             nicht.
           </DialogDescription>

@@ -782,9 +782,9 @@ export interface ForecastResult {
  * The forecast is the third analytics scope (ADR-0035): the current balance
  * (real data, snapshot-anchored like engine.ts) plus planned occurrences of
  * ACTIVE plans from today through `months` months — paused plans stay visible
- * on the calendar and plan list but never enter the projection; real bank
- * amounts never enter the projected sums, and projected amounts never enter
- * the real analytics.
+ * on the calendar and plan list but never enter the projection. Real booked
+ * amounts never enter the planned sums (they only move the balance line), and
+ * projected amounts never enter the real analytics.
  *
  * Known limitation, inherited from the anchor math it mirrors: the anchor
  * is the SINGLE latest snapshot batch, so for an all-accounts projection

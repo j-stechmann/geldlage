@@ -287,10 +287,10 @@ export function PlansList() {
           {
             description:
               next === "active"
-                ? "Zählt wieder in der Prognose."
+                ? "Zählt wieder für die Prognose."
                 : next === "paused"
-                  ? "Termine bleiben sichtbar, zählen aber nicht in der Prognose."
-                  : "Keine weiteren Termine; zählt nicht in der Prognose.",
+                  ? "Termine bleiben sichtbar, zählen aber nicht für die Prognose."
+                  : "Keine weiteren Termine; zählt nicht für die Prognose.",
           }
         )
         invalidatePlans(queryClient)
