@@ -343,7 +343,9 @@ projection line** (anchored at the last real point; suppressed when
 imported future bookings already extend the series beyond today, which
 would make the merged line run backwards), the cashflow chart stacks
 **planned bars** (translucent; monthly planned sums exclude matched
-occurrences so Ist + Geplant never double-count — at the default
+occurrences and paused plans — paused plans stay calendar-only, so they
+never move the projection line, bars, category stack or summary card — so
+Ist + Geplant never double-count — at the default
 Status = gebucht scope; with Status „Alle“/„Nicht gebucht“ a pending bank
 row matching a plan counts in BOTH bars, matching is gebucht-only by
 design (see the dashboard hint); planned expenses carry the

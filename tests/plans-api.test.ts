@@ -834,6 +834,25 @@ describe("GET /api/plans/occurrences", () => {
     expect(byDate.get("2026-10-02")!.planStatus).toBe("active")
   })
 
+  it("keeps paused occurrences visible outside the forecast", async () => {
+    await seedSimplePlan({
+      dtstart: "2026-10-05",
+      amountCents: -100,
+      rrule: null,
+      status: "paused",
+    })
+    const res = await getOccurrences("from=2026-10-01&to=2026-10-31")
+    expect(res.status).toBe(200)
+    const { occurrences } = (await res.json()) as {
+      occurrences: Array<{ date: string; planStatus: string }>
+    }
+    expect(occurrences).toHaveLength(1)
+    expect(occurrences[0]).toMatchObject({
+      date: "2026-10-05",
+      planStatus: "paused",
+    })
+  })
+
   it("crosses users: another user sees no occurrences", async () => {
     await seedSimplePlan({ dtstart: "2026-01-01" })
     const res = await getOccurrences(

@@ -362,7 +362,7 @@ describe("computeForecast", () => {
     expect(forecast.startingBalanceCents).toBe(300_000 - 50_000)
   })
 
-  it("finished and paused plans behave: finished never expands, paused does", () => {
+  it("finished and paused plans never enter the projection", () => {
     seedBatch({ snapshotDate: "2026-01-31", snapshotAmountCents: 100_000 })
     seedPlan({
       dtstart: "2026-03-20",
@@ -378,8 +378,46 @@ describe("computeForecast", () => {
     })
 
     const forecast = computeForecast(userId, { months: 1, today: "2026-03-15" })
-    expect(forecast.monthlyPlanned).toHaveLength(1)
-    expect(forecast.monthlyPlanned[0]?.expensesCents).toBe(6_000)
+    // paused plans stay visible on the calendar but are not expected money
+    expect(forecast.monthlyPlanned).toEqual([])
+    expect(forecast.plannedCategories).toEqual([])
+    expect(forecast.projectedBalance).toEqual([
+      { date: "2026-03-15", balanceCents: 100_000 },
+    ])
+  })
+
+  // A paused occurrence must not participate in the forecast's matching at
+  // all: if it claimed the booked row first (its key sorts first here), the
+  // active occurrence would stay unmatched and be counted ON TOP of the
+  // real-future booking — a double count.
+  it("does not let a paused occurrence consume an active plan's match", () => {
+    seedBatch({ snapshotDate: "2026-01-31", snapshotAmountCents: 100_000 })
+    seedTx("2026-03-20", -5_000, { payee: "Mietwerk GmbH" })
+    seedPlan({
+      id: "a-paused",
+      dtstart: "2026-03-20",
+      amountCents: -5_000,
+      rrule: null,
+      counterparty: "Mietwerk GmbH",
+      status: "paused",
+    })
+    seedPlan({
+      id: "z-active",
+      dtstart: "2026-03-20",
+      amountCents: -5_000,
+      rrule: null,
+      counterparty: "Mietwerk GmbH",
+      status: "active",
+    })
+
+    const forecast = computeForecast(userId, { months: 1, today: "2026-03-15" })
+    // the active occurrence matches the real booking → only the booking
+    // moves the projection; the paused copy is ignored entirely
+    expect(forecast.monthlyPlanned).toEqual([])
+    expect(forecast.projectedBalance).toEqual([
+      { date: "2026-03-15", balanceCents: 100_000 },
+      { date: "2026-03-20", balanceCents: 95_000 },
+    ])
   })
 
   it("months clamps into [1, 60] and invalid input falls back to 12", () => {

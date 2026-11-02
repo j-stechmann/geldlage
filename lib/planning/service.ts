@@ -575,7 +575,7 @@ export interface PlanOccurrence {
   categoryName: string | null
   categoryColor: string | null
   accountId: number | null
-  /** active | paused — paused occurrences still expand (UI greys them) */
+  /** active | paused — paused occurrences expand for calendar/list reads only */
   planStatus: "active" | "paused"
   matched: {
     transactionId: string
@@ -588,17 +588,25 @@ export interface PlanOccurrence {
  * Expanded occurrences in [from, to] with read-time matching against booked
  * transactions (see lib/planning/matching.ts). The transaction candidate
  * window is padded by the match tolerances so posting drift across the
- * window edge still matches. Paused plans expand; finished ones do not.
+ * window edge still matches. Paused plans expand by default (the calendar /
+ * occurrences views grey them); finished ones do not. Forecast callers pass
+ * `includePaused: false` so paused amounts never enter a projection — and,
+ * because the filter runs before matching, a paused occurrence cannot
+ * consume a booking that an active plan still needs.
  */
 export function listOccurrences(
   userId: number,
   w: { from: string; to: string },
-  accountId?: number | undefined
+  accountId?: number | undefined,
+  options: { includePaused?: boolean } = {}
 ): PlanOccurrence[] {
   const db = getDb()
   const conditions: (SQL | undefined)[] = [
     eq(plannedTransactions.userId, userId),
-    inArray(plannedTransactions.status, ["active", "paused"]),
+    inArray(
+      plannedTransactions.status,
+      options.includePaused === false ? ["active"] : ["active", "paused"]
+    ),
   ]
   if (accountId !== undefined) {
     // the account filter also keeps account-agnostic plans visible
@@ -772,8 +780,9 @@ export interface ForecastResult {
 
 /**
  * The forecast is the third analytics scope (ADR-0035): the current balance
- * (real data, snapshot-anchored like engine.ts) plus planned occurrences
- * from today through `months` months — real bank amounts never enter the
+ * (real data, snapshot-anchored like engine.ts) plus planned occurrences of
+ * ACTIVE plans from today through `months` months — paused plans stay
+ * calendar-only (never projected), real bank amounts never enter the
  * projected sums, and projected amounts never enter the real analytics.
  *
  * Known limitation, inherited from the anchor math it mirrors: the anchor
@@ -885,10 +894,15 @@ export function computeForecast(
   }
 
   // ── planned occurrences over the horizon ──
+  // Paused plans are calendar-only: they never enter a projection, and the
+  // filter happens BEFORE read-time matching so a paused occurrence cannot
+  // claim a booked row that an active plan needs (that would leave the
+  // active plan's occurrence unmatched and double-count its money).
   const occurrences = listOccurrences(
     userId,
     { from: today, to: horizonEnd },
-    accountId
+    accountId,
+    { includePaused: false }
   )
 
   const monthlyPlanned = new Map<
