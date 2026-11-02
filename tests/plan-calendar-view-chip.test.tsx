@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react"
 import { describe, it, expect, vi } from "vitest"
-import { fireEvent, waitFor } from "@testing-library/react"
+import { act, fireEvent, waitFor } from "@testing-library/react"
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -93,6 +93,36 @@ describe("PlanCalendarView chip and create actions", () => {
 
     await waitFor(() => {
       expect(stub.calls.length).toBe(2)
+    })
+    expect(container.textContent).not.toContain("edit:")
+  })
+
+  it("refetches instead of opening a stale edit dialog after a failed refetch", async () => {
+    const stub = stubFetch([
+      { url: /\/api\/plans$/, json: plansResponse([PLAN]), once: true },
+      { url: /\/api\/plans$/, status: 500 },
+    ])
+    const { container, getByRole, queryClient } = renderWithQuery(
+      <PlanCalendarView />
+    )
+    await waitFor(() => {
+      expect(queryClient.getQueryState(PLANS_KEY)?.status).toBe("success")
+    })
+
+    // a mutation-driven refetch fails; React Query keeps the last successful
+    // rows, so the chip still resolves — but editing from that snapshot could
+    // save outdated values
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: PLANS_KEY })
+    })
+    await waitFor(() => {
+      expect(queryClient.getQueryState(PLANS_KEY)?.status).toBe("error")
+    })
+
+    const before = stub.calls.length
+    fireEvent.click(getByRole("button", { name: "chip" }))
+    await waitFor(() => {
+      expect(stub.calls.length).toBeGreaterThan(before)
     })
     expect(container.textContent).not.toContain("edit:")
   })

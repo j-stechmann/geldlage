@@ -1,9 +1,16 @@
 // @vitest-environment jsdom
 import React from "react"
-import { describe, it, expect } from "vitest"
+import { afterEach, describe, it, expect, vi } from "vitest"
 import { act, fireEvent, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { PlansList } from "@/components/planning/plans-list"
+import { resolveCategoryColor } from "@/lib/category-colors"
 import { renderWithQuery, stubFetch } from "./helpers-dom"
+
+// the settling test installs a manual fetch stub; do not leak it into a later
+// test in this file (each one installs its own, but the cleanup keeps that
+// invariant explicit)
+afterEach(() => vi.unstubAllGlobals())
 
 /**
  * /plans is a server-paged table: search, status and page serialize into the
@@ -78,6 +85,68 @@ describe("PlansList", () => {
     ).toBeDisabled()
   })
 
+  it("disarms actions and hides the stale count while a page is still loading", async () => {
+    // a manual fetch stub so the page-2 response can be held open
+    const calls: string[] = []
+    let resolvePageTwo: (res: Response) => void = () => {}
+    const response = (body: unknown) =>
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input)
+        calls.push(url)
+        if (url.includes("page=2")) {
+          return new Promise<Response>((resolve) => {
+            resolvePageTwo = resolve
+          })
+        }
+        return Promise.resolve(
+          response({ ...ONE_PAGE, total: 41, pageCount: 3 })
+        )
+      })
+    )
+
+    const { container, getByRole } = renderWithQuery(<PlansList />)
+    await waitFor(() => {
+      expect(container.textContent).toContain("41 Pläne")
+    })
+
+    fireEvent.click(getByRole("button", { name: /Weiter/ }))
+    await waitFor(() => {
+      expect(calls.some((u) => u.includes("page=2"))).toBe(true)
+    })
+
+    // placeholder rows are readable but not actionable, and the previous
+    // query's total/pageCount must not be presented as the current answer
+    expect(
+      getByRole("button", { name: "Aktionen für Mietwerk GmbH" })
+    ).toBeDisabled()
+    expect(container.textContent).not.toContain("41 Pläne")
+    expect(container.textContent).toContain("2 / …")
+    expect(container.textContent).toContain("…")
+
+    await act(async () => {
+      resolvePageTwo(
+        response({
+          ...ONE_PAGE,
+          page: 2,
+          total: 41,
+          pageCount: 3,
+        })
+      )
+    })
+    await waitFor(() => {
+      expect(container.textContent).toContain("2 / 3")
+    })
+    expect(
+      getByRole("button", { name: "Aktionen für Mietwerk GmbH" })
+    ).toBeEnabled()
+  })
+
   it("renders a category badge even when the stored color is missing", async () => {
     // legacy/imported rows can carry a category name with a NULL color;
     // resolveCategoryColor() derives a palette color from the id, so the
@@ -102,6 +171,12 @@ describe("PlansList", () => {
     await waitFor(() => {
       expect(container.textContent).toContain("Nebenkosten")
     })
+    // the badge keeps the palette fallback driven by the category id
+    const badge = container.querySelector(".category-badge") as HTMLElement
+    expect(badge).toBeTruthy()
+    expect(badge.style.getPropertyValue("--category-color")).toBe(
+      resolveCategoryColor(7, null)
+    )
   })
 
   it("distinguishes a genuinely empty list from an empty search result", async () => {
@@ -127,7 +202,9 @@ describe("PlansList", () => {
     const stub = stubFetch([
       { url: /\/api\/plans$/, json: { ...ONE_PAGE, pageCount: 2, total: 21 } },
     ])
-    const { getByLabelText, getByRole } = renderWithQuery(<PlansList />)
+    const { getByLabelText, getByRole, container } = renderWithQuery(
+      <PlansList />
+    )
 
     await waitFor(() => {
       expect(
@@ -149,6 +226,10 @@ describe("PlansList", () => {
             c.url.includes("page=1")
         )
       ).toBe(true)
+    })
+    // wait out the placeholder transition so the pager is armed again
+    await waitFor(() => {
+      expect(container.textContent).toContain("1 / 2")
     })
 
     fireEvent.click(getByRole("button", { name: /Weiter/ }))
@@ -228,6 +309,138 @@ describe("PlansList", () => {
       const pageTwo = pages.lastIndexOf("2")
       expect(pageTwo).toBeGreaterThan(-1)
       expect(pages.slice(pageTwo + 1)).not.toContain("1")
+    })
+  })
+
+  it("returns to page 1 when the filter changes while browsing a later page", async () => {
+    const stub = stubFetch([
+      {
+        url: /\/api\/plans$/,
+        json: { ...ONE_PAGE, total: 41, pageCount: 3 },
+      },
+    ])
+    const { getByLabelText, getByRole, container } = renderWithQuery(
+      <PlansList />
+    )
+    await waitFor(() => {
+      expect(container.textContent).toContain("41 Pläne")
+    })
+
+    fireEvent.click(getByRole("button", { name: /Weiter/ }))
+    await waitFor(() => {
+      expect(stub.calls.some((c) => c.url.includes("page=2"))).toBe(true)
+    })
+
+    fireEvent.change(getByLabelText("Pläne durchsuchen"), {
+      target: { value: "Miete" },
+    })
+    await waitFor(() => {
+      const last = stub.calls[stub.calls.length - 1]
+      expect(last.url).toContain("q=Miete")
+      expect(last.url).toContain("page=1")
+    })
+  })
+
+  it("the reset button clears search/status and returns to page 1 immediately", async () => {
+    const stub = stubFetch([
+      {
+        url: /\/api\/plans$/,
+        json: { ...ONE_PAGE, total: 41, pageCount: 3 },
+      },
+    ])
+    const { getByLabelText, getByRole, container } = renderWithQuery(
+      <PlansList />
+    )
+    await waitFor(() => {
+      expect(container.textContent).toContain("41 Pläne")
+    })
+
+    fireEvent.click(getByRole("button", { name: /Weiter/ }))
+    await waitFor(() => {
+      expect(stub.calls.some((c) => c.url.includes("page=2"))).toBe(true)
+    })
+    fireEvent.change(getByLabelText("Pläne durchsuchen"), {
+      target: { value: "Miete" },
+    })
+    await waitFor(() => {
+      expect(stub.calls.some((c) => c.url.includes("q=Miete"))).toBe(true)
+    })
+
+    fireEvent.click(
+      getByRole("button", { name: "Suche und Filter zurücksetzen" })
+    )
+
+    // the applied filter and page drop without waiting for the 300 ms
+    // debounce: the empty input and the results cannot disagree
+    await waitFor(() => {
+      const last = stub.calls[stub.calls.length - 1]
+      expect(last.url).not.toContain("q=")
+      expect(last.url).not.toContain("status=")
+      expect(last.url).toContain("page=1")
+    })
+    expect(
+      (getByLabelText("Pläne durchsuchen") as HTMLInputElement).value
+    ).toBe("")
+    expect(container.textContent).toContain("41 Pläne")
+  })
+
+  it("reset returns an unfiltered later page to page 1", async () => {
+    const stub = stubFetch([
+      {
+        url: /\/api\/plans$/,
+        json: { ...ONE_PAGE, total: 41, pageCount: 3 },
+      },
+    ])
+    const { container, getByRole } = renderWithQuery(<PlansList />)
+    await waitFor(() => {
+      expect(container.textContent).toContain("41 Pläne")
+    })
+
+    fireEvent.click(getByRole("button", { name: /Weiter/ }))
+    await waitFor(() => {
+      expect(stub.calls.some((c) => c.url.includes("page=2"))).toBe(true)
+    })
+
+    // no search/status is active, so only the explicit setPage(1) can bring
+    // the list back — the pre-fix handler left the user on page 2
+    fireEvent.click(
+      getByRole("button", { name: "Suche und Filter zurücksetzen" })
+    )
+    await waitFor(() => {
+      const last = stub.calls[stub.calls.length - 1]
+      expect(last.url).toContain("page=1")
+      expect(last.url).not.toContain("q=")
+      expect(last.url).not.toContain("status=")
+    })
+  })
+
+  it("serializes the status filter and clears it on reset", async () => {
+    const stub = stubFetch([
+      { url: /\/api\/plans$/, json: { ...ONE_PAGE, total: 1 } },
+    ])
+    const { getByRole, container } = renderWithQuery(<PlansList />)
+    await waitFor(() => {
+      expect(container.textContent).toContain("1 Plan")
+    })
+
+    const user = userEvent.setup()
+    await user.click(getByRole("combobox", { name: "Status filtern" }))
+    const active = await waitFor(() => getByRole("option", { name: "Aktiv" }))
+    await user.click(active)
+
+    await waitFor(() => {
+      const statusCall = stub.calls.find((c) => c.url.includes("status=active"))
+      expect(statusCall).toBeTruthy()
+      expect(statusCall!.url).toContain("page=1")
+    })
+
+    await user.click(
+      getByRole("button", { name: "Suche und Filter zurücksetzen" })
+    )
+    await waitFor(() => {
+      const last = stub.calls[stub.calls.length - 1]
+      expect(last.url).not.toContain("status=")
+      expect(last.url).toContain("page=1")
     })
   })
 })

@@ -84,9 +84,11 @@ export default function DashboardPage() {
           >
             Geplant einblenden
           </Button>
-          {forecastOn && !forecast && forecastQuery.isError && (
+          {forecastOn && forecastQuery.isError && (
             /* a failed projection must not read as "no plans" (or worse, as
-               an inert toggle): the planning pages' ErrorState + retry pattern */
+               an inert toggle) — and a failed *refetch* over cached figures
+               must not read as success either: keep the last card visible but
+               surface the retryable banner, the /plans row-banner pattern */
             <ErrorState onRetry={() => void forecastQuery.refetch()} />
           )}
           {forecastOn && hasContentFilters(filters) && (

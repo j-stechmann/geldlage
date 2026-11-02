@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react"
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { waitFor } from "@testing-library/react"
+import { fireEvent, waitFor } from "@testing-library/react"
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -66,12 +66,34 @@ beforeEach(() => {
 
 describe("PlanCalendarView failure surface", () => {
   it("a failed window read shows the retryable banner, not an empty month", async () => {
-    stubAll({ occ: { status: 500 }, cal: { status: 500 } })
-    const { container } = renderWithQuery(<PlanCalendarView />)
+    const stub = stubAll({ occ: { status: 500 }, cal: { status: 500 } })
+    const { container, getByText } = renderWithQuery(<PlanCalendarView />)
     await waitFor(() => {
       expect(container.textContent).toContain(ERROR_TEXT)
     })
+    // the create action and the calendar stay usable beside the banner
+    expect(container.textContent).toContain("Plan anlegen")
+    expect(
+      Array.from(container.querySelectorAll("button")).some(
+        (b) => b.textContent?.includes("Plan anlegen") && !b.disabled
+      )
+    ).toBe(true)
+    expect(container.textContent).toContain("Monat")
     expect(container.textContent).not.toContain(FAR_HINT)
+
+    // the retry really re-requests both window reads
+    fireEvent.click(getByText("Erneut versuchen"))
+    await waitFor(() => {
+      expect(
+        stub.calls.filter((c) => c.url.startsWith("/api/plans/occurrences"))
+          .length
+      ).toBeGreaterThanOrEqual(2)
+      expect(
+        stub.calls.filter(
+          (c) => c.url.split("?")[0] === "/api/transactions/calendar"
+        ).length
+      ).toBeGreaterThanOrEqual(2)
+    })
   })
 
   it("a far window shows the navigation hint without a dead retry", async () => {
@@ -87,12 +109,21 @@ describe("PlanCalendarView failure surface", () => {
   })
 
   it("a failed plan-list read keeps the calendar alive and offers a retry", async () => {
-    stubAll({ plans: { status: 500 } })
-    const { container } = renderWithQuery(<PlanCalendarView />)
+    const stub = stubAll({ plans: { status: 500 } })
+    const { container, getByText } = renderWithQuery(<PlanCalendarView />)
     await waitFor(() => {
       expect(container.textContent).toContain(ERROR_TEXT)
     })
-    // the calendar itself still mounts (its own reads succeeded)
+    // the calendar itself still mounts (its own reads succeeded), and plan
+    // creation does not depend on the list read
     expect(container.textContent).toContain("Monat")
+    expect(container.textContent).toContain("Plan anlegen")
+
+    fireEvent.click(getByText("Erneut versuchen"))
+    await waitFor(() => {
+      expect(
+        stub.calls.filter((c) => c.url.startsWith("/api/plans?")).length
+      ).toBeGreaterThanOrEqual(2)
+    })
   })
 })

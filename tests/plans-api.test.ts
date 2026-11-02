@@ -432,6 +432,29 @@ describe("GET /api/plans", () => {
       expect(data.plans[0].counterparty).toBe("Mietwerk GmbH")
     }
 
+    // category-only match: the loop's "Miete" also appears in the purpose, so
+    // it would still pass if the categories join/search were removed
+    const categoryOnlyId = db
+      .insert(categories)
+      .values({
+        userId,
+        name: "Nebenkosten",
+        nameKey: "nebenkosten",
+        language: "de",
+        origin: "manual",
+      })
+      .returning()
+      .get().id
+    await seedSimplePlan({
+      counterparty: "Hausverwaltung",
+      purpose: "Abschlag",
+      categoryId: categoryOnlyId,
+    })
+    const categoryOnly = await getPlansQuery(`page=1&pageSize=20&q=Nebenkosten`)
+    const categoryOnlyData = await categoryOnly.json()
+    expect(categoryOnlyData.total).toBe(1)
+    expect(categoryOnlyData.plans[0].counterparty).toBe("Hausverwaltung")
+
     const miss = await getPlansQuery("page=1&pageSize=20&q=Versicherung")
     expect((await miss.json()).total).toBe(0)
   })
@@ -492,6 +515,16 @@ describe("GET /api/plans", () => {
     const data = await res.json()
     expect(data.page).toBe(1)
     expect(data.plans).toHaveLength(1)
+
+    // non-positive / non-numeric pages fall back too (paging params are
+    // lenient, unlike the strict status allowlist)
+    for (const page of ["0", "-3", "abc"]) {
+      const fallback = await getPlansQuery(`page=${page}&pageSize=20`)
+      expect(fallback.status).toBe(200)
+      const fallbackData = await fallback.json()
+      expect(fallbackData.page).toBe(1)
+      expect(fallbackData.plans).toHaveLength(1)
+    }
   })
 
   it("falls back to page 1 when the OFFSET product leaves the safe range", async () => {
@@ -526,11 +559,22 @@ describe("GET /api/plans", () => {
 
     const second = await getPlansQuery("page=2&pageSize=2")
     const secondData = await second.json()
+    expect(secondData.total).toBe(3)
     expect(secondData.page).toBe(2)
+    expect(secondData.pageCount).toBe(2)
     expect(secondData.plans).toHaveLength(1)
     // the two pages do not overlap
     expect(secondData.plans[0].id).not.toBe(firstData.plans[0].id)
     expect(secondData.plans[0].id).not.toBe(firstData.plans[1].id)
+
+    // an in-range page beyond pageCount is not clamped: it honestly returns
+    // an empty page and echoes the requested page (the UI follows pageCount)
+    const beyond = await getPlansQuery("page=99&pageSize=2")
+    const beyondData = await beyond.json()
+    expect(beyondData.total).toBe(3)
+    expect(beyondData.page).toBe(99)
+    expect(beyondData.pageCount).toBe(2)
+    expect(beyondData.plans).toHaveLength(0)
   })
 
   it("rejects an unknown status instead of returning the unfiltered list", async () => {
@@ -561,6 +605,23 @@ describe("GET /api/plans", () => {
     expect(data.total).toBe(2)
     expect(data.page).toBe(1)
     expect(data.pageCount).toBe(1)
+  })
+
+  it("applies q/status to the unpaged full list too", async () => {
+    await seedSimplePlan({ counterparty: "Mietwerk", status: "active" })
+    await seedSimplePlan({ counterparty: "Stadtwerke", status: "finished" })
+
+    const byStatus = await (await getPlansQuery("status=active")).json()
+    expect(byStatus.plans).toHaveLength(1)
+    expect(byStatus.plans[0].counterparty).toBe("Mietwerk")
+    expect(byStatus.total).toBe(1)
+    expect(byStatus.page).toBe(1)
+    expect(byStatus.pageCount).toBe(1)
+
+    const bySearch = await (await getPlansQuery("q=stadt")).json()
+    expect(bySearch.plans).toHaveLength(1)
+    expect(bySearch.plans[0].counterparty).toBe("Stadtwerke")
+    expect(bySearch.total).toBe(1)
   })
 
   it("clamps pageSize to 100", async () => {

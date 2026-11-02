@@ -200,10 +200,16 @@ export function PlansList() {
 
   // debounce the text input, emitting the trimmed value so the URL/query
   // key does not churn on trailing whitespace (the transactions FilterBar
-  // pattern)
+  // pattern). The timer id lives in a ref so the reset button can cancel an
+  // already-due timer synchronously, instead of waiting for the effect
+  // cleanup and briefly re-applying the pre-reset search.
+  const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   React.useEffect(() => {
-    const t = setTimeout(() => setQ(qDraft.trim()), 300)
-    return () => clearTimeout(t)
+    debounceRef.current = setTimeout(() => setQ(qDraft.trim()), 300)
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+      debounceRef.current = null
+    }
   }, [qDraft])
 
   const filters: PlanListFilters = { q, status }
@@ -219,6 +225,13 @@ export function PlansList() {
 
   const plansQuery = usePlansPage(filters, page, PAGE_SIZE)
   const pageCount = plansQuery.data?.pageCount ?? 1
+  // `placeholderData` keeps the previous page on screen while a page change
+  // loads, which is what keeps the table from flashing a skeleton. It must
+  // NOT be mistaken for the current key's answer, though: the rows, total and
+  // pageCount are the previous query's, so row actions stay disarmed and the
+  // count/pager figures show "…" until the real response lands. (A new-key
+  // error drops the placeholder and surfaces the inline ErrorState.)
+  const settling = plansQuery.isPlaceholderData
 
   // a delete on the last page can leave it out of range — follow the server's
   // pageCount instead of rendering a permanently empty page (render-time
@@ -319,7 +332,7 @@ export function PlansList() {
           value={status}
           onValueChange={(v) => setStatus(String(v) as PlanStatusFilter)}
         >
-          <SelectTrigger className="w-40">
+          <SelectTrigger className="w-40" aria-label="Status filtern">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -336,8 +349,17 @@ export function PlansList() {
           title="Suche und Filter zurücksetzen"
           aria-label="Suche und Filter zurücksetzen"
           onClick={() => {
+            // clear the applied filter immediately, not only via the 300 ms
+            // debounce: otherwise the empty input would still fetch the old
+            // query (and the old page) until the timer fires
+            if (debounceRef.current) {
+              clearTimeout(debounceRef.current)
+              debounceRef.current = null
+            }
             setQDraft("")
+            setQ("")
             setStatus("all")
+            setPage(1)
           }}
         >
           <RotateCcw className="size-4" />
@@ -389,7 +411,7 @@ export function PlansList() {
                   />
                 </TableCell>
               </TableRow>
-            ) : plansQuery.isLoading && rows.length === 0 ? (
+            ) : (plansQuery.isLoading || settling) && rows.length === 0 ? (
               Array.from({ length: 6 }).map((_, i) => (
                 <TableRow key={i}>
                   {Array.from({ length: COLUMN_COUNT }).map((_, j) => (
@@ -468,7 +490,7 @@ export function PlansList() {
                       <PlanActions
                         plan={plan}
                         busy={busy}
-                        disabled={plansQuery.isError}
+                        disabled={plansQuery.isError || settling}
                         onEdit={openEdit}
                         onToggleStatus={toggleStatus}
                         onDelete={setDeleting}
@@ -484,7 +506,7 @@ export function PlansList() {
 
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">
-          {data
+          {data && !settling
             ? `${data.total.toLocaleString("de-DE")} ${data.total === 1 ? "Plan" : "Pläne"}`
             : "…"}
         </p>
@@ -499,12 +521,13 @@ export function PlansList() {
             Zurück
           </Button>
           <span className="text-sm text-muted-foreground tabular-nums">
-            {page} / {pageCount}
+            {page} /{" "}
+            {settling || (plansQuery.isError && !data) ? "…" : pageCount}
           </span>
           <Button
             variant="outline"
             size="sm"
-            disabled={page >= pageCount}
+            disabled={page >= pageCount || settling}
             onClick={() => setPage((p) => p + 1)}
           >
             Weiter

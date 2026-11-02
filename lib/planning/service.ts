@@ -5,7 +5,7 @@
  */
 import { and, eq, inArray, or, sql } from "drizzle-orm"
 import type { SQL } from "drizzle-orm"
-import { getDb } from "@/lib/db"
+import { getDb, type Db } from "@/lib/db"
 import { escapeLike, likeEscapedFolded } from "@/lib/db/search"
 import {
   accounts,
@@ -294,8 +294,7 @@ export interface PlanRow {
   updatedAt: string
 }
 
-function planRowsQuery() {
-  const db = getDb()
+function planRowsQuery(db: Db = getDb()) {
   return db
     .select({
       id: plannedTransactions.id,
@@ -411,7 +410,7 @@ export function listPlansPage(
       .leftJoin(categories, eq(categories.id, plannedTransactions.categoryId))
       .where(where)
       .get()?.count ?? 0
-  const plans = planRowsQuery()
+  const plans = planRowsQuery(db)
     .where(where)
     .orderBy(...PLAN_LIST_ORDER)
     .limit(pageSize)

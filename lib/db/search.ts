@@ -11,7 +11,8 @@ import { sql, type SQL, type SQLWrapper } from "drizzle-orm"
  *
  * Case folding: SQLite's `LIKE` folds ASCII only, so a German user searching
  * `überweisung` would not match a stored `Überweisung`. `search_fold` is a
- * connection-level function (registered by `createSchemaSqlite`) that
+ * connection-level function (registered by `createSchemaSqlite`, re-checked by
+ * `getDb`/`getReadOnlyDb` for dev hot reloads) that
  * lowercases with JS's Unicode-aware `toLowerCase`; `likeEscapedFolded` folds
  * BOTH the column and the pattern. Folding costs a JS callback per scanned row
  * and column, so it is used where the scanned set is small by nature
@@ -28,9 +29,19 @@ export function foldSearchText(value: unknown): string | null {
 }
 
 /**
+ * Connection-level functions a given better-sqlite3 handle already has.
+ * `registerSqlFunctions` is idempotent at the SQLite level, but getDb() runs
+ * on every query; this keeps the re-registration cost to once per connection
+ * (per module instance — a dev hot reload re-registers once, which is fine).
+ */
+const registeredSqlClients = new WeakSet<object>()
+
+/**
  * Register the connection-level functions the query layer relies on. Called
- * from `createSchemaSqlite` so every DB (prod singleton, tests, injected test
- * handles) has them before any query runs. Registration is idempotent: SQLite
+ * from `createSchemaSqlite` (prod singleton, test DBs) and from `getDb` (dev
+ * hot reloads, where the global holder outlives the module that first created
+ * the handle) and `createReadOnlyDb` (the agent's second connection), so every
+ * DB has them before any query runs. Registration is idempotent: SQLite
  * replaces a function of the same name/arity.
  */
 export function registerSqlFunctions(sqlite: {
@@ -40,7 +51,9 @@ export function registerSqlFunctions(sqlite: {
     cb: (value: unknown) => string | null
   ) => unknown
 }) {
+  if (registeredSqlClients.has(sqlite)) return
   sqlite.function(SEARCH_FOLD_FN, { deterministic: true }, foldSearchText)
+  registeredSqlClients.add(sqlite)
 }
 
 /** Escape LIKE metacharacters in user input for `ESCAPE '\'`. */
@@ -59,8 +72,10 @@ export function likeEscaped(column: SQLWrapper, pattern: string): SQL {
 
 /**
  * `search_fold(column) LIKE search_fold(?) ESCAPE '\'` — metacharacter-literal
- * and case-insensitive for the whole alphabet. Reserve this for small scanned
- * sets: the fold is a JS call per row and column.
+ * and case-insensitive beyond SQLite's ASCII-only LIKE (JS `toLowerCase`,
+ * which covers German umlauts; it is not full Unicode case folding — `ß`/`SS`
+ * still differ). Reserve this for small scanned sets: the fold is a JS call
+ * per row and column.
  */
 export function likeEscapedFolded(column: SQLWrapper, pattern: string): SQL {
   return sql`${sql.raw(SEARCH_FOLD_FN)}(${column}) LIKE ${sql.raw(SEARCH_FOLD_FN)}(${pattern}) ESCAPE '\\'`

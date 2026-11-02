@@ -42,6 +42,13 @@ export function PlanCalendarView() {
   }
 
   const handleEventClick = (occurrence: PlanOccurrence) => {
+    // A failed background refetch keeps the last successful list; opening the
+    // editor from that stale snapshot could PATCH outdated values. Refetch and
+    // leave the dialog closed, matching the list's disarmed row actions.
+    if (plansQuery.isError) {
+      void plansQuery.refetch()
+      return
+    }
     const plan = plans.find((p) => p.id === occurrence.planId)
     if (plan) {
       setEditing(plan)

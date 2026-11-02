@@ -63,6 +63,10 @@ const globalRef = globalThis as unknown as {
 
 export function getDb(): Db {
   if (process.env.VITEST && globalRef.__geldlageTestDb) {
+    // injected handles normally come from createTestDb()/createSchemaSqlite,
+    // which already registered; the WeakSet makes this free and covers a raw
+    // drizzle handle injected by a future test
+    registerSqlFunctions(globalRef.__geldlageTestDb.$client)
     return globalRef.__geldlageTestDb
   }
   if (!globalRef.__geldlageDbHolder) {
@@ -73,6 +77,10 @@ export function getDb(): Db {
     holder.__geldlageDb = createDb()
     createSchemaSqlite(holder.__geldlageDb)
   }
+  // The global holder survives Next dev hot reloads, so a handle created by
+  // an older module (before search_fold existed) would otherwise never gain
+  // the function. One-time per connection via the WeakSet in search.ts.
+  registerSqlFunctions(holder.__geldlageDb.$client)
   // cheap idempotent re-check so a hot-reloaded schema heals the file DB
   migrateSchema(holder.__geldlageDb)
   return holder.__geldlageDb
