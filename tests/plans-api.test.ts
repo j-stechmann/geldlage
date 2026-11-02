@@ -436,6 +436,21 @@ describe("GET /api/plans", () => {
     expect((await miss.json()).total).toBe(0)
   })
 
+  it("folds case for non-ASCII text too", async () => {
+    // SQLite's LIKE is case-insensitive for ASCII only; search_fold covers
+    // the rest of the alphabet (Ü/Ö/Ä are common in German bank text)
+    await seedSimplePlan({ counterparty: "Überweisung Ölwechsel" })
+    await seedSimplePlan({ counterparty: "Stadtwerke" })
+
+    const res = await getPlansQuery(
+      `page=1&pageSize=20&q=${encodeURIComponent("überweisung ölwechsel")}`
+    )
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(data.total).toBe(1)
+    expect(data.plans[0].counterparty).toBe("Überweisung Ölwechsel")
+  })
+
   it("treats LIKE metacharacters in the query as literals", async () => {
     await seedSimplePlan({ counterparty: "Zins 2,5 % p.a." })
     await seedSimplePlan({ counterparty: "Zinsgutschrift" })
@@ -524,8 +539,13 @@ describe("GET /api/plans", () => {
     expect(res.status).toBe(400)
     expect((await res.json()).error).toBe("invalid_status")
 
-    // absent/empty still means "all" (the calendar lookup contract)
-    for (const query of ["page=1&pageSize=20", "page=1&pageSize=20&status="]) {
+    // absent/empty/"all" mean "all" (the value the client DTO carries when
+    // unfiltered, so the API must not reject it)
+    for (const query of [
+      "page=1&pageSize=20",
+      "page=1&pageSize=20&status=",
+      "page=1&pageSize=20&status=all",
+    ]) {
       const ok = await getPlansQuery(query)
       expect(ok.status).toBe(200)
       expect((await ok.json()).total).toBe(1)

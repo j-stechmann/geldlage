@@ -4,8 +4,9 @@
  * like every other domain table. Money stays integer cents (ADR-0002).
  */
 import { and, eq, inArray, or, sql } from "drizzle-orm"
-import type { SQL, SQLWrapper } from "drizzle-orm"
+import type { SQL } from "drizzle-orm"
 import { getDb } from "@/lib/db"
+import { escapeLike, likeEscapedFolded } from "@/lib/db/search"
 import {
   accounts,
   categories,
@@ -328,22 +329,6 @@ const PLAN_LIST_ORDER = [
   sql`${plannedTransactions.id} DESC`,
 ] as const
 
-/**
- * Escape LIKE metacharacters in user input. SQLite has no default escape
- * character, so the pattern must be matched with an explicit `ESCAPE '\'`
- * (see likeEscaped): without it a `%`/`_` typed into the search would act as
- * a wildcard and return rows that do not contain the query.
- */
-function escapeLike(s: string): string {
-  return s.replace(/([\\%_])/g, "\\$1")
-}
-
-/** `column LIKE ? ESCAPE '\'` — drizzle's like() cannot carry the ESCAPE clause. */
-function likeEscaped(column: SQLWrapper, pattern: string): SQL {
-  // JS: "\\" → a single backslash in the generated SQL
-  return sql`${column} LIKE ${pattern} ESCAPE '\\'`
-}
-
 function planListWhere(userId: number, filters: PlanListFilters = {}): SQL {
   const conditions: SQL[] = [eq(plannedTransactions.userId, userId)]
   if (filters.status !== undefined && filters.status !== "all") {
@@ -351,20 +336,19 @@ function planListWhere(userId: number, filters: PlanListFilters = {}): SQL {
   }
   const q = filters.q?.trim()
   if (q) {
-    // SQLite LIKE is case-insensitive for ASCII and the columns' contents
-    // are free bank text (counterparty/purpose/notes); account + category
-    // names are joined in so the search can target any list column.
-    // Metacharacters are escaped, so a literal "%"/"_" stays literal — the
-    // same contract the transactions search aims at
-    // (lib/analytics/queries.ts).
+    // The columns' contents are free bank text (counterparty/purpose/notes);
+    // account + category names are joined in so the search can target any
+    // list column. likeEscapedFolded() folds case for the whole alphabet
+    // (SQLite's LIKE folds ASCII only) and treats "%"/"_" literally; the plan
+    // set is small, so the per-row fold is cheap.
     const pattern = `%${escapeLike(q)}%`
     conditions.push(
       or(
-        likeEscaped(plannedTransactions.counterparty, pattern),
-        likeEscaped(plannedTransactions.purpose, pattern),
-        likeEscaped(plannedTransactions.notes, pattern),
-        likeEscaped(accounts.name, pattern),
-        likeEscaped(categories.name, pattern)
+        likeEscapedFolded(plannedTransactions.counterparty, pattern),
+        likeEscapedFolded(plannedTransactions.purpose, pattern),
+        likeEscapedFolded(plannedTransactions.notes, pattern),
+        likeEscapedFolded(accounts.name, pattern),
+        likeEscapedFolded(categories.name, pattern)
       )!
     )
   }

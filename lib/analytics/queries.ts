@@ -5,13 +5,13 @@ import {
   eq,
   gte,
   inArray,
-  like,
   lte,
   or,
   sql,
   type SQL,
 } from "drizzle-orm"
 import { getDb } from "@/lib/db"
+import { escapeLike, likeEscaped } from "@/lib/db/search"
 import { accounts, categories, transactions } from "@/lib/db/schema"
 
 export type SortField =
@@ -79,11 +79,12 @@ export function parseFilters(sp: URLSearchParams): TransactionFilters {
   }
 }
 
-/** escape LIKE wildcards in user input; match with LIKE ... ESCAPE '\' */
-function escapeLike(s: string): string {
-  return s.replace(/([\\%_])/g, "\\$1")
-}
-
+/**
+ * Free-text search over payee/payer/purpose. Uses the shared SQL search
+ * helpers so `%`/`_` stay literal (drizzle's `like()` cannot emit the ESCAPE
+ * clause); case folding stays ASCII-only here because this scan covers the
+ * full booking history (`likeEscapedFolded` would add a JS call per row).
+ */
 export function buildWhere(
   f: TransactionFilters,
   userId: number
@@ -93,11 +94,11 @@ export function buildWhere(
     conditions.push(eq(transactions.status, f.status ?? "Gebucht"))
   }
   if (f.q) {
-    const escaped = `%${escapeLike(f.q)}%`
+    const pattern = `%${escapeLike(f.q)}%`
     const cond = or(
-      like(transactions.payee, escaped),
-      like(transactions.payer, escaped),
-      like(transactions.purpose, escaped)
+      likeEscaped(transactions.payee, pattern),
+      likeEscaped(transactions.payer, pattern),
+      likeEscaped(transactions.purpose, pattern)
     )
     if (cond) conditions.push(cond)
   }

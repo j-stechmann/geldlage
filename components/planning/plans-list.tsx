@@ -240,9 +240,16 @@ export function PlansList() {
   }
 
   // a successful create is the newest row, i.e. page 1; editing and
-  // cancelling keep the current page so the list does not jump underfoot
+  // cancelling keep the current page so the list does not jump underfoot.
+  // The active filters are cleared too: a search or status=Beendet would
+  // otherwise hide the new plan on the page we just jumped to, leaving the
+  // toast as the only confirmation that the create worked.
   const handleSaved = (created: boolean) => {
-    if (created) setPage(1)
+    if (!created) return
+    setQDraft("")
+    setQ("")
+    setStatus("all")
+    setPage(1)
   }
 
   const toastError = (title: string, err: unknown) =>

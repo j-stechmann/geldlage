@@ -185,18 +185,26 @@ async function parseError(res: Response, fallback: string): Promise<ApiError> {
  * the matched-plan reverse lookup. `includeNextDue=0` skips the server's
  * per-plan recurrence walk: neither consumer reads `nextDueDate`, and the
  * paged /plans table computes it from its own page response.
+ *
+ * Both observers use the same `PLANS_KEY` cache entry, so the fetcher must be
+ * defined once — whichever observer mounts first would otherwise define the
+ * cached shape.
  */
 const PLANS_LOOKUP_URL = "/api/plans?includeNextDue=0"
 
+const plansLookupQuery = {
+  queryKey: PLANS_KEY,
+  queryFn: async (): Promise<{ plans: PlanRow[] }> => {
+    const res = await apiFetch(PLANS_LOOKUP_URL)
+    if (!res.ok)
+      throw await parseError(res, "Pläne konnten nicht geladen werden")
+    return res.json()
+  },
+} as const
+
 export function usePlans() {
   return useQuery<{ plans: PlanRow[] }>({
-    queryKey: PLANS_KEY,
-    queryFn: async () => {
-      const res = await apiFetch(PLANS_LOOKUP_URL)
-      if (!res.ok)
-        throw await parseError(res, "Pläne konnten nicht geladen werden")
-      return res.json()
-    },
+    ...plansLookupQuery,
     placeholderData: (prev) => prev,
   })
 }
@@ -385,13 +393,7 @@ export function useMatchedPlanForTx(ref: MatchedTxRef | null): {
   // per expanded unmatched row (PLANS_KEY is the cache the calendar and the
   // transactions table already share)
   const plansQuery = useQuery<{ plans: PlanRow[] }>({
-    queryKey: PLANS_KEY,
-    queryFn: async () => {
-      const res = await apiFetch(PLANS_LOOKUP_URL)
-      if (!res.ok)
-        throw await parseError(res, "Pläne konnten nicht geladen werden")
-      return res.json()
-    },
+    ...plansLookupQuery,
     enabled: planId !== null,
   })
 

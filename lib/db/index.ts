@@ -8,6 +8,7 @@ import { users as usersTable } from "./schema"
 import { getConfig } from "@/lib/config"
 import { pickCategoryColor } from "@/lib/category-colors"
 import { DEFAULT_THREAD_TITLE } from "@/lib/agent/constants"
+import { registerSqlFunctions } from "./search"
 
 export type Db = ReturnType<typeof createDb>
 /** Transaction callback parameter type (for helpers receiving `tx`). */
@@ -97,6 +98,9 @@ export function createTestDb(): Db {
 
 /** Create all tables idempotently (drizzle-kit push equivalent, code-first). */
 export function createSchemaSqlite(db: Db) {
+  // Connection-level SQL functions (search_fold for LIKE search) must exist
+  // before the first query, not just before the first table write.
+  registerSqlFunctions(db.$client)
   dropLegacyUserlessTables(db)
   db.run(`
     CREATE TABLE IF NOT EXISTS users (
