@@ -221,7 +221,7 @@ export function queryTransactions(
 }
 
 /**
- * Precise single-row lookup (deep link from the /planung calendar):
+ * Precise single-row lookup (deep link from the /calendar page):
  * user-scoped, ignores every other filter — a miss or a foreign id is an
  * empty page, never a leak.
  */

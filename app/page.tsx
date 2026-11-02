@@ -16,8 +16,8 @@ import {
   hasContentFilters,
   type TableFilters,
 } from "@/lib/filters"
-import { germanDate, useForecast } from "@/components/planning/api"
-import { euro } from "@/lib/money"
+import { useForecast } from "@/components/planning/api"
+import { ForecastSummary } from "@/components/planning/forecast-summary"
 
 const FORECAST_MONTHS = 12
 
@@ -84,25 +84,9 @@ export default function DashboardPage() {
           >
             Geplant einblenden
           </Button>
-          {forecastOn && forecast && (
-            <span className="text-sm text-muted-foreground">
-              Projektion{" "}
-              <strong className="font-medium text-foreground tabular-nums">
-                {euro(
-                  forecast.projectedBalance[
-                    forecast.projectedBalance.length - 1
-                  ]?.balanceCents ?? null
-                )}
-              </strong>{" "}
-              zum {germanDate(forecast.horizon.to)}
-              {forecast.withoutSnapshot
-                ? " (ohne Kontostand-Referenz: Summe der Buchungen)"
-                : ""}
-            </span>
-          )}
           {forecastOn && !forecast && forecastQuery.isError && (
             /* a failed projection must not read as "no plans" (or worse, as
-               an inert toggle): /planung's ErrorState + retry pattern */
+               an inert toggle): the planning pages' ErrorState + retry pattern */
             <ErrorState onRetry={() => void forecastQuery.refetch()} />
           )}
           {forecastOn && hasContentFilters(filters) && (
@@ -117,6 +101,8 @@ export default function DashboardPage() {
             </span>
           )}
         </div>
+
+        {forecastOn && forecast && <ForecastSummary forecast={forecast} />}
 
         {/* @min-[1024px] (container query on <main>) instead of viewport
             lg: the charts reflow against the space left of the agent dock.

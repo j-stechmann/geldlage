@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   if (!session) return unauthorized()
   const sp = request.nextUrl.searchParams
 
-  // precise single-row lookup (deep link from /planung): short-circuits all
+  // precise single-row lookup (deep link from /calendar): short-circuits all
   // filter/pagination handling — a miss is an empty page, never a leak
   const id = sp.get("id")?.trim()
   if (id) {

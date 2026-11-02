@@ -69,6 +69,9 @@ function deletePlan(id: string, uid: number = userId) {
 function getPlansRow(uid: number = userId) {
   return authedRequest(`${BASE}/api/plans`, uid).then(getPlans)
 }
+function getPlansQuery(query: string, uid: number = userId) {
+  return authedRequest(`${BASE}/api/plans?${query}`, uid).then(getPlans)
+}
 function getOccurrences(query: string, uid: number = userId) {
   return authedRequest(`${BASE}/api/plans/occurrences?${query}`, uid).then(
     getOccurrencesRoute
@@ -397,6 +400,96 @@ describe("GET /api/plans", () => {
       "plan-b-tie",
       "plan-a-tie",
     ])
+  })
+
+  it("searches counterparty, purpose, notes, account and category names", async () => {
+    await seedSimplePlan({
+      counterparty: "Mietwerk GmbH",
+      purpose: "Miete Januar",
+      notes: "Dauerauftrag",
+      accountId,
+      categoryId,
+    })
+    await seedSimplePlan({
+      counterparty: "Stadtwerke",
+      purpose: "Abschlag Strom",
+      notes: null,
+    })
+
+    for (const q of [
+      "mietwerk",
+      "MIETE JANUAR",
+      "dauerauftrag",
+      "Girokonto",
+      "Miete",
+    ]) {
+      const res = await getPlansQuery(
+        `page=1&pageSize=20&q=${encodeURIComponent(q)}`
+      )
+      expect(res.status).toBe(200)
+      const data = await res.json()
+      expect(data.total).toBe(1)
+      expect(data.plans[0].counterparty).toBe("Mietwerk GmbH")
+    }
+
+    const miss = await getPlansQuery("page=1&pageSize=20&q=Versicherung")
+    expect((await miss.json()).total).toBe(0)
+  })
+
+  it("filters by status and paginates with a stable total/pageCount", async () => {
+    await seedSimplePlan({ counterparty: "A", status: "active" })
+    await seedSimplePlan({ counterparty: "B", status: "paused" })
+    await seedSimplePlan({ counterparty: "C", status: "finished" })
+
+    const activeOnly = await getPlansQuery("page=1&pageSize=20&status=active")
+    const activeData = await activeOnly.json()
+    expect(activeData.total).toBe(1)
+    expect(activeData.plans[0].counterparty).toBe("A")
+
+    const first = await getPlansQuery("page=1&pageSize=2")
+    const firstData = await first.json()
+    expect(firstData.total).toBe(3)
+    expect(firstData.page).toBe(1)
+    expect(firstData.pageCount).toBe(2)
+    expect(firstData.plans).toHaveLength(2)
+
+    const second = await getPlansQuery("page=2&pageSize=2")
+    const secondData = await second.json()
+    expect(secondData.page).toBe(2)
+    expect(secondData.plans).toHaveLength(1)
+    // the two pages do not overlap
+    expect(secondData.plans[0].id).not.toBe(firstData.plans[0].id)
+    expect(secondData.plans[0].id).not.toBe(firstData.plans[1].id)
+  })
+
+  it("keeps the unpaged full-list contract for existing consumers", async () => {
+    await seedSimplePlan({ counterparty: "A", status: "active" })
+    await seedSimplePlan({ counterparty: "B", status: "finished" })
+    const res = await getPlansRow(userId)
+    const data = await res.json()
+    expect(data.plans).toHaveLength(2)
+    expect(data.total).toBe(2)
+    expect(data.page).toBe(1)
+    expect(data.pageCount).toBe(1)
+  })
+
+  it("clamps pageSize to 100", async () => {
+    for (let i = 0; i < 101; i++) {
+      db.insert(plannedTransactions)
+        .values({
+          userId,
+          counterparty: `Plan ${i}`,
+          amountCents: -100,
+          dtstart: "2026-01-01",
+        })
+        .run()
+    }
+    const res = await getPlansQuery("page=1&pageSize=5000")
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(data.total).toBe(101)
+    expect(data.plans).toHaveLength(100)
+    expect(data.pageCount).toBe(2)
   })
 
   it("401 without a session", async () => {
@@ -735,7 +828,7 @@ describe("GET /api/transactions/calendar", () => {
         .status
     ).toBe(400)
     // same far-window contract as GET /api/plans/occurrences: the two
-    // /planung window reads must fail together (the calendar pair shares
+    // /calendar window reads must fail together (the calendar pair shares
     // one ErrorState — a far navigation would otherwise 400 occurrences
     // while bank chips still served beneath it)
     const farFuture = await getCalendar("from=2999-01-01&to=2999-02-10")

@@ -1,0 +1,106 @@
+// @vitest-environment jsdom
+import React from "react"
+import { describe, it, expect } from "vitest"
+import { fireEvent, waitFor } from "@testing-library/react"
+import { PlansList } from "@/components/planning/plans-list"
+import { renderWithQuery, stubFetch } from "./helpers-dom"
+
+/**
+ * /plans is a server-paged table: search, status and page serialize into the
+ * /api/plans query string, failed reads surface the shared ErrorState, and
+ * empty states distinguish "no plans at all" from "no search hits".
+ */
+
+const EMPTY_PAGE = { plans: [], total: 0, page: 1, pageCount: 1 }
+
+const ONE_PAGE = {
+  plans: [
+    {
+      id: "plan-1",
+      accountId: null,
+      accountName: null,
+      counterparty: "Mietwerk GmbH",
+      purpose: "Miete Januar",
+      amountCents: -9950,
+      categoryId: null,
+      categoryName: null,
+      categoryColor: null,
+      dtstart: "2026-01-01",
+      rrule: "FREQ=MONTHLY;BYMONTHDAY=1",
+      status: "active",
+      notes: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      nextDueDate: "2026-11-01",
+    },
+  ],
+  total: 1,
+  page: 1,
+  pageCount: 1,
+}
+
+const ERROR_TEXT = "Daten konnten nicht geladen werden."
+
+describe("PlansList", () => {
+  it("shows the ErrorState instead of the empty-plan copy on a failed read", async () => {
+    stubFetch([{ url: /\/api\/plans$/, status: 500 }])
+    const { container } = renderWithQuery(<PlansList />)
+    await waitFor(() => {
+      expect(container.textContent).toContain(ERROR_TEXT)
+    })
+    expect(container.textContent).not.toContain("Noch keine Pläne angelegt")
+  })
+
+  it("distinguishes a genuinely empty list from an empty search result", async () => {
+    stubFetch([
+      { url: /\/api\/plans$/, json: ONE_PAGE, once: true },
+      { url: /\/api\/plans$/, json: EMPTY_PAGE },
+    ])
+    const { container, getByLabelText } = renderWithQuery(<PlansList />)
+    await waitFor(() => {
+      expect(container.textContent).toContain("Mietwerk GmbH")
+    })
+
+    fireEvent.change(getByLabelText("Pläne durchsuchen"), {
+      target: { value: "Versicherung" },
+    })
+    await waitFor(() => {
+      expect(container.textContent).toContain("Keine Pläne gefunden.")
+    })
+    expect(container.textContent).not.toContain("Noch keine Pläne angelegt")
+  })
+
+  it("serializes the debounced search and the page into the API query", async () => {
+    const stub = stubFetch([
+      { url: /\/api\/plans$/, json: { ...ONE_PAGE, pageCount: 2, total: 21 } },
+    ])
+    const { getByLabelText, getByRole } = renderWithQuery(<PlansList />)
+
+    await waitFor(() => {
+      expect(
+        stub.calls.filter((c) => c.url.split("?")[0] === "/api/plans")
+      ).toHaveLength(1)
+    })
+    expect(stub.calls[0].url).toContain("page=1")
+    expect(stub.calls[0].url).toContain("pageSize=20")
+
+    fireEvent.change(getByLabelText("Pläne durchsuchen"), {
+      target: { value: "  Miete  " },
+    })
+    await waitFor(() => {
+      expect(
+        stub.calls.some(
+          (c) =>
+            c.url.includes("q=Miete") &&
+            !c.url.includes("q=+Miete") &&
+            c.url.includes("page=1")
+        )
+      ).toBe(true)
+    })
+
+    fireEvent.click(getByRole("button", { name: /Weiter/ }))
+    await waitFor(() => {
+      expect(stub.calls.some((c) => c.url.includes("page=2"))).toBe(true)
+    })
+  })
+})

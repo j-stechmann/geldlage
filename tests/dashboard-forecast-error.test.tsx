@@ -18,7 +18,7 @@ import {
 
 /**
  * The dashboard's "Geplant einblenden" overlay must surface a failed
- * forecast read (/planung's ErrorState + retry pattern). A failed toggle
+ * forecast read (the planning pages' ErrorState + retry pattern). A failed toggle
  * once rendered as charts silently without the overlay — visually
  * identical to "no plans exist".
  *
