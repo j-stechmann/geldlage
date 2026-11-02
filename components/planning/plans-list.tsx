@@ -283,7 +283,15 @@ export function PlansList() {
             ? "Plan pausiert"
             : next === "finished"
               ? "Plan beendet"
-              : "Plan aktiviert"
+              : "Plan aktiviert",
+          {
+            description:
+              next === "active"
+                ? "Zählt wieder in der Prognose."
+                : next === "paused"
+                  ? "Termine bleiben sichtbar, zählen aber nicht in der Prognose."
+                  : "Keine weiteren Termine; zählt nicht in der Prognose.",
+          }
         )
         invalidatePlans(queryClient)
       })

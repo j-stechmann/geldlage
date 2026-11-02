@@ -21,7 +21,7 @@ import {
 export const update_plan = {
   name: "update_plan" as const,
   description:
-    "Ändert einen bestehenden Plan teilweise: nur die mitgegebenen Felder werden geändert, alle übrigen bleiben. Pflicht: id — ermittele sie immer zuerst über list_plans oder query_data, erfinde niemals eine ID. Leerbare Felder (counterparty, purpose, notes, rrule, account_id, category_id) werden mit null geleert; rrule null = einmalig am dtstart. status: „paused“ pausiert (Termine bleiben sichtbar, geplant-gestrichelt, zählen aber nicht in der Prognose), „finished“ schließt den Plan endgültig ab — bevorzuge das gegenüber dem Löschen. amount_cents: Integer Cent, nie 0, negativ = Ausgabe (Euro vorher mit calculator umrechnen); dtstart: ISO-JJJJ-MM-TT. Fehler (z. B. invalid_rrule, account_not_found): Feldwert korrigieren und erneut aufrufen. Liefert den aktualisierten Plan zurück.",
+    "Ändert einen bestehenden Plan teilweise: nur die mitgegebenen Felder werden geändert, alle übrigen bleiben. Pflicht: id — ermittele sie immer zuerst über list_plans oder query_data, erfinde niemals eine ID. Leerbare Felder (counterparty, purpose, notes, rrule, account_id, category_id) werden mit null geleert; rrule null = einmalig am dtstart. status: „paused“ pausiert (Termine bleiben sichtbar, zählen aber nicht in der Prognose), „finished“ schließt den Plan endgültig ab — bevorzuge das gegenüber dem Löschen. amount_cents: Integer Cent, nie 0, negativ = Ausgabe (Euro vorher mit calculator umrechnen); dtstart: ISO-JJJJ-MM-TT. Fehler (z. B. invalid_rrule, account_not_found): Feldwert korrigieren und erneut aufrufen. Liefert den aktualisierten Plan zurück.",
   parameters: {
     type: "object",
     properties: {

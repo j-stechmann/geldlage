@@ -12,7 +12,8 @@ export default function PlansPage() {
         <p className="text-sm text-muted-foreground">
           Geplante Transaktionen — einmalig oder wiederkehrend. Suche, filtere
           und bearbeite Pläne; der Abgleich mit echten Buchungen läuft über den
-          Kalender.
+          Kalender. Pausierte Pläne bleiben sichtbar, zählen aber nicht in der
+          Prognose.
         </p>
       </div>
       <PlansList />
