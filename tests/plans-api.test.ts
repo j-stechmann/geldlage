@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { eq } from "drizzle-orm"
 import { NextRequest } from "next/server"
 import type { Db } from "@/lib/db"
@@ -17,6 +17,7 @@ import { GET as getOccurrencesRoute } from "@/app/api/plans/occurrences/route"
 import { GET as getForecastRoute } from "@/app/api/plans/forecast/route"
 import { GET as getCalendarRoute } from "@/app/api/transactions/calendar/route"
 import { GET as getTransactionsRoute } from "@/app/api/transactions/route"
+import { todayLocal } from "@/lib/analytics/date"
 import { authedRequest, setupTestDb, seedUser } from "./helpers"
 
 const BASE = "http://localhost:3000"
@@ -834,6 +835,33 @@ describe("GET /api/plans/occurrences", () => {
     expect(byDate.get("2026-10-02")!.planStatus).toBe("active")
   })
 
+  it("keeps paused occurrences visible and matched outside the forecast", async () => {
+    await seedSimplePlan({
+      dtstart: "2026-11-02",
+      amountCents: -950_00,
+      rrule: null,
+      counterparty: "Mietwerk GmbH",
+      status: "paused",
+    })
+    const res = await getOccurrences("from=2026-11-01&to=2026-11-30")
+    expect(res.status).toBe(200)
+    const { occurrences } = (await res.json()) as {
+      occurrences: Array<{
+        date: string
+        planStatus: string
+        matched: { transactionId: string } | null
+      }>
+    }
+    expect(occurrences).toHaveLength(1)
+    // the default (calendar/list) path still includes paused plans AND still
+    // matches their booked rows — only the forecast opts out of paused
+    expect(occurrences[0]).toMatchObject({
+      date: "2026-11-02",
+      planStatus: "paused",
+      matched: { transactionId: "tx-matched" },
+    })
+  })
+
   it("crosses users: another user sees no occurrences", async () => {
     await seedSimplePlan({ dtstart: "2026-01-01" })
     const res = await getOccurrences(
@@ -1084,6 +1112,12 @@ describe("GET /api/transactions id lookup", () => {
 })
 
 describe("GET /api/plans/forecast", () => {
+  // safety net: the frozen-clock test below restores Date in `finally`, but a
+  // thrown setup line or timeout must never leak fake timers into later tests
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it("401 without session; 400 on garbage months", async () => {
     expect(
       (await getForecastRoute(anonRequest(`${BASE}/api/plans/forecast`))).status
@@ -1112,5 +1146,58 @@ describe("GET /api/plans/forecast", () => {
       projectedBalance: expect.any(Array),
       plannedCategories: expect.any(Array),
     })
+  })
+
+  it("projects active plans only, even when a paused plan shares the date", async () => {
+    // freeze the local clock so the seeded dtstart and the route's own
+    // todayLocal() cannot disagree across midnight
+    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.setSystemTime(new Date(2026, 5, 15, 12, 0, 0))
+    try {
+      const today = todayLocal()
+      await seedSimplePlan({
+        dtstart: today,
+        amountCents: -1_000,
+        rrule: null,
+        status: "active",
+      })
+      await seedSimplePlan({
+        dtstart: today,
+        amountCents: -9_000,
+        rrule: null,
+        status: "paused",
+      })
+
+      const res = await getForecast("months=1")
+      expect(res.status).toBe(200)
+      const { forecast } = (await res.json()) as {
+        forecast: {
+          monthlyPlanned: unknown
+          plannedCategories: unknown
+        }
+      }
+      // computeForecast must scope occurrences to active plans before
+      // building the sums: only the active 1.000-cent plan reaches the sums
+      // and category shares
+      expect(forecast.monthlyPlanned).toEqual([
+        {
+          month: today.slice(0, 7),
+          incomeCents: 0,
+          expensesCents: 1_000,
+          netCents: -1_000,
+        },
+      ])
+      expect(forecast.plannedCategories).toEqual([
+        {
+          categoryId: null,
+          name: "ohne Kategorie",
+          color: null,
+          totalCents: 1_000,
+          share: 1,
+        },
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

@@ -14,19 +14,19 @@ One new table `planned_transactions`
 ([lib/db/schema.ts](../lib/db/schema.ts), DDL in
 [lib/db/index.ts](../lib/db/index.ts)):
 
-| Column         | Type       | Notes                                                                                  |
-| -------------- | ---------- | -------------------------------------------------------------------------------------- |
-| `id`           | TEXT PK    | UUID                                                                                   |
-| `user_id`      | INTEGER FK | owning user — plans are per user like every domain table                               |
-| `account_id`   | INTEGER FK | nullable: NULL = plan applies to "any account" (visible under the account filter tool) |
-| `counterparty` | TEXT       | free text; drives the match ("Mietwerk GmbH")                                          |
-| `purpose`      | TEXT       | free text                                                                              |
-| `amount_cents` | INTEGER    | signed cents ([ADR-0002](adr/adr-0002-integer-cents.md)); CHECK `<> 0`                 |
-| `category_id`  | INTEGER FK | nullable                                                                               |
-| `dtstart`      | TEXT       | first occurrence, ISO `YYYY-MM-DD`                                                     |
-| `rrule`        | TEXT       | bare RFC 5545 RRULE value, allowlisted (below); **NULL = one-off on `dtstart`**        |
-| `status`       | TEXT       | `active / paused / finished` (CHECK enforced; paused still expands, finished doesn't)  |
-| `notes`        | TEXT       |                                                                                        |
+| Column         | Type       | Notes                                                                                                                                                        |
+| -------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`           | TEXT PK    | UUID                                                                                                                                                         |
+| `user_id`      | INTEGER FK | owning user — plans are per user like every domain table                                                                                                     |
+| `account_id`   | INTEGER FK | nullable: NULL = plan applies to "any account" (visible under the account filter tool)                                                                       |
+| `counterparty` | TEXT       | free text; drives the match ("Mietwerk GmbH")                                                                                                                |
+| `purpose`      | TEXT       | free text                                                                                                                                                    |
+| `amount_cents` | INTEGER    | signed cents ([ADR-0002](adr/adr-0002-integer-cents.md)); CHECK `<> 0`                                                                                       |
+| `category_id`  | INTEGER FK | nullable                                                                                                                                                     |
+| `dtstart`      | TEXT       | first occurrence, ISO `YYYY-MM-DD`                                                                                                                           |
+| `rrule`        | TEXT       | bare RFC 5545 RRULE value, allowlisted (below); **NULL = one-off on `dtstart`**                                                                              |
+| `status`       | TEXT       | `active / paused / finished` (CHECK enforced; paused stays visible on the calendar and plan list but is excluded from the forecast, finished doesn't expand) |
+| `notes`        | TEXT       |                                                                                                                                                              |
 
 Indexes: `planned_transactions_user_status_idx` `(user_id, status)` and
 `planned_transactions_account_idx` `(account_id)`.
@@ -122,16 +122,31 @@ is left untouched; the forecast endpoint is deliberately separate.
   user whose accounts carry **per-account snapshots** enters only that one
   account's snapshot money (Σ booked stays all-account), so the starting
   balance can be understated; account-scoped forecasts are exact.
-- **Planned aggregates use only UNMATCHED occurrences** from today through
-  `months` (clamped 1–60, default 12): matched ones are booked money
-  already inside the actuals — including them would double-count. One
-  horizon edge stays counted: a match whose booking posts after
-  `horizonEnd` (within the ± posting-drift window) is outside the
+- **Planned aggregates use occurrences of ACTIVE plans that are not booked
+  within the projection** from today through `months` (clamped 1–60, default
+  12): matched ones are booked money already inside the actuals — including
+  them would double-count (the one exception is a match whose booking posts
+  after `horizonEnd`, below). A paused plan stays visible on the calendar and
+  plan list, but its occurrences never enter the projection. The status
+  filter runs _before_ read-time matching, so a paused occurrence cannot
+  consume a booked row an active plan still needs (which would leave the
+  active occurrence unmatched and count it on top of the real booking).
+  This deliberately prioritizes active plans: when matching is ambiguous, a
+  nearby compatible active occurrence may claim a booking that "belonged" to
+  a paused plan, which excludes the active occurrence from the planned sums
+  (the booking then represents the money once) rather than double-counting
+  it. The calendar matches paused and active occurrences together, so the
+  two views can disagree on which occurrence owns a booking: the calendar
+  may show it on the paused occurrence while the forecast treats it as the
+  active plan's booking.
+  For active plans one horizon edge stays counted: a match whose booking
+  posts after `horizonEnd` (within the ± posting-drift window) is outside the
   projection's real data entirely, so the planned occurrence remains its
   only in-horizon representation (`bookingDate ≤ horizonEnd` defines
-  "already booked" here). Also included in the _balance projection_ (but
-  not the planned sums): booked rows dated after today (`realFuture`, e.g.
-  postdated standing orders).
+  "already booked" here); paused occurrences are removed before matching, so
+  this edge does not resurrect them. Also included in the _balance
+  projection_ (but not the planned sums): booked rows dated after today
+  (`realFuture`, e.g. postdated standing orders).
 - **Account-agnostic plans (`account_id` NULL) count FULLY toward every
   account-scoped projection** — the same "any account" convention the
   calendar and plan list apply. An account-scoped read narrows only the
@@ -224,6 +239,8 @@ shows the forecast summary card. Details in
 `tests/planning-recurrence.test.ts` (validation table, window expansion,
 UTC-noon invariants, short-month skipping), `tests/planning-matching.test.ts`
 (tolerance/window/counterparty/greedy), `tests/planning-forecast.test.ts`
-(hand-computed to-the-cent scenario incl. matched-exclusion and account
-scoping), `tests/plans-api.test.ts` (routes: 401/400/404 mapping,
-canonicalization, user isolation) — see [testing.md](testing.md).
+(hand-computed to-the-cent scenario incl. matched-occurrence exclusion,
+paused-plan exclusion, the paused-vs-active match priority and account
+scoping),
+`tests/plans-api.test.ts` (routes: 401/400/404 mapping, canonicalization,
+user isolation) — see [testing.md](testing.md).

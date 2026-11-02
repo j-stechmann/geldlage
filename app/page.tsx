@@ -98,8 +98,9 @@ export default function DashboardPage() {
               {filters.status !== "Gebucht" &&
                 /* the Ist scope honors the status filter, but matching is
                    gebucht-only (lib/planning/service.ts): a pending bank row
-                   that matches a plan is counted as Ist AND as planned */
-                " Pläne werden nur gegen gebuchte Buchungen abgeglichen — bei Status „Alle“/„Nicht gebucht“ kann eine offene Zahlung doppelt zählen (Ist-Balken + geplanter Termin)."}
+                   that matches an active plan is counted as Ist AND as
+                   planned (paused plans are excluded from the forecast) */
+                " Pläne werden nur gegen gebuchte Buchungen abgeglichen — bei Status „Alle“/„Nicht gebucht“ kann eine offene Zahlung doppelt zählen (Ist-Balken + geplanter Termin eines aktiven Plans)."}
             </span>
           )}
         </div>

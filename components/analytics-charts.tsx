@@ -322,9 +322,10 @@ export function CashflowChart({
  * Merged series when the forecast toggle is on: the solid balance line runs
  * through the real history; at its last point the dashed projection takes
  * over (running balance from real future bookings + unmatched, still-future
- * planned occurrences — see computeForecast). A history extending beyond
- * today (imported future bookings) suppresses the projection line entirely:
- * its anchor overlaps real dates and the merged line would run backwards.
+ * planned occurrences of active plans — see computeForecast). A history
+ * extending beyond today (imported future bookings) suppresses the
+ * projection line entirely: its anchor overlaps real dates and the merged
+ * line would run backwards.
  * With NO history at all (fresh user: no snapshots, no bookings) the dashed
  * projection stands alone from today so planned-only balances still render.
  * Exported for the balance-merge regression tests (connection-point

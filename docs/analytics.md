@@ -13,7 +13,8 @@ reflects the filtered query results — with one deliberate exception
 **third scope** ([ADR-0035](adr/adr-0035-planned-transactions-rrule.md),
 [planning.md](planning.md)) with its own endpoint
 (`GET /api/plans/forecast`): planned money never enters `computeAnalytics`
-results, and real booked money never enters projected sums. The dashboard's
+results, and real booked money never enters the planned sums (it only moves
+the balance line). The dashboard's
 "Geplant einblenden" toggle fetches the forecast separately and merges it
 into the charts client-side (`mergeBalance`/`mergeCashflow` in
 [components/analytics-charts.tsx](../components/analytics-charts.tsx)).

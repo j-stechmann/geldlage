@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.24.0
+
+### Changed
+
+- **planning — paused plans are excluded from the forecast**: the 12-month
+  projection, monthly planned sums, category shares and the forecast summary
+  card now count **active** plans only. Pausing a plan keeps it visible on
+  `/calendar` and `/plans`, and `GET /api/plans/occurrences` still expands and
+  matches paused occurrences; only the forecast drops their future amounts.
+  The forecast applies the status filter _before_ read-time matching, so a
+  paused occurrence cannot consume a booked row an active plan still needs
+  (which would leave the active occurrence unmatched and count its money on
+  top of the real booking). Already-booked future rows still move the balance
+  line. The calendar and forecast can therefore disagree about which
+  occurrence owns a booking when paused and active plans compete; the
+  forecast deliberately prioritizes active plans. Docs, UI copy, the agent
+  tool descriptions and ADR-0035 explain the rule; regression tests cover
+  paused income/expenses/categories, active-match priority and the
+  past-horizon edge. Closes #96.
+
 ## v1.23.0
 
 ### Added
