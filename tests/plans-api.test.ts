@@ -834,22 +834,30 @@ describe("GET /api/plans/occurrences", () => {
     expect(byDate.get("2026-10-02")!.planStatus).toBe("active")
   })
 
-  it("keeps paused occurrences visible outside the forecast", async () => {
+  it("keeps paused occurrences visible and matched outside the forecast", async () => {
     await seedSimplePlan({
-      dtstart: "2026-10-05",
-      amountCents: -100,
+      dtstart: "2026-11-02",
+      amountCents: -950_00,
       rrule: null,
+      counterparty: "Mietwerk GmbH",
       status: "paused",
     })
-    const res = await getOccurrences("from=2026-10-01&to=2026-10-31")
+    const res = await getOccurrences("from=2026-11-01&to=2026-11-30")
     expect(res.status).toBe(200)
     const { occurrences } = (await res.json()) as {
-      occurrences: Array<{ date: string; planStatus: string }>
+      occurrences: Array<{
+        date: string
+        planStatus: string
+        matched: { transactionId: string } | null
+      }>
     }
     expect(occurrences).toHaveLength(1)
+    // the default (calendar/list) path still includes paused plans AND still
+    // matches their booked rows — only the forecast opts out of paused
     expect(occurrences[0]).toMatchObject({
-      date: "2026-10-05",
+      date: "2026-11-02",
       planStatus: "paused",
+      matched: { transactionId: "tx-matched" },
     })
   })
 

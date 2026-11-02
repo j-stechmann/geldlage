@@ -364,6 +364,18 @@ describe("computeForecast", () => {
 
   it("finished and paused plans never enter the projection", () => {
     seedBatch({ snapshotDate: "2026-01-31", snapshotAmountCents: 100_000 })
+    const pausedCategory = db
+      .insert(categories)
+      .values({
+        userId,
+        name: "Pausiert",
+        nameKey: "pausiert",
+        language: "de",
+        origin: "manual",
+        color: "#999999",
+      })
+      .returning()
+      .get()
     seedPlan({
       dtstart: "2026-03-20",
       amountCents: -5_000,
@@ -374,11 +386,13 @@ describe("computeForecast", () => {
       dtstart: "2026-03-21",
       amountCents: -6_000,
       rrule: null,
+      categoryId: pausedCategory.id,
       status: "paused",
     })
 
     const forecast = computeForecast(userId, { months: 1, today: "2026-03-15" })
-    // paused plans stay visible on the calendar but are not expected money
+    // paused plans stay visible on the calendar but are not expected money —
+    // neither in the monthly sums nor in the category stack/shares
     expect(forecast.monthlyPlanned).toEqual([])
     expect(forecast.plannedCategories).toEqual([])
     expect(forecast.projectedBalance).toEqual([
@@ -387,9 +401,10 @@ describe("computeForecast", () => {
   })
 
   // A paused occurrence must not participate in the forecast's matching at
-  // all: if it claimed the booked row first (its key sorts first here), the
-  // active occurrence would stay unmatched and be counted ON TOP of the
-  // real-future booking — a double count.
+  // all: pause its occurrence ON the booking date and give the active plan a
+  // worse +/-1-day fit, so the paused one would win on match quality alone.
+  // If it still claimed the row, the active occurrence would stay unmatched
+  // and be counted ON TOP of the real-future booking — a double count.
   it("does not let a paused occurrence consume an active plan's match", () => {
     seedBatch({ snapshotDate: "2026-01-31", snapshotAmountCents: 100_000 })
     seedTx("2026-03-20", -5_000, { payee: "Mietwerk GmbH" })
@@ -403,7 +418,7 @@ describe("computeForecast", () => {
     })
     seedPlan({
       id: "z-active",
-      dtstart: "2026-03-20",
+      dtstart: "2026-03-21",
       amountCents: -5_000,
       rrule: null,
       counterparty: "Mietwerk GmbH",
@@ -411,8 +426,9 @@ describe("computeForecast", () => {
     })
 
     const forecast = computeForecast(userId, { months: 1, today: "2026-03-15" })
-    // the active occurrence matches the real booking → only the booking
-    // moves the projection; the paused copy is ignored entirely
+    // the active occurrence matches the real booking (−1 day, inside the
+    // tolerance) → only the booking moves the projection; the paused copy is
+    // ignored entirely
     expect(forecast.monthlyPlanned).toEqual([])
     expect(forecast.projectedBalance).toEqual([
       { date: "2026-03-15", balanceCents: 100_000 },
