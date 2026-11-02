@@ -315,7 +315,7 @@ export const plannedTransactions = sqliteTable(
      * NULL = one-off plan occurring exactly on dtstart.
      */
     rrule: text("rrule"),
-    /** active | paused | finished (paused still expands; finished does not) */
+    /** active | paused | finished (paused expands for calendar/list reads but is excluded from the forecast; finished never expands) */
     status: text("status").$type<PlanStatus>().notNull().default("active"),
     notes: text("notes"),
     createdAt: text("created_at")

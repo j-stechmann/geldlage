@@ -45,7 +45,8 @@ export const create_plan = {
       status: {
         type: "string",
         enum: ["active", "paused", "finished"],
-        description: "Startstatus, Standard: active.",
+        description:
+          "Startstatus, Standard: active (paused: Termine bleiben sichtbar, zählen aber nicht in der Prognose; finished: kein Termin mehr).",
       },
       counterparty: {
         type: ["string", "null"],

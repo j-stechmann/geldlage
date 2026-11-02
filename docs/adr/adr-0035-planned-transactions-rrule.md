@@ -1,6 +1,11 @@
 # ADR-0035: Geplante Transaktionen — virtual overlay, read-time matching, full RRULE
 
 _Status: accepted · Date: 2026-10_
+_Amended 2026-11-02: paused plans are excluded from the forecast — their
+occurrences stay visible on the calendar and plan list but never enter the
+projection, and the forecast filters paused occurrences before read-time
+matching so a paused occurrence cannot claim a booking an active plan still
+needs. See point 4._
 
 ## Context
 
@@ -64,12 +69,15 @@ EXDATE/RDATE` as well as multi-line/`DTSTART:` pastes (dtstart is a
    (`GET /api/plans/forecast`). `computeAnalytics` and its
    two-scope/`buildTimeScopedWhere` invariant stay untouched. The forecast
    starts at the snapshot-anchored current balance (same anchor math as
-   engine.ts) and projects forward with **unmatched** planned occurrences
-   plus already-booked future dates — matched plans and booked money never
-   double-count. Real amounts never enter projected sums; planned amounts
-   never enter real analytics. Monthly planned sums for the current month
-   count from TODAY (the dashboard merges partial actuals with the
-   remaining plans).
+   engine.ts) and projects forward with **unmatched** planned occurrences of
+   **active** plans plus already-booked future dates — matched plans and
+   booked money never double-count. Paused plans stay visible on the calendar
+   and plan list but never enter the projection, and the forecast filters
+   paused occurrences before matching so a paused occurrence cannot consume a
+   booking an active plan still needs. Real amounts never enter projected
+   sums; planned amounts never enter real analytics. Monthly planned sums for
+   the current month count from TODAY (the dashboard merges partial actuals
+   with the remaining plans).
 
 5. **Calendar UI from the ReUI shadcn registry** (`@reui/event-calendar`,
    Base UI twin matching the app's `@base-ui/react` primitives, base-nova
@@ -79,7 +87,8 @@ EXDATE/RDATE` as well as multi-line/`DTSTART:` pastes (dtstart is a
    expansion truth. Drags/resize stay off by design: editing an occurrence
    means editing its plan (a drag would ambiguously rewrite DTSTART/RRULE).
    `rrule` also powers the client preview in the plan dialog — same engine
-   on both sides, so preview == calendar == forecast.
+   on both sides, so preview == calendar; the forecast is the same expansion
+   restricted to active plans.
 
 ## Alternatives considered
 

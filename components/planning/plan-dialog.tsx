@@ -1092,8 +1092,9 @@ export function PlanDialog({
             {isEdit ? "Plan bearbeiten" : "Geplante Transaktion anlegen"}
           </DialogTitle>
           <DialogDescription>
-            Pläne sind virtuell — sie erscheinen im Kalender und in der
-            Prognose, berühren aber echte Buchungen nicht.
+            Pläne sind virtuell — aktive Pläne erscheinen im Kalender und in der
+            Prognose, pausierte nur im Kalender und in der Planliste; echte
+            Buchungen berühren sie nicht.
           </DialogDescription>
         </DialogHeader>
 

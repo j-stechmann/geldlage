@@ -575,7 +575,7 @@ export interface PlanOccurrence {
   categoryName: string | null
   categoryColor: string | null
   accountId: number | null
-  /** active | paused — paused occurrences expand for calendar/list reads only */
+  /** active | paused — paused occurrences expand for calendar/list reads; forecasts exclude them */
   planStatus: "active" | "paused"
   matched: {
     transactionId: string
@@ -781,9 +781,10 @@ export interface ForecastResult {
 /**
  * The forecast is the third analytics scope (ADR-0035): the current balance
  * (real data, snapshot-anchored like engine.ts) plus planned occurrences of
- * ACTIVE plans from today through `months` months — paused plans stay
- * calendar-only (never projected), real bank amounts never enter the
- * projected sums, and projected amounts never enter the real analytics.
+ * ACTIVE plans from today through `months` months — paused plans stay visible
+ * on the calendar and plan list but never enter the projection; real bank
+ * amounts never enter the projected sums, and projected amounts never enter
+ * the real analytics.
  *
  * Known limitation, inherited from the anchor math it mirrors: the anchor
  * is the SINGLE latest snapshot batch, so for an all-accounts projection
@@ -894,10 +895,11 @@ export function computeForecast(
   }
 
   // ── planned occurrences over the horizon ──
-  // Paused plans are calendar-only: they never enter a projection, and the
-  // filter happens BEFORE read-time matching so a paused occurrence cannot
-  // claim a booked row that an active plan needs (that would leave the
-  // active plan's occurrence unmatched and double-count its money).
+  // Paused plans stay visible on the calendar/list but are excluded from every
+  // projection aggregate. The filter happens BEFORE read-time matching so a
+  // paused occurrence cannot claim a booked row that an active plan needs
+  // (that would leave the active plan's occurrence unmatched and double-count
+  // its money).
   const occurrences = listOccurrences(
     userId,
     { from: today, to: horizonEnd },
