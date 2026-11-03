@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.24.1
+
+### Fixed
+
+- **planning — short-month due dates clamp to month end**: monthly and
+  yearly `BYMONTHDAY` anchors that a month cannot hold (positive days 29–31)
+  now fire on the month's **last day** instead of skipping that month, so
+  money due on the 31st no longer disappears in February. A monthly
+  `BYMONTHDAY=31` rule yields Jan 31, Feb 28/29, Mar 31, Apr 30, …; a yearly
+  `BYMONTH=2;BYMONTHDAY=29` fires every year (Feb 28 outside leap years); a
+  yearless `YEARLY;BYMONTHDAY=31` fills all 12 month ends. Anchors that clamp
+  to the same month end collapse to one occurrence, `COUNT` counts the
+  clamped dates and `UNTIL` includes a clamped month end on or before its
+  day; `INTERVAL` and `BYMONTH` keep their phase/filter semantics. The clamp
+  lives in the shared recurrence engine (ADR-0035), so the calendar, plan
+  list next-date, dialog preview, forecast and read-time matching all
+  inherit it — read-time expansion also changes already-stored plans (a
+  `COUNT`-bounded plan can end sooner). Only plain day-of-month rules clamp:
+  `BYDAY`/`BYSETPOS` intersections, raw `DAILY`/`WEEKLY` `BYMONTHDAY`
+  filters, rules whose day comes from `DTSTART`, and legacy/corrupt rows
+  carrying parts `validateRrule` rejects keep RRULE semantics. The plan
+  dialog explains the rule for monthly and yearly day fields, the
+  repetition badge names the month-end clamp, and the agent tool
+  description plus ADR-0035/planning/api/testing docs are updated.
+  Closes #104.
+
 ## v1.24.0
 
 ### Changed

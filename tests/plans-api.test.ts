@@ -252,18 +252,26 @@ describe("POST /api/plans", () => {
   })
 
   it("accepts sparse-but-live rules whose first occurrence lies years ahead", async () => {
-    // a leap-day yearly plan with dtstart in a non-leap year: the first
-    // occurrence (2028-02-29) is ~624 days out — beyond a fixed 400-day
+    // a century-cadence yearly plan anchored after February: the first
+    // occurrence (2126-02-01) is a century out — beyond a fixed 400-day
     // check, found by the same bounded ladder nextOccurrenceDate uses
-    const leap = await postPlan(`${BASE}/api/plans`, {
+    const sparseYearly = await postPlan(`${BASE}/api/plans`, {
       amountCents: -950_00,
       dtstart: "2026-06-15",
-      rrule: "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=29",
+      rrule: "FREQ=YEARLY;INTERVAL=100;BYMONTH=2;BYMONTHDAY=1",
     })
-    expect(leap.status).toBe(201)
-    expect(getStored((await leap.json()).plan.id)!.rrule).toBe(
-      "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=29"
+    expect(sparseYearly.status).toBe(201)
+    const sparseYearlyId = (await sparseYearly.json()).plan.id
+    expect(getStored(sparseYearlyId)!.rrule).toBe(
+      "FREQ=YEARLY;INTERVAL=100;BYMONTH=2;BYMONTHDAY=1"
     )
+    const yearlyRow = (
+      (await (await getPlansRow(userId)).json()).plans as Array<{
+        id: string
+        nextDueDate: string | null
+      }>
+    ).find((p) => p.id === sparseYearlyId)
+    expect(yearlyRow!.nextDueDate).toBe("2126-02-01")
 
     // MONTHLY;INTERVAL=100 fires ~8⅓ years out (2034-07-01) — ladder rung 3
     const sparse = await postPlan(`${BASE}/api/plans`, {
@@ -272,20 +280,30 @@ describe("POST /api/plans", () => {
       rrule: "FREQ=MONTHLY;INTERVAL=100;BYMONTHDAY=1",
     })
     expect(sparse.status).toBe(201)
-    expect(getStored((await sparse.json()).plan.id)!.rrule).toBe(
+    const sparseId = (await sparse.json()).plan.id
+    expect(getStored(sparseId)!.rrule).toBe(
       "FREQ=MONTHLY;INTERVAL=100;BYMONTHDAY=1"
     )
+    const monthlyRow = (
+      (await (await getPlansRow(userId)).json()).plans as Array<{
+        id: string
+        nextDueDate: string | null
+      }>
+    ).find((p) => p.id === sparseId)
+    expect(monthlyRow!.nextDueDate).toBe("2034-07-01")
   })
 
   it("accepts a rule whose first occurrence lies beyond the early ladder rungs", async () => {
     // one Gregorian 400-year cycle between consecutive matches (2000 →
-    // 2400 leap Feb 29): a fixed ~34,000-day ladder used to wrongly reject
-    // this as invalid_rrule and then report "no future dates" for the
-    // stored live rule — the ladder's closing rung makes both truthful
+    // 2400): BYDAY+BYMONTHDAY is outside the month-end clamp, so the
+    // Feb-29-that-is-a-Tuesday rule keeps its 400-year gap. A fixed
+    // ~34,000-day ladder used to wrongly reject this as invalid_rrule and
+    // then report "no future dates" for the stored live rule — the
+    // ladder's closing rung makes both truthful
     const res = await postPlan(`${BASE}/api/plans`, {
       amountCents: -100,
       dtstart: "2000-02-29",
-      rrule: "FREQ=YEARLY;INTERVAL=100;BYMONTH=2;BYMONTHDAY=29",
+      rrule: "FREQ=YEARLY;INTERVAL=100;BYMONTH=2;BYMONTHDAY=29;BYDAY=TU",
     })
     expect(res.status).toBe(201)
     const id = (await res.json()).plan.id
@@ -374,6 +392,26 @@ describe("GET /api/plans", () => {
     // user isolation
     const other = await getPlansRow(otherUserId)
     expect((await other.json()).plans).toHaveLength(0)
+  })
+
+  it("reports a clamped month end as the next due date", async () => {
+    // freeze the clock so the assertion does not depend on the real today
+    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.setSystemTime(new Date(2026, 5, 15, 12, 0, 0))
+    try {
+      await seedSimplePlan({
+        dtstart: "2026-01-31",
+        rrule: "FREQ=MONTHLY;BYMONTHDAY=31",
+      })
+      const data = (await (await getPlansRow()).json()) as {
+        plans: Array<{ nextDueDate: string | null }>
+      }
+      // Jan 31, Feb 28, Mar 31, Apr 30, May 31, Jun 30 — June's month end
+      // is the first occurrence at/after the frozen 2026-06-15
+      expect(data.plans[0].nextDueDate).toBe("2026-06-30")
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("breaks equal-createdAt ties deterministically on id", async () => {
@@ -803,6 +841,28 @@ describe("GET /api/plans/occurrences", () => {
       (await getOccurrences("from=2026-01-01&to=2026-02-01&accountId=12abc"))
         .status
     ).toBe(400)
+  })
+
+  it("clamps short-month due dates end-to-end (issue #104)", async () => {
+    // a monthly plan due on the 31st must still appear in February and April,
+    // on their last day — not vanish for the month
+    await seedSimplePlan({
+      amountCents: -950_00,
+      dtstart: "2026-01-31",
+      rrule: "FREQ=MONTHLY;BYMONTHDAY=31",
+      counterparty: "Vermieter",
+    })
+    const res = await getOccurrences("from=2026-01-01&to=2026-04-30")
+    expect(res.status).toBe(200)
+    const { occurrences } = (await res.json()) as {
+      occurrences: Array<{ date: string }>
+    }
+    expect(occurrences.map((o) => o.date)).toEqual([
+      "2026-01-31",
+      "2026-02-28",
+      "2026-03-31",
+      "2026-04-30",
+    ])
   })
 
   it("expands occurrences with category + read-time match state", async () => {
