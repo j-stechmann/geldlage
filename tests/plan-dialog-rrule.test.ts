@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest"
 import {
   parseByMonthDay,
   parseRruleToForm,
+  shortMonthHint,
   yearlyNoMonthHint,
   freqPickPatch,
 } from "@/components/planning/plan-dialog"
@@ -234,9 +235,10 @@ describe("parseRruleToForm part parity (sparse-rule hardening)", () => {
   })
 
   it("representable ultra-sparse rules stay builder-owned", () => {
-    // leap-day on a century cadence (first occurrence 2400-02-29): both
-    // window sets are empty AND every part round-trips — parity equal →
-    // the builder may own the rule (untouched edit-save keeps the rule)
+    // century-cadence leap-day rule (first occurrence 2100-02-28 after the
+    // month-end clamp): both window sets are equal AND every part
+    // round-trips — parity equal → the builder may own the rule (an
+    // untouched edit-save keeps the rule)
     const o = parseRruleToForm(
       "FREQ=YEARLY;INTERVAL=100;BYMONTH=2;BYMONTHDAY=29",
       "2000-03-01"
@@ -334,6 +336,61 @@ describe("yearlyNoMonthHint (mode-accurate engine semantics)", () => {
   })
 })
 
+describe("shortMonthHint (month-end clamp copy)", () => {
+  it("explains a single clamped day for every-month rules", () => {
+    const hint = shortMonthHint("31", null)
+    expect(hint).toContain("31.")
+    expect(hint).toContain("letzten Tag des Monats")
+    expect(hint).not.toContain("fällt aus")
+  })
+
+  it("uses the plural copy for several clamping days", () => {
+    const hint = shortMonthHint("30, 31", null)
+    expect(hint).toContain("Tage, die es in einem Monat nicht gibt")
+    expect(hint).toContain("letzten Tag des Monats")
+  })
+
+  it("states the February leap/non-leap resolution", () => {
+    expect(shortMonthHint("29", [2])).toContain("28. oder 29.")
+    expect(shortMonthHint("31", null)).toContain("28. oder 29.")
+  })
+
+  it("stays silent when the chosen days always exist", () => {
+    expect(shortMonthHint("15", null)).toBeNull()
+    expect(shortMonthHint("31", [1, 3, 5, 7, 8, 10, 12])).toBeNull()
+  })
+
+  it("only hints for yearly month picks that can actually be short", () => {
+    expect(shortMonthHint("29", [2])).toContain("letzten Tag")
+    expect(shortMonthHint("29", [1, 3])).toBeNull()
+    expect(shortMonthHint("31", [2, 4])).toContain("letzten Tag")
+    // February is not selected here, so the February example would mislead
+    expect(shortMonthHint("31", [4])).toContain("letzten Tag")
+    expect(shortMonthHint("31", [4])).not.toContain("Februar")
+  })
+
+  it("ignores invalid day text (the field's own error owns that case)", () => {
+    expect(shortMonthHint("1.5", null)).toBeNull()
+    expect(shortMonthHint("", null)).toBeNull()
+  })
+
+  it("ignores out-of-range month indices", () => {
+    expect(shortMonthHint("31", [0])).toBeNull()
+    expect(shortMonthHint("31", [13])).toBeNull()
+    expect(shortMonthHint("31", [])).toBeNull()
+    // a bad entry does not poison a valid one
+    expect(shortMonthHint("31", [2, 13])).toContain("letzten Tag")
+  })
+
+  it("compares against the actual shortest month length", () => {
+    // April has 30 days: day 30 exists, day 31 clamps
+    expect(shortMonthHint("30", [4])).toBeNull()
+    expect(shortMonthHint("31", [4])).toContain("letzten Tag")
+    // negative anchors are month-end offsets, not clamping day numbers
+    expect(shortMonthHint("-1", null)).toBeNull()
+  })
+})
+
 describe("freqPickPatch (same-value select taps stay no-ops)", () => {
   /**
    * Base UI fires the select's onValueChange on EVERY item press — also
@@ -410,6 +467,38 @@ describe("describeRrule YEARLY cadence (engine-accurate)", () => {
     ).toBe("alle 2 Jahre in März am 15.")
     expect(describeRrule("FREQ=YEARLY;INTERVAL=2;BYDAY=1MO")).toBe(
       "alle 2 Jahre am 1. Mo"
+    )
+  })
+
+  it("marks day anchors the engine clamps to month end", () => {
+    // 29–31 can exceed a selected month's length → the badge names the
+    // clamp instead of reading as an impossible date
+    expect(describeRrule("FREQ=MONTHLY;BYMONTHDAY=31")).toBe(
+      "am 31. (bzw. Monatsende)"
+    )
+    expect(describeRrule("FREQ=MONTHLY;BYMONTHDAY=30,31")).toBe(
+      "am 30./31. (bzw. Monatsende)"
+    )
+    // a day that exists in every month stays plain
+    expect(describeRrule("FREQ=MONTHLY;BYMONTHDAY=15")).toBe("am 15.")
+    // yearly: only a selected short month triggers the suffix
+    expect(describeRrule("FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=29")).toBe(
+      "jährlich in Februar am 29. (bzw. Monatsende)"
+    )
+    expect(describeRrule("FREQ=YEARLY;BYMONTH=1,3;BYMONTHDAY=31")).toBe(
+      "jährlich in Januar/März am 31."
+    )
+    expect(describeRrule("FREQ=YEARLY;BYMONTHDAY=31")).toBe(
+      "am 31. jedes Monats (bzw. Monatsende)"
+    )
+    // negative anchors are month-end offsets, not clamping day numbers
+    expect(describeRrule("FREQ=MONTHLY;BYMONTHDAY=-1")).toBe("am letzten Tag")
+    // a legacy row with a part outside the clamp vocabulary expands through
+    // rrule and must not claim a month-end clamp
+    expect(describeRrule("FREQ=MONTHLY;BYHOUR=9;BYMONTHDAY=31")).toBe("am 31.")
+    // a leading "+" is a valid monthdaynum; rrule/engine clamp it too
+    expect(describeRrule("FREQ=MONTHLY;BYMONTHDAY=+29")).toBe(
+      "am 29. (bzw. Monatsende)"
     )
   })
 

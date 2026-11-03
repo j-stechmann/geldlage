@@ -336,11 +336,10 @@ describe("plan dialog: invalid builder input must not crash the page", () => {
   })
 
   it("a sparse-but-live rule previews its real next dates (ladder, not a 400-day window)", async () => {
-    // leap-day yearly plan anchored in a non-leap year: the first occurrence
-    // (2028-02-29) is > 2 years after dtstart — a fixed 400-day preview
-    // window used to falsely claim "keinen Termin"; the preview now walks
-    // the same bounded ladder as the server's validation and shows 2028 /
-    // 2032 / 2036
+    // century cadence: the first occurrence (2126-02-01) is a century after
+    // dtstart — a fixed 400-day preview window used to falsely claim
+    // "keinen Termin"; the preview now walks the same bounded ladder as the
+    // server's validation and shows 2126 / 2226 / 2326
     renderWithQuery(
       <PlanDialog
         open
@@ -348,16 +347,79 @@ describe("plan dialog: invalid builder input must not crash the page", () => {
         plan={{
           ...BASE_PLAN,
           dtstart: "2026-06-15",
-          rrule: "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=29",
+          rrule: "FREQ=YEARLY;INTERVAL=100;BYMONTH=2;BYMONTHDAY=1",
         }}
       />
     )
     await waitFor(() => {
-      expect(document.body.textContent).toContain("29.02.2028")
+      expect(document.body.textContent).toContain("01.02.2126")
     })
-    expect(document.body.textContent).toContain("29.02.2032")
+    expect(document.body.textContent).toContain("01.02.2226")
+    expect(document.body.textContent).toContain("01.02.2326")
     expect(document.body.textContent).not.toContain("erzeugt keinen Termin")
     expect(saveButton()).toBeEnabled()
+  })
+
+  it("shows no clamp hint while a raw rule is authoritative", async () => {
+    // BYDAY+BYMONTHDAY intersects and skips months whose 31st is not a
+    // Monday; the builder-owned fields would otherwise claim a clamp that
+    // the effective raw rule does not do
+    renderWithQuery(
+      <PlanDialog
+        open
+        onOpenChange={() => {}}
+        plan={{
+          ...BASE_PLAN,
+          dtstart: "2026-01-31",
+          rrule: "FREQ=MONTHLY;BYDAY=MO;BYMONTHDAY=31",
+        }}
+      />
+    )
+    await waitFor(() => {
+      expect(inputByLabel("RRULE").value).toBe(
+        "FREQ=MONTHLY;BYDAY=MO;BYMONTHDAY=31"
+      )
+    })
+    expect(document.body.textContent).not.toContain("letzten Tag des Monats")
+  })
+
+  it("explains the month-end clamp for yearly day-of-month rules", async () => {
+    renderWithQuery(
+      <PlanDialog
+        open
+        onOpenChange={() => {}}
+        plan={{
+          ...BASE_PLAN,
+          dtstart: "2026-01-01",
+          rrule: "FREQ=YEARLY;BYMONTH=2,4;BYMONTHDAY=29",
+        }}
+      />
+    )
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("28. oder 29.")
+    })
+    expect(document.body.textContent).toContain("letzten Tag des Monats")
+
+    // dropping the short month leaves only April, where the 29th exists —
+    // the hint must disappear with it
+    const february = Array.from(document.body.querySelectorAll("button")).find(
+      (b) => b.textContent === "Feb"
+    )
+    expect(february, "Feb month chip should be rendered").toBeTruthy()
+    fireEvent.click(february!)
+    await waitFor(() => {
+      expect(document.body.textContent).not.toContain("letzten Tag des Monats")
+    })
+
+    // the yearly day field is the hint's source: April only, day 31 clamps
+    // (and no February example may sneak in)
+    fireEvent.change(inputByLabel("Tag im Monat"), {
+      target: { value: "31" },
+    })
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("Der 31.")
+    })
+    expect(document.body.textContent).not.toContain("28. oder 29.")
   })
 
   it("no-month YEARLY hints are mode-accurate (copy once swapped the modes)", async () => {

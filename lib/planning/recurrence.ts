@@ -10,6 +10,12 @@
  * either side without off-by-one drift, and the ISO dates handed back are
  * read from the same UTC parts. Nothing here touches local time; the client
  * renders occurrences from the ISO strings independently.
+ *
+ * Monthly/yearly BYMONTHDAY anchors that short months cannot hold (positive
+ * days 29–31) CLAMP to the month's last day instead of skipping the month:
+ * money due on the 31st is still due in February (ADR-0035, amended for
+ * issue #104). Only plain day-of-month rules clamp; BYDAY/BYSETPOS shapes
+ * keep rrule's intersection semantics. See `dayOfMonthClamp`.
  */
 import { RRule, rrulestr } from "rrule"
 
@@ -22,14 +28,22 @@ export class RuleValidationError extends Error {
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 
+/** Last calendar day of a 1-based month (UTC calendar). */
+function daysInMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate()
+}
+
+/** "YYYY-MM-DD" from UTC calendar parts (year 1900–9999). */
+function isoDate(year: number, month: number, day: number): string {
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`
+}
+
 /** True for "YYYY-MM-DD" names of real calendar days (incl. leap years). */
 export function isValidIsoDate(s: string): boolean {
   if (!ISO_DATE.test(s)) return false
   const [y, m, d] = s.split("-").map(Number)
   if (m < 1 || m > 12) return false
-  // last calendar day of month m (m is 1-based here)
-  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate()
-  return d >= 1 && d <= lastDay
+  return d >= 1 && d <= daysInMonth(y, m)
 }
 
 /** Noon UTC instant of an ISO date — see module doc. */
@@ -73,6 +87,177 @@ function ladderWindowEnd(
   return end.getUTCFullYear() > 9999 ? MAX_ISO_DATE : isoOf(end)
 }
 
+/**
+ * Parsed shape of a month-end-clamping rule: a MONTHLY/YEARLY rule whose
+ * BYMONTHDAY anchors include a day (29–31) that short months cannot hold.
+ * Such a rule fires on the month's last day instead of skipping the month —
+ * money due on the 31st is still due in February.
+ *
+ * Only plain day-of-month rules qualify. BYDAY/BYSETPOS intersect/re-select
+ * the expanded set, where "the selected day does not exist" is a filter
+ * result rather than a missing due date; those keep RRULE semantics. A rule
+ * without BYMONTHDAY (the day comes from DTSTART) is not a BYMONTHDAY anchor
+ * either and keeps RRULE's skip semantics.
+ */
+interface DayOfMonthClamp {
+  /** RRule.MONTHLY or RRule.YEARLY. */
+  freq: number
+  interval: number
+  /** 1-based BYMONTH list, sorted; null = every month. */
+  months: number[] | null
+  /** BYMONTHDAY values, including negative ones (mapped from month end). */
+  days: number[]
+  count: number | null
+  /** Inclusive UNTIL day (occurrences are noon-anchored, so dates compare). */
+  untilIso: string | null
+}
+
+/**
+ * Detect a clampable monthly/yearly BYMONTHDAY rule. Returns null for every
+ * other shape, which then expands through rrule unchanged.
+ */
+function dayOfMonthClamp(parsed: RRule): DayOfMonthClamp | null {
+  const opts = parsed.origOptions as {
+    freq?: number
+    interval?: number
+    bymonthday?: number | number[] | null
+    bymonth?: number | number[] | null
+    count?: number | null
+    until?: Date | null
+  }
+  const optsRecord = parsed.origOptions as Record<string, unknown>
+  // A legacy/corrupt row may carry parts validateRrule rejects (BYDAY,
+  // BYSETPOS, BYYEARDAY, BYWEEKNO, BYEASTER, time-of-day parts, …). Such
+  // parts limit/re-select the expanded set or carry different intent, so it
+  // is no longer a plain day-of-month rule — clamp would invent dates rrule
+  // never yields. Fall through to rrule for the row's original meaning. The
+  // set is deliberately the clamp path's OWN vocabulary, not ALLOWED_PARTS:
+  // a future allowlisted part the arithmetic path does not implement must
+  // fall through too, not be silently ignored.
+  const hasUnsupportedPart = Object.keys(optsRecord).some(
+    (key) =>
+      optsRecord[key] !== undefined &&
+      optsRecord[key] !== null &&
+      !["cache", "tzid"].includes(key) &&
+      !CLAMP_SAFE_PARTS.has(key)
+  )
+  if (hasUnsupportedPart) return null
+  if (opts.freq !== RRule.MONTHLY && opts.freq !== RRule.YEARLY) return null
+  if (opts.bymonthday == null) return null
+  const rawDays = Array.isArray(opts.bymonthday)
+    ? opts.bymonthday
+    : [opts.bymonthday]
+  const days = rawDays.filter(
+    (d): d is number => typeof d === "number" && Number.isInteger(d)
+  )
+  // Only 29–31 can exceed a month's length; smaller days always exist.
+  if (!days.some((d) => d >= 29 && d <= 31)) return null
+  const rawMonths =
+    opts.bymonth == null
+      ? []
+      : Array.isArray(opts.bymonth)
+        ? opts.bymonth
+        : [opts.bymonth]
+  // An out-of-range/non-integer BYMONTH makes the rule dead in rrule; the
+  // clamp path must not resurrect it as live (defence in depth for rows that
+  // predate validation, e.g. BYMONTH=0,2;BYMONTHDAY=31).
+  if (
+    rawMonths.some(
+      (m) => typeof m !== "number" || !Number.isInteger(m) || m < 1 || m > 12
+    )
+  ) {
+    return null
+  }
+  const months = [...new Set(rawMonths as number[])].sort((a, b) => a - b)
+  // expandOccurrenceDates rejects corrupt INTERVAL/COUNT rows before this
+  // detection runs, so a clampable rule always carries valid end conditions.
+  return {
+    freq: opts.freq,
+    interval:
+      typeof opts.interval === "number" && opts.interval >= 1
+        ? opts.interval
+        : 1,
+    months: opts.bymonth == null ? null : months,
+    days,
+    count: typeof opts.count === "number" ? opts.count : null,
+    untilIso: opts.until instanceof Date ? isoOf(opts.until) : null,
+  }
+}
+
+/**
+ * Expand a clampable rule arithmetically. Month-by-month expansion is both
+ * simpler and cheaper than post-processing rrule output: the clamp can add
+ * a date rrule never yields (a month the underlying rule considers empty),
+ * and COUNT must count clamped occurrences, not rrule's skipped months.
+ */
+function expandDayOfMonthClamp(
+  dtstart: string,
+  spec: DayOfMonthClamp,
+  w: { from: string; to: string },
+  cap: number
+): string[] {
+  const [startYear, startMonth] = dtstart.split("-").map(Number)
+  const [fromYear, fromMonth] = w.from.split("-").map(Number)
+  const [toYear, toMonth] = w.to.split("-").map(Number)
+  const out: string[] = []
+  let emitted = 0
+
+  const months: Array<[number, number]> = []
+  if (spec.freq === RRule.MONTHLY) {
+    const startIndex = startYear * 12 + (startMonth - 1)
+    const fromIndex = fromYear * 12 + (fromMonth - 1)
+    const toIndex = toYear * 12 + (toMonth - 1)
+    // Without COUNT the window can start the scan; with COUNT every earlier
+    // occurrence has to be counted from dtstart.
+    const begin =
+      spec.count === null ? Math.max(startIndex, fromIndex) : startIndex
+    for (let index = begin; index <= toIndex; index++) {
+      if ((index - startIndex) % spec.interval !== 0) continue
+      const year = Math.floor(index / 12)
+      const month = (index % 12) + 1
+      if (spec.months !== null && !spec.months.includes(month)) continue
+      months.push([year, month])
+    }
+  } else {
+    const begin =
+      spec.count === null ? Math.max(startYear, fromYear) : startYear
+    for (let year = begin; year <= toYear; year++) {
+      if ((year - startYear) % spec.interval !== 0) continue
+      // YEARLY;BYMONTHDAY without BYMONTH repeats the day in every month.
+      for (const month of spec.months ?? [
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+      ]) {
+        months.push([year, month])
+      }
+    }
+  }
+
+  for (const [year, month] of months) {
+    const last = daysInMonth(year, month)
+    const days = new Set<number>()
+    for (const day of spec.days) {
+      if (day >= 1 && day <= 31) {
+        days.add(Math.min(day, last))
+      } else if (day <= -1 && day >= -31) {
+        const resolved = last + 1 + day
+        if (resolved >= 1) days.add(resolved)
+      }
+    }
+    for (const day of [...days].sort((a, b) => a - b)) {
+      const iso = isoDate(year, month, day)
+      if (iso < dtstart) continue
+      if (spec.untilIso !== null && iso > spec.untilIso) return out
+      if (spec.count !== null) emitted++
+      if (iso >= w.from && iso <= w.to) {
+        out.push(iso)
+        if (out.length >= cap) return out
+      }
+      if (spec.count !== null && emitted >= spec.count) return out
+    }
+  }
+  return out
+}
+
 /** rrule's numeric freq constants, allowlisted (SECONDLY/MINUTELY rejected). */
 const ALLOWED_FREQ: Record<string, number> = {
   DAILY: RRule.DAILY,
@@ -101,6 +286,22 @@ const ALLOWED_PARTS = new Set([
   "bymonthday",
   "bymonth",
   "bysetpos",
+  "wkst",
+])
+
+/**
+ * Parts the arithmetic clamp path (`expandDayOfMonthClamp`) fully honors.
+ * Kept separate from ALLOWED_PARTS so a part may be allowlisted at write time
+ * without silently changing clamp semantics: anything outside this set takes
+ * the rrule path, keeping that part's meaning.
+ */
+const CLAMP_SAFE_PARTS = new Set([
+  "freq",
+  "interval",
+  "count",
+  "until",
+  "bymonthday",
+  "bymonth",
   "wkst",
 ])
 
@@ -313,7 +514,9 @@ export function isEmptyRule(input: string | null | undefined): boolean {
  * occurrence cap — a pathological rule can never blow up a request.
  *
  * The rule is rebuilt with an EXPLICIT dtstart: rrulestr alone would default
- * dtstart to "now", silently emptying every window before today.
+ * dtstart to "now", silently emptying every window before today. Plain
+ * monthly/yearly BYMONTHDAY rules with a 29–31 anchor take the clamping path
+ * (see `dayOfMonthClamp`); every other shape expands through rrule.
  */
 export function expandOccurrenceDates(
   dtstart: string,
@@ -321,6 +524,7 @@ export function expandOccurrenceDates(
   w: { from: string; to: string },
   cap = 2000
 ): string[] {
+  if (cap <= 0) return []
   if (isEmptyRule(rruleText)) {
     return dtstart >= w.from && dtstart <= w.to ? [dtstart] : []
   }
@@ -329,6 +533,22 @@ export function expandOccurrenceDates(
       forceset: false,
     })
     if (!(parsed instanceof RRule)) return []
+    // Defence in depth for corrupt rows: validateRrule rejects these, but
+    // rrule itself hangs on a non-positive/fractional INTERVAL (only exactly
+    // 0 short-circuits) and ignores invalid COUNTs. Reject before ANY
+    // expansion path so a pathological row can never block a read route.
+    const rawOpts = parsed.origOptions as {
+      interval?: number
+      count?: number | null
+    }
+    const rawInterval = rawOpts.interval ?? 1
+    if (!Number.isInteger(rawInterval) || rawInterval < 1) return []
+    if (
+      rawOpts.count != null &&
+      (!Number.isInteger(rawOpts.count) || rawOpts.count < 1)
+    ) {
+      return []
+    }
     const after = noonUtc(w.from)
     const before = noonUtc(w.to)
     // A rule live at write time expires naturally later (UNTIL passes) —
@@ -344,6 +564,10 @@ export function expandOccurrenceDates(
     const until = (parsed.origOptions as { until?: Date | null }).until
     if (until instanceof Date && until.getTime() < after.getTime()) {
       return []
+    }
+    const clamp = dayOfMonthClamp(parsed)
+    if (clamp !== null) {
+      return expandDayOfMonthClamp(dtstart, clamp, w, cap)
     }
     const rule = new RRule({
       ...parsed.origOptions,
@@ -368,15 +592,21 @@ export function expandOccurrenceDates(
  * counts), or null. Scans a
  * growing window (first attempt the default horizon, then wider) so an
  * unbounded daily rule cannot scan forever — while a live but *sparse* rule
- * (large INTERVAL, 5th-weekday ordinals, leap-day rules) still finds its
- * real next date instead of a misleading null. The ladder is bounded: a
- * rule that truly never fires again (expired UNTIL, exhausted COUNT) costs
- * at most five bounded scans. The closing rung makes "dead" truthful for
- * every storable unbounded rule — the widest gap between consecutive
- * occurrences of any live rule is one Gregorian 400-year cycle (146,097
- * days, e.g. BYMONTH=2;BYMONTHDAY=29 with INTERVAL=100 anchored on a
- * century-leap sequence: 2000 → 2400); dense rules are found on the first
- * rung, only the pathological sparse cadences pay the full ladder.
+ * (large INTERVAL, 5th-weekday ordinals, BYDAY+BYMONTHDAY intersections)
+ * still finds its real next date instead of a misleading null. The ladder is
+ * bounded: a rule that truly never fires again (expired UNTIL, exhausted
+ * COUNT) costs at most five bounded scans. The closing rung covers the
+ * common sparse shapes: a live plain MONTHLY/YEARLY day-of-month rule (the
+ * clamping path) fires within a century (a BYMONTH filter can add at most
+ * 12 MONTHLY interval steps, and a YEARLY interval is ≤100 years), and a
+ * century-cadence weekday intersection can span one Gregorian 400-year
+ * cycle (146,097 days, e.g. a Feb-29-that-is-a-Tuesday rule anchored on a
+ * century cadence: 2000 → 2400). A large INTERVAL combined with a
+ * calendar-dependent BYDAY/BYSETPOS filter, and raw DAILY/WEEKLY BY*
+ * filters, can space matches thousands of years apart (e.g.
+ * YEARLY;INTERVAL=97;BYMONTH=2;BYMONTHDAY=29;BYDAY=TU); past the ladder they
+ * answer null instead of scanning unboundedly. Dense rules are found on the
+ * first rung, only the pathological sparse cadences pay the full ladder.
  *
  * Rung ends clamp at MAX_ISO_DATE: an unclamped end would cross into the
  * extended-year form and truncate into an Invalid Date (between throws →
