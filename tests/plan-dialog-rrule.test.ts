@@ -496,6 +496,10 @@ describe("describeRrule YEARLY cadence (engine-accurate)", () => {
     // a legacy row with a part outside the clamp vocabulary expands through
     // rrule and must not claim a month-end clamp
     expect(describeRrule("FREQ=MONTHLY;BYHOUR=9;BYMONTHDAY=31")).toBe("am 31.")
+    // a leading "+" is a valid monthdaynum; rrule/engine clamp it too
+    expect(describeRrule("FREQ=MONTHLY;BYMONTHDAY=+29")).toBe(
+      "am 29. (bzw. Monatsende)"
+    )
   })
 
   it("BYDAY + BYMONTHDAY intersect — full raw rule instead of a compact lie", () => {

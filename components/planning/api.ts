@@ -583,7 +583,9 @@ function clampsToMonthEnd(parts: Map<string, string>): boolean {
   }
   const days = (parts.get("BYMONTHDAY") ?? "")
     .split(",")
-    .filter((token) => /^-?\d+$/.test(token))
+    // RFC monthdaynum allows a leading sign; rrule parses "+29" and the
+    // engine clamps it, so the badge must not drop the suffix
+    .filter((token) => /^[+-]?\d+$/.test(token))
     .map(Number)
     .filter((n) => n >= 29 && n <= 31)
   if (days.length === 0) return false
@@ -591,7 +593,7 @@ function clampsToMonthEnd(parts: Map<string, string>): boolean {
   const byMonth = parts.get("BYMONTH")
   if (byMonth !== undefined) {
     const tokens = byMonth.split(",")
-    months = tokens.filter((token) => /^\d+$/.test(token)).map(Number)
+    months = tokens.filter((token) => /^\+?\d+$/.test(token)).map(Number)
     // an invalid/out-of-range BYMONTH makes the engine fall through to rrule
     // (and the rule dead) — never claim a clamp
     if (
