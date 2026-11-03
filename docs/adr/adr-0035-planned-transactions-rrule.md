@@ -6,6 +6,9 @@ stay visible on the calendar and in the plan list, but their occurrences
 never enter the projection, and the forecast filters paused occurrences
 before read-time matching so a paused occurrence cannot claim a booking an
 active plan still needs. See point 4._
+_Amended 2026-11-03: monthly and yearly `BYMONTHDAY` anchors that a short
+month cannot hold (29–31) clamp to the month's last day instead of skipping
+it (issue #104). See point 2._
 
 ## Context
 
@@ -41,18 +44,26 @@ EXDATE/RDATE` as well as multi-line/`DTSTART:` pastes (dtstart is a
    identically; ISO dates are read from UTC parts — and the rule is always
    rebuilt with the column's dtstart, because `rrulestr`-only rules default
    `dtstart` to _now_ and silently empty pre-today windows.
-   **RRULE semantics are RRULE's**: monthly `BYMONTHDAY=31` SKIPS short
-   months (bank debits would clamp to month end); the form warns when day
-   ≥ 29 is picked. `COUNT ≤ 366` + window caps bound every expansion.
-   `UNTIL` inputs are lifted to **noon UTC** (any sub-noon datetime form:
-   date-only, midnight, `06:00Z` …, floating no-Z included; times at/after
-   noon stay) so the named end day stays included — also applied at
-   read time, lifting pre-fix stored rules. The occurrence-productivity
-   check on create/update walks the same bounded next-date ladder as
-   `nextOccurrenceDate` (five rungs up to 147 000 days — the closing rung
-   spans one Gregorian 400-year cycle, the widest possible gap between
-   consecutive occurrences of any live rule) — sparse-but-live rules
-   (leap-day yearly, large INTERVAL) are creatable, dead ones are rejected.
+   **Short months clamp to month end**: positive monthly/yearly `BYMONTHDAY`
+   anchors a month cannot hold (29–31) fire on that month's last day instead
+   of skipping it — `BYMONTHDAY=31` → Feb 28/29, Apr 30, …; yearly
+   `BYMONTH=2;BYMONTHDAY=29` occurs every year; yearless
+   `YEARLY;BYMONTHDAY=31` fills all 12 month ends. `COUNT` counts the
+   clamped occurrences, `UNTIL` includes a clamped month end on/before its
+   day, and multiple clamped days in one month collapse to one date. Only
+   plain day-of-month rules clamp; `BYDAY`/`BYSETPOS` intersections and raw
+   DAILY/WEEKLY `BYMONTHDAY` filters keep RRULE's semantics. The form
+   explains the clamp when day ≥ 29 is picked. `COUNT ≤ 366` + window caps
+   bound every expansion. `UNTIL` inputs are lifted to **noon UTC** (any
+   sub-noon datetime form: date-only, midnight, `06:00Z` …, floating no-Z
+   included; times at/after noon stay) so the named end day stays included —
+   also applied at read time, lifting pre-fix stored rules. The
+   occurrence-productivity check on create/update walks the same bounded
+   next-date ladder as `nextOccurrenceDate` (five rungs up to 147 000 days —
+   the closing rung spans one Gregorian 400-year cycle, the widest possible
+   gap between consecutive occurrences of any live rule) — sparse-but-live
+   rules (large INTERVAL, `BYDAY`+`BYMONTHDAY` intersections) are creatable,
+   dead ones are rejected.
 
 3. **Read-time matching, zero storage.** Each occurrences request pairs
    planned occurrences with real `Gebucht` rows of the same user (± the
@@ -116,6 +127,6 @@ EXDATE/RDATE` as well as multi-line/`DTSTART:` pastes (dtstart is a
   answer "was ist diesem Monat noch geplant?" via the query DSL catalog.
 - Negative: two date engines coexist (analytics' string-sliced months vs.
   planning's noon-UTC rrule) — both UTC-anchored, tested against the same
-  fixtures; RRULE's skip-short-months semantics must be explained in the
+  fixtures; month-end clamping for short months must be explained in the
   form; tolerance-based matching is heuristic by nature (5 € / 1 % window,
   documented and constant-driven).

@@ -256,10 +256,10 @@ function assertOwnedRef(
  * A validated rule must produce at least one occurrence at/after dtstart.
  * The check walks the same bounded horizon ladder as nextOccurrenceDate
  * (closing rung ≥ the Gregorian 400-year cycle) instead of a fixed short
- * window: sparse-but-live rules (leap-day yearly, large INTERVAL) must be
- * creatable even when their first occurrence lies years ahead, while
- * genuinely dead rules (expired UNTIL, exhausted COUNT) still fail all
- * five bounded scans.
+ * window: sparse-but-live rules (large INTERVAL, weekday-ordinal or
+ * BYDAY+BYMONTHDAY intersections) must be creatable even when their first
+ * occurrence lies years ahead, while genuinely dead rules (expired UNTIL,
+ * exhausted COUNT) still fail all five bounded scans.
  */
 function assertRuleProducesOccurrence(
   dtstart: string,

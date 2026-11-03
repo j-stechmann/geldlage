@@ -336,11 +336,10 @@ describe("plan dialog: invalid builder input must not crash the page", () => {
   })
 
   it("a sparse-but-live rule previews its real next dates (ladder, not a 400-day window)", async () => {
-    // leap-day yearly plan anchored in a non-leap year: the first occurrence
-    // (2028-02-29) is > 2 years after dtstart — a fixed 400-day preview
-    // window used to falsely claim "keinen Termin"; the preview now walks
-    // the same bounded ladder as the server's validation and shows 2028 /
-    // 2032 / 2036
+    // century cadence: the first occurrence (2126-02-01) is a century after
+    // dtstart — a fixed 400-day preview window used to falsely claim
+    // "keinen Termin"; the preview now walks the same bounded ladder as the
+    // server's validation and shows 2126 / 2226 / 2326
     renderWithQuery(
       <PlanDialog
         open
@@ -348,14 +347,14 @@ describe("plan dialog: invalid builder input must not crash the page", () => {
         plan={{
           ...BASE_PLAN,
           dtstart: "2026-06-15",
-          rrule: "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=29",
+          rrule: "FREQ=YEARLY;INTERVAL=100;BYMONTH=2;BYMONTHDAY=1",
         }}
       />
     )
     await waitFor(() => {
-      expect(document.body.textContent).toContain("29.02.2028")
+      expect(document.body.textContent).toContain("01.02.2126")
     })
-    expect(document.body.textContent).toContain("29.02.2032")
+    expect(document.body.textContent).toContain("01.02.2226")
     expect(document.body.textContent).not.toContain("erzeugt keinen Termin")
     expect(saveButton()).toBeEnabled()
   })

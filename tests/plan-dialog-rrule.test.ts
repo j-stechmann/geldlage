@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest"
 import {
   parseByMonthDay,
   parseRruleToForm,
+  shortMonthHint,
   yearlyNoMonthHint,
   freqPickPatch,
 } from "@/components/planning/plan-dialog"
@@ -234,9 +235,10 @@ describe("parseRruleToForm part parity (sparse-rule hardening)", () => {
   })
 
   it("representable ultra-sparse rules stay builder-owned", () => {
-    // leap-day on a century cadence (first occurrence 2400-02-29): both
-    // window sets are empty AND every part round-trips — parity equal →
-    // the builder may own the rule (untouched edit-save keeps the rule)
+    // century-cadence leap-day rule (first occurrence 2100-02-28 after the
+    // month-end clamp): both window sets are equal AND every part
+    // round-trips — parity equal → the builder may own the rule (an
+    // untouched edit-save keeps the rule)
     const o = parseRruleToForm(
       "FREQ=YEARLY;INTERVAL=100;BYMONTH=2;BYMONTHDAY=29",
       "2000-03-01"
@@ -331,6 +333,37 @@ describe("yearlyNoMonthHint (mode-accurate engine semantics)", () => {
     // the day-set copy (above) and the wday copy are unaffected
     expect(yearlyNoMonthHint("mday", true)).toContain("12× pro Jahr")
     expect(yearlyNoMonthHint("wday", false)).toContain("ganze Jahr")
+  })
+})
+
+describe("shortMonthHint (month-end clamp copy)", () => {
+  it("explains a single clamped day for every-month rules", () => {
+    const hint = shortMonthHint("31", null)
+    expect(hint).toContain("31.")
+    expect(hint).toContain("letzte Tag des Monats")
+    expect(hint).not.toContain("fällt aus")
+  })
+
+  it("uses the plural copy for several clamping days", () => {
+    const hint = shortMonthHint("30, 31", null)
+    expect(hint).toContain("fehlende Tage")
+    expect(hint).toContain("letzte Tag des Monats")
+  })
+
+  it("stays silent when the chosen days always exist", () => {
+    expect(shortMonthHint("15", null)).toBeNull()
+    expect(shortMonthHint("31", [1, 3, 5, 7, 8, 10, 12])).toBeNull()
+  })
+
+  it("only hints for yearly month picks that can actually be short", () => {
+    expect(shortMonthHint("29", [2])).toContain("letzte Tag")
+    expect(shortMonthHint("29", [1, 3])).toBeNull()
+    expect(shortMonthHint("31", [2, 4])).toContain("letzte Tag")
+  })
+
+  it("ignores invalid day text (the field's own error owns that case)", () => {
+    expect(shortMonthHint("1.5", null)).toBeNull()
+    expect(shortMonthHint("", null)).toBeNull()
   })
 })
 

@@ -106,8 +106,9 @@ describe("planFormFromPrefill", () => {
 
 describe("plan dialog pre-fill from a prefill source (render)", () => {
   it("shows the guessed monthly rule and stays saveable for day ≥ 29", async () => {
-    // the 31st skips short months — the dialog hints that (same UX as a
-    // hand-built monthly rule) instead of silently guessing a broken one
+    // the 31st clamps to month end in short months — the dialog explains
+    // that (same UX as a hand-built monthly rule) instead of predicting a
+    // skipped month
     renderWithQuery(
       <PlanDialog
         open
@@ -128,7 +129,7 @@ describe("plan dialog pre-fill from a prefill source (render)", () => {
     expect(createButton()).toBeEnabled()
     await waitFor(() => {
       expect(document.body.textContent).toContain(
-        "springt diese Regel über den 31."
+        "gilt für den 31. der letzte Tag des Monats"
       )
     })
   })

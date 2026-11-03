@@ -40,7 +40,7 @@ export const create_plan = {
       rrule: {
         type: ["string", "null"],
         description:
-          'Bare RFC-5545-RRULE ohne DTSTART-Präfix und ohne "RRULE:", z. B. "FREQ=WEEKLY;BYDAY=MO" oder "FREQ=MONTHLY;BYMONTHDAY=1". Erlaubte Teile: FREQ (DAILY|WEEKLY|MONTHLY|YEARLY), INTERVAL (1–100), COUNT (1–366), UNTIL (JJJJMMTT), BYDAY, BYMONTHDAY, BYMONTH, BYSETPOS, WKST — alles andere (z. B. EXDATE, ein zweites DTSTART) wird abgelehnt. Ordnungszahlen bei BYDAY (z. B. 1FR) nur bei MONTHLY/YEARLY — für DAILY/WEEKLY abgelehnt. null oder weggelassen = einmalig am dtstart. Monatliche BYMONTHDAY ≥ 29 überspringt kurze Monate (RRULE-Semantik).',
+          'Bare RFC-5545-RRULE ohne DTSTART-Präfix und ohne "RRULE:", z. B. "FREQ=WEEKLY;BYDAY=MO" oder "FREQ=MONTHLY;BYMONTHDAY=1". Erlaubte Teile: FREQ (DAILY|WEEKLY|MONTHLY|YEARLY), INTERVAL (1–100), COUNT (1–366), UNTIL (JJJJMMTT), BYDAY, BYMONTHDAY, BYMONTH, BYSETPOS, WKST — alles andere (z. B. EXDATE, ein zweites DTSTART) wird abgelehnt. Ordnungszahlen bei BYDAY (z. B. 1FR) nur bei MONTHLY/YEARLY — für DAILY/WEEKLY abgelehnt. null oder weggelassen = einmalig am dtstart. Monatliche/jährliche BYMONTHDAY-Tage 29–31 werden in kurzen Monaten auf den letzten Tag des Monats gelegt (z. B. der 31. → 28./29. Februar), COUNT zählt diese Termine mit.',
       },
       status: {
         type: "string",

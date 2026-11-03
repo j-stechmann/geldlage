@@ -54,15 +54,25 @@ Indexes: `planned_transactions_user_status_idx` `(user_id, status)` and
   defaults `dtstart` to _now_ and would silently empty pre-today windows.
   Dates anchor at **noon UTC** (`Date.UTC(y, m-1, d, 12)`) so DST never
   shifts a day and month ends behave; ISO strings are read from UTC parts.
-- **RRULE semantics are RRULE's**: monthly `BYMONTHDAY=31` _skips_ short
-  months (a bank debit would clamp to Feb 28). The create/edit form shows a
-  hint when day ≥ 29 is chosen for monthly rules.
+- **Short months clamp to month end**: a positive monthly/yearly
+  `BYMONTHDAY` anchor that a month cannot hold (29–31) fires on that
+  month's **last day** instead of skipping the month — `BYMONTHDAY=31` gives
+  Feb 28/29, Apr 30, …; a yearly `BYMONTH=2;BYMONTHDAY=29` fires every year
+  (Feb 28 in non-leap years); yearless `YEARLY;BYMONTHDAY=31` fires on all
+  12 month ends. Several clamped days within one month collapse to one
+  occurrence, `COUNT` counts the clamped dates and `UNTIL` includes a
+  clamped month end on or before its day. Only plain day-of-month rules
+  clamp: `BYDAY` / `BYSETPOS` intersections keep RRULE semantics, as do raw
+  DAILY/WEEKLY `BYMONTHDAY` filters. The create/edit form explains the rule
+  when day ≥ 29 is chosen (monthly always, yearly when a selected month can
+  be short).
 - `nextOccurrenceDate` powers the list's "Nächster Termin"; both are
   bounded: window expansion caps at 2000 occurrences, the next-date scan
   walks a five-rung horizon ladder (400 → 147 000 days — the closing rung
   spans one Gregorian 400-year cycle) so unbounded rules can never scan
   forever while sparse live rules (large INTERVAL, 5th-weekday ordinals,
-  leap-day yearly) still report their real next date. Rung window ends
+  `BYDAY`+`BYMONTHDAY` intersections) still report their real next date.
+  Rung window ends
   clamp at `9999-12-31` (the last storable ISO date) — an unclamped end
   would cross into toISOString's extended-year form, truncate into an
   Invalid Date and make every rung answer "no occurrences"; occurrences
@@ -167,7 +177,7 @@ writes ([api.md](api.md)):
 | Route                                              | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `GET /api/plans`                                   | list + `nextDueDate` per plan; `q`/`status` filter (case-insensitive incl. non-ASCII, metacharacters literal), `page`/`pageSize` (≤ 100) page the table — without paging params the full list is returned for existing consumers, and `includeNextDue=0` skips the per-plan next-date walk for lookups that never read it                                                                                                                        |
-| `POST /api/plans`                                  | create; validates `amountCents ≠ 0`, `dtstart` ISO (not before 1900), RRULE allowlist + first occurrence within the bounded next-date ladder (five rungs, closing rung ≥ one Gregorian 400-year cycle — sparse-but-live rules like leap-day yearly pass; rung ends clamp at the last storable ISO date `9999-12-31`), ownership of account/category                                                                                              |
+| `POST /api/plans`                                  | create; validates `amountCents ≠ 0`, `dtstart` ISO (not before 1900), RRULE allowlist + first occurrence within the bounded next-date ladder (five rungs, closing rung ≥ one Gregorian 400-year cycle — sparse-but-live rules such as `BYDAY`+`BYMONTHDAY` intersections pass; rung ends clamp at the last storable ISO date `9999-12-31`), ownership of account/category                                                                        |
 | `PATCH /api/plans/[id]`                            | partial update; dtstart/rule changes re-check occurrence productivity                                                                                                                                                                                                                                                                                                                                                                            |
 | `DELETE /api/plans/[id]`                           | delete (no other data references plans)                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `GET /api/plans/occurrences?from&to&accountId`     | expanded window + match states; window ≤ 400 days apart _and_ within ±60 months of today (rrule expansion walks from dtstart occurrence-by-occurrence — no seek — so far windows cost CPU linear in that distance)                                                                                                                                                                                                                               |
@@ -237,7 +247,8 @@ shows the forecast summary card. Details in
 ## Tests
 
 `tests/planning-recurrence.test.ts` (validation table, window expansion,
-UTC-noon invariants, short-month skipping), `tests/planning-matching.test.ts`
+UTC-noon invariants, monthly/yearly month-end clamping incl. COUNT/UNTIL and
+leap years), `tests/planning-matching.test.ts`
 (tolerance/window/counterparty/greedy), `tests/planning-forecast.test.ts`
 (hand-computed to-the-cent scenario incl. matched-occurrence exclusion,
 paused-plan exclusion, the paused-vs-active match priority and account

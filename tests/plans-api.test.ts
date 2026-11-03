@@ -252,17 +252,17 @@ describe("POST /api/plans", () => {
   })
 
   it("accepts sparse-but-live rules whose first occurrence lies years ahead", async () => {
-    // a leap-day yearly plan with dtstart in a non-leap year: the first
-    // occurrence (2028-02-29) is ~624 days out — beyond a fixed 400-day
+    // a century-cadence yearly plan anchored after February: the first
+    // occurrence (2126-02-01) is a century out — beyond a fixed 400-day
     // check, found by the same bounded ladder nextOccurrenceDate uses
-    const leap = await postPlan(`${BASE}/api/plans`, {
+    const sparseYearly = await postPlan(`${BASE}/api/plans`, {
       amountCents: -950_00,
       dtstart: "2026-06-15",
-      rrule: "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=29",
+      rrule: "FREQ=YEARLY;INTERVAL=100;BYMONTH=2;BYMONTHDAY=1",
     })
-    expect(leap.status).toBe(201)
-    expect(getStored((await leap.json()).plan.id)!.rrule).toBe(
-      "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=29"
+    expect(sparseYearly.status).toBe(201)
+    expect(getStored((await sparseYearly.json()).plan.id)!.rrule).toBe(
+      "FREQ=YEARLY;INTERVAL=100;BYMONTH=2;BYMONTHDAY=1"
     )
 
     // MONTHLY;INTERVAL=100 fires ~8⅓ years out (2034-07-01) — ladder rung 3
@@ -279,13 +279,15 @@ describe("POST /api/plans", () => {
 
   it("accepts a rule whose first occurrence lies beyond the early ladder rungs", async () => {
     // one Gregorian 400-year cycle between consecutive matches (2000 →
-    // 2400 leap Feb 29): a fixed ~34,000-day ladder used to wrongly reject
-    // this as invalid_rrule and then report "no future dates" for the
-    // stored live rule — the ladder's closing rung makes both truthful
+    // 2400): BYDAY+BYMONTHDAY is outside the month-end clamp, so the
+    // Feb-29-that-is-a-Tuesday rule keeps its 400-year gap. A fixed
+    // ~34,000-day ladder used to wrongly reject this as invalid_rrule and
+    // then report "no future dates" for the stored live rule — the
+    // ladder's closing rung makes both truthful
     const res = await postPlan(`${BASE}/api/plans`, {
       amountCents: -100,
       dtstart: "2000-02-29",
-      rrule: "FREQ=YEARLY;INTERVAL=100;BYMONTH=2;BYMONTHDAY=29",
+      rrule: "FREQ=YEARLY;INTERVAL=100;BYMONTH=2;BYMONTHDAY=29;BYDAY=TU",
     })
     expect(res.status).toBe(201)
     const id = (await res.json()).plan.id

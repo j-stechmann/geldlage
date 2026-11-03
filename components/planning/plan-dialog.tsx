@@ -183,6 +183,41 @@ export function parseByMonthDay(text: string): number[] {
   return nums
 }
 
+/** Shortest possible length of a 1-based month (February = 28). */
+function shortestMonthLength(month: number): number {
+  // 2025 is non-leap, so month 2 resolves to 28.
+  return new Date(Date.UTC(2025, month, 0)).getUTCDate()
+}
+
+/**
+ * Hint for day-of-month anchors that short months cannot hold. `months` is
+ * null for "every month" (monthly rules, yearly without month chips);
+ * otherwise only a selected month that can actually be too short triggers
+ * the hint (Jan/Mar with day 31 never clamps). Exported for tests.
+ */
+export function shortMonthHint(
+  daysText: string,
+  months: number[] | null = null
+): string | null {
+  let days: number[]
+  try {
+    days = parseByMonthDay(daysText)
+  } catch {
+    return null
+  }
+  const clamping = days.filter((day) => day >= 29 && day <= 31)
+  if (clamping.length === 0) return null
+  if (months !== null) {
+    const canClamp = clamping.some((day) =>
+      months.some((month) => shortestMonthLength(month) < day)
+    )
+    if (!canClamp) return null
+  }
+  return clamping.length === 1
+    ? `In kurzen Monaten (z. B. Februar) gilt für den ${clamping[0]}. der letzte Tag des Monats als Termin.`
+    : "In kurzen Monaten (z. B. Februar) gilt für fehlende Tage der letzte Tag des Monats als Termin."
+}
+
 /** UTF-8 byte length — the unit the server's text caps actually count. */
 function utf8Bytes(s: string): number {
   return new TextEncoder().encode(s).length
@@ -623,9 +658,9 @@ function initialForm(
  * The monthly guess for a prefill open: the day-of-month of the source
  * (booking) date as a BYMONTHDAY rule — the same field the builder writes
  * in "Am Tag des Monats" mode, so parseRruleToForm round-trips it. Days
- * ≥ 29 skip short months; the dialog's monthDayHint documents that
- * already. A source date that is not a valid ISO date leaves the form at
- * its one-off default instead of a half-parsed rule.
+ * ≥ 29 clamp to month end in short months; the dialog's monthDayHint
+ * explains that already. A source date that is not a valid ISO date leaves
+ * the form at its one-off default instead of a half-parsed rule.
  */
 function monthlyGuessOverrides(dtstart: string): Partial<FormState> {
   const day = Number.parseInt(dtstart.slice(8, 10), 10)
@@ -964,8 +999,9 @@ export function PlanDialog({
         return { dates: [], error: "Regel nicht unterstützt" }
       // next dates via the same bounded horizon ladder the server's
       // validation uses (nextOccurrenceDate): sparse-but-live rules
-      // (leap-day yearly, large INTERVAL) preview their real next dates —
-      // a fixed 400-day window would falsely claim "keinen Termin"
+      // (large INTERVAL, BYDAY+BYMONTHDAY intersections) preview their real
+      // next dates — a fixed 400-day window would falsely claim "keinen
+      // Termin"
       const dates: string[] = []
       let cursor = dtstart
       for (let i = 0; i < 3; i++) {
@@ -994,18 +1030,26 @@ export function PlanDialog({
     }
   }, [effective, form.dtstart])
 
-  // short-month hint: monthly rules on days ≥ 29 skip short months
-  const monthDayHint = React.useMemo(() => {
-    if (form.freq !== "MONTHLY" || form.monthlyMode !== "mday") return null
-    const days = form.byMonthDayText
-      .split(",")
-      .map((v) => Number.parseInt(v.trim(), 10))
-      .filter((n) => Number.isInteger(n) && n >= 29)
-    if (days.length === 0) return null
-    return days.length === 1
-      ? `In kurzen Monaten (z. B. Februar) springt diese Regel über den ${days[0]}. — der Termin fällt aus.`
-      : "In kurzen Monaten (z. B. Februar) springt diese Regel über die gewählten Tage — die Termine fallen aus."
-  }, [form.freq, form.monthlyMode, form.byMonthDayText])
+  // short-month hint: day-of-month anchors (29–31) clamp to month end in
+  // months that cannot hold them — monthly always, yearly only when the
+  // selected months include a short one
+  const monthDayHint = React.useMemo(
+    () =>
+      form.freq === "MONTHLY" && form.monthlyMode === "mday"
+        ? shortMonthHint(form.byMonthDayText, null)
+        : null,
+    [form.freq, form.monthlyMode, form.byMonthDayText]
+  )
+  const yearlyMonthDayHint = React.useMemo(
+    () =>
+      form.freq === "YEARLY" && form.yearlyMode === "mday"
+        ? shortMonthHint(
+            form.yearlyMonthDayText,
+            form.byMonth.length === 0 ? null : form.byMonth.map(Number)
+          )
+        : null,
+    [form.freq, form.yearlyMode, form.yearlyMonthDayText, form.byMonth]
+  )
 
   const save = async () => {
     // defense in depth: the button is already disabled — in builder mode
@@ -1559,7 +1603,8 @@ export function PlanDialog({
                         }
                         placeholder="z. B. 1 oder -1"
                         aria-label="Tag im Monat"
-                      />
+                      />,
+                      yearlyMonthDayHint ?? undefined
                     )
                   ) : (
                     <div className="flex items-end gap-2">
