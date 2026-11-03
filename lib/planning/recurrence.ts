@@ -122,30 +122,24 @@ function dayOfMonthClamp(parsed: RRule): DayOfMonthClamp | null {
     bymonth?: number | number[] | null
     byweekday?: unknown
     bysetpos?: unknown
-    byyearday?: unknown
-    byweekno?: unknown
-    byhour?: unknown
-    byminute?: unknown
-    bysecond?: unknown
     count?: number | null
     until?: Date | null
   }
+  const optsRecord = parsed.origOptions as Record<string, unknown>
+  // A legacy/corrupt row may carry parts validateRrule rejects (BYYEARDAY,
+  // BYWEEKNO, BYEASTER, time-of-day parts, …). Such parts limit the expanded
+  // set or carry different intent, so it is no longer a plain day-of-month
+  // rule — clamp would invent dates rrule never yields. Fall through to rrule
+  // for the row's original meaning.
+  const hasUnsupportedPart = Object.keys(optsRecord).some(
+    (key) =>
+      optsRecord[key] !== undefined &&
+      optsRecord[key] !== null &&
+      !["cache", "tzid"].includes(key) &&
+      !ALLOWED_PARTS.has(key)
+  )
+  if (hasUnsupportedPart) return null
   if (opts.freq !== RRule.MONTHLY && opts.freq !== RRule.YEARLY) return null
-  // A legacy/corrupt row may carry parts validateRrule rejects. Such parts
-  // limit the expanded set (BYYEARDAY/BYWEEKNO) or carry time-of-day intent,
-  // so it is no longer a plain day-of-month rule — clamp would invent dates
-  // rrule never yields. Fall through to rrule for the row's original meaning.
-  if (
-    [
-      opts.byyearday,
-      opts.byweekno,
-      opts.byhour,
-      opts.byminute,
-      opts.bysecond,
-    ].some((part) => part != null)
-  ) {
-    return null
-  }
   if (opts.byweekday != null || opts.bysetpos != null) return null
   if (opts.bymonthday == null) return null
   const rawDays = Array.isArray(opts.bymonthday)

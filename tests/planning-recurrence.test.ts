@@ -319,6 +319,8 @@ describe("expandOccurrenceDates", () => {
     for (const rule of [
       "FREQ=MONTHLY;BYYEARDAY=100;BYMONTHDAY=31",
       "FREQ=YEARLY;BYWEEKNO=20;BYMONTHDAY=31",
+      "FREQ=MONTHLY;BYEASTER=0;BYMONTHDAY=31",
+      "FREQ=YEARLY;BYEASTER=0;BYMONTHDAY=29",
     ]) {
       expect(
         expandOccurrenceDates("2026-01-01", rule, {
