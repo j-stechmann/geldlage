@@ -95,7 +95,9 @@ function ladderWindowEnd(
  *
  * Only plain day-of-month rules qualify. BYDAY/BYSETPOS intersect/re-select
  * the expanded set, where "the selected day does not exist" is a filter
- * result rather than a missing due date; those keep RRULE semantics.
+ * result rather than a missing due date; those keep RRULE semantics. A rule
+ * without BYMONTHDAY (the day comes from DTSTART) is not a BYMONTHDAY anchor
+ * either and keeps RRULE's skip semantics.
  */
 interface DayOfMonthClamp {
   /** RRule.MONTHLY or RRule.YEARLY. */
@@ -120,27 +122,27 @@ function dayOfMonthClamp(parsed: RRule): DayOfMonthClamp | null {
     interval?: number
     bymonthday?: number | number[] | null
     bymonth?: number | number[] | null
-    byweekday?: unknown
-    bysetpos?: unknown
     count?: number | null
     until?: Date | null
   }
   const optsRecord = parsed.origOptions as Record<string, unknown>
-  // A legacy/corrupt row may carry parts validateRrule rejects (BYYEARDAY,
-  // BYWEEKNO, BYEASTER, time-of-day parts, …). Such parts limit the expanded
-  // set or carry different intent, so it is no longer a plain day-of-month
-  // rule — clamp would invent dates rrule never yields. Fall through to rrule
-  // for the row's original meaning.
+  // A legacy/corrupt row may carry parts validateRrule rejects (BYDAY,
+  // BYSETPOS, BYYEARDAY, BYWEEKNO, BYEASTER, time-of-day parts, …). Such
+  // parts limit/re-select the expanded set or carry different intent, so it
+  // is no longer a plain day-of-month rule — clamp would invent dates rrule
+  // never yields. Fall through to rrule for the row's original meaning. The
+  // set is deliberately the clamp path's OWN vocabulary, not ALLOWED_PARTS:
+  // a future allowlisted part the arithmetic path does not implement must
+  // fall through too, not be silently ignored.
   const hasUnsupportedPart = Object.keys(optsRecord).some(
     (key) =>
       optsRecord[key] !== undefined &&
       optsRecord[key] !== null &&
       !["cache", "tzid"].includes(key) &&
-      !ALLOWED_PARTS.has(key)
+      !CLAMP_SAFE_PARTS.has(key)
   )
   if (hasUnsupportedPart) return null
   if (opts.freq !== RRule.MONTHLY && opts.freq !== RRule.YEARLY) return null
-  if (opts.byweekday != null || opts.bysetpos != null) return null
   if (opts.bymonthday == null) return null
   const rawDays = Array.isArray(opts.bymonthday)
     ? opts.bymonthday
@@ -284,6 +286,22 @@ const ALLOWED_PARTS = new Set([
   "bymonthday",
   "bymonth",
   "bysetpos",
+  "wkst",
+])
+
+/**
+ * Parts the arithmetic clamp path (`expandDayOfMonthClamp`) fully honors.
+ * Kept separate from ALLOWED_PARTS so a part may be allowlisted at write time
+ * without silently changing clamp semantics: anything outside this set takes
+ * the rrule path, keeping that part's meaning.
+ */
+const CLAMP_SAFE_PARTS = new Set([
+  "freq",
+  "interval",
+  "count",
+  "until",
+  "bymonthday",
+  "bymonth",
   "wkst",
 ])
 

@@ -63,11 +63,15 @@ Indexes: `planned_transactions_user_status_idx` `(user_id, status)` and
   occurrence, `COUNT` counts the clamped dates and `UNTIL` includes a
   clamped month end on or before its day. Only plain day-of-month rules
   clamp: `BYDAY` / `BYSETPOS` intersections keep RRULE semantics, as do raw
-  DAILY/WEEKLY `BYMONTHDAY` filters. The create/edit form explains the rule
-  when day ≥ 29 is chosen (monthly always, yearly when no month is selected
-  or a selected month can be short). Expansion happens at read time, so this
-  also applies to already-stored plans: a stored `BYMONTHDAY=31` rule now
-  fires in short months, and a `COUNT`-bounded plan can end sooner.
+  DAILY/WEEKLY `BYMONTHDAY` filters and rules whose day comes from `DTSTART`
+  (no `BYMONTHDAY` part). Legacy/corrupt rows with parts `validateRrule`
+  rejects (e.g. an out-of-range `BYMONTH`, `BYYEARDAY`, `BYEASTER`) also keep
+  RRULE semantics instead of being resurrected by the clamp. The create/edit
+  form explains the rule when day ≥ 29 is chosen (monthly always, yearly
+  when no month is selected or a selected month can be short). Expansion
+  happens at read time, so this also applies to already-stored plans: a
+  stored `BYMONTHDAY=31` rule now fires in short months, and a `COUNT`-bounded
+  plan can end sooner.
 - `nextOccurrenceDate` powers the list's "Nächster Termin"; both are
   bounded: window expansion caps at 2000 occurrences, the next-date scan
   walks a five-rung horizon ladder (400 → 147 000 days — the closing rung

@@ -257,6 +257,14 @@ describe("expandOccurrenceDates", () => {
         }
       )
     ).toEqual(["2026-02-28"])
+    // DTSTART after the clamped day of its own month: January's 30th already
+    // passed on Jan 31, so February's month end is the first occurrence
+    expect(
+      expandOccurrenceDates("2026-01-31", "FREQ=MONTHLY;BYMONTHDAY=30", {
+        from: "2026-01-01",
+        to: "2026-03-31",
+      })
+    ).toEqual(["2026-02-28", "2026-03-30"])
   })
 
   it("several clamped days in one month collapse to a single month end", () => {
@@ -266,6 +274,15 @@ describe("expandOccurrenceDates", () => {
       { from: "2026-02-01", to: "2026-02-28" }
     )
     expect(dates).toEqual(["2026-02-28"])
+    // the collapsed date also counts once: with COUNT=3 the sequence is
+    // Feb 28 → Mar 30 → Mar 31, not Feb 28 twice and then Mar 30
+    expect(
+      expandOccurrenceDates(
+        "2026-02-01",
+        "FREQ=MONTHLY;BYMONTHDAY=30,31;COUNT=3",
+        { from: "2026-02-01", to: "2026-12-31" }
+      )
+    ).toEqual(["2026-02-28", "2026-03-30", "2026-03-31"])
   })
 
   it("keeps both dates when only one of several day anchors clamps", () => {
@@ -404,6 +421,14 @@ describe("expandOccurrenceDates", () => {
       { from: "2026-01-01", to: "2026-12-31" }
     )
     expect(dates).toEqual(["2026-01-31", "2026-02-28", "2026-03-31"])
+    // BYMONTH also bounds the counted set (MONTHLY;BYMONTH=2 = yearly Feb)
+    expect(
+      expandOccurrenceDates(
+        "2026-01-31",
+        "FREQ=MONTHLY;BYMONTH=2;BYMONTHDAY=31;COUNT=2",
+        { from: "2026-01-01", to: "2027-12-31" }
+      )
+    ).toEqual(["2026-02-28", "2027-02-28"])
   })
 
   it("COUNT keeps counting occurrences before the window starts", () => {
@@ -502,6 +527,14 @@ describe("expandOccurrenceDates", () => {
       expandOccurrenceDates(
         "2026-01-31",
         "FREQ=MONTHLY;BYMONTHDAY=31;UNTIL=20260228T115959Z",
+        { from: "2026-01-01", to: "2026-12-31" }
+      )
+    ).toEqual(["2026-01-31", "2026-02-28"])
+    // date-only UNTIL takes the same lift, so its day stays included
+    expect(
+      expandOccurrenceDates(
+        "2026-01-31",
+        "FREQ=MONTHLY;BYMONTHDAY=31;UNTIL=20260228",
         { from: "2026-01-01", to: "2026-12-31" }
       )
     ).toEqual(["2026-01-31", "2026-02-28"])

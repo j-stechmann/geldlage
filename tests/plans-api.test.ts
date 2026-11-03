@@ -394,6 +394,26 @@ describe("GET /api/plans", () => {
     expect((await other.json()).plans).toHaveLength(0)
   })
 
+  it("reports a clamped month end as the next due date", async () => {
+    // freeze the clock so the assertion does not depend on the real today
+    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.setSystemTime(new Date(2026, 5, 15, 12, 0, 0))
+    try {
+      await seedSimplePlan({
+        dtstart: "2026-01-31",
+        rrule: "FREQ=MONTHLY;BYMONTHDAY=31",
+      })
+      const data = (await (await getPlansRow()).json()) as {
+        plans: Array<{ nextDueDate: string | null }>
+      }
+      // Jan 31, Feb 28, Mar 31, Apr 30, May 31, Jun 30 — June's month end
+      // is the first occurrence at/after the frozen 2026-06-15
+      expect(data.plans[0].nextDueDate).toBe("2026-06-30")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("breaks equal-createdAt ties deterministically on id", async () => {
     // createdAt carries millisecond precision, but two rows written within
     // that one millisecond (bulk seeds) share it — without a unique-column

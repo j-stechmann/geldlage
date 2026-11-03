@@ -470,6 +470,31 @@ describe("describeRrule YEARLY cadence (engine-accurate)", () => {
     )
   })
 
+  it("marks day anchors the engine clamps to month end", () => {
+    // 29–31 can exceed a selected month's length → the badge names the
+    // clamp instead of reading as an impossible date
+    expect(describeRrule("FREQ=MONTHLY;BYMONTHDAY=31")).toBe(
+      "am 31. (bzw. Monatsende)"
+    )
+    expect(describeRrule("FREQ=MONTHLY;BYMONTHDAY=30,31")).toBe(
+      "am 30./31. (bzw. Monatsende)"
+    )
+    // a day that exists in every month stays plain
+    expect(describeRrule("FREQ=MONTHLY;BYMONTHDAY=15")).toBe("am 15.")
+    // yearly: only a selected short month triggers the suffix
+    expect(describeRrule("FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=29")).toBe(
+      "jährlich in Februar am 29. (bzw. Monatsende)"
+    )
+    expect(describeRrule("FREQ=YEARLY;BYMONTH=1,3;BYMONTHDAY=31")).toBe(
+      "jährlich in Januar/März am 31."
+    )
+    expect(describeRrule("FREQ=YEARLY;BYMONTHDAY=31")).toBe(
+      "am 31. jedes Monats (bzw. Monatsende)"
+    )
+    // negative anchors are month-end offsets, not clamping day numbers
+    expect(describeRrule("FREQ=MONTHLY;BYMONTHDAY=-1")).toBe("am letzten Tag")
+  })
+
   it("BYDAY + BYMONTHDAY intersect — full raw rule instead of a compact lie", () => {
     // only Monday 1sts qualify (once a year, some years none) — "jährlich
     // am 1." would hide the weekday limiter

@@ -550,6 +550,36 @@ const MONTHS = [
   "Dezember",
 ]
 
+/** Shortest length of each 1-based month (February = 28, non-leap). */
+const SHORTEST_MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+
+/**
+ * True when a positive BYMONTHDAY anchor (29–31) can exceed the length of a
+ * month the rule selects, i.e. the engine clamps it to the month's last day
+ * (lib/planning/recurrence.ts). The badge must say so — "am 31." alone
+ * reads as an impossible February date.
+ */
+function clampsToMonthEnd(
+  byMonthDay: string | undefined,
+  byMonth: string | undefined
+): boolean {
+  const days = (byMonthDay ?? "")
+    .split(",")
+    .map((v) => Number.parseInt(v, 10))
+    .filter((n) => Number.isInteger(n) && n >= 29 && n <= 31)
+  if (days.length === 0) return false
+  const months =
+    byMonth === undefined
+      ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+      : byMonth
+          .split(",")
+          .map((v) => Number.parseInt(v, 10))
+          .filter((m) => Number.isInteger(m) && m >= 1 && m <= 12)
+  return days.some((day) =>
+    months.some((month) => SHORTEST_MONTH_DAYS[month - 1] < day)
+  )
+}
+
 /**
  * Humanize a bare RFC 5545 RRULE (allowlisted subset) into short German
  * text — the plan list's "Wiederholung" column. Unmapped shapes fall back
@@ -647,7 +677,9 @@ export function describeRrule(rruleText: string | null): string {
       const weekdays = describeByWeekday(byDay)
       base = `jeden ${weekdays} im Monat${interval === 1 ? "" : ` (alle ${interval} Monate)`}`
     } else if (byMonthDay) {
-      base = `${interval === 1 ? "am" : `alle ${interval} Monate am`} ${ordinalizeMonthDays(byMonthDay)}`
+      base = `${interval === 1 ? "am" : `alle ${interval} Monate am`} ${ordinalizeMonthDays(byMonthDay)}${
+        clampsToMonthEnd(byMonthDay, undefined) ? " (bzw. Monatsende)" : ""
+      }`
     } else {
       base = interval === 1 ? "monatlich" : `alle ${interval} Monate`
     }
@@ -676,10 +708,13 @@ export function describeRrule(rruleText: string | null): string {
       // yearless BYMONTHDAY repeats the day in EVERY month (12×/year —
       // engine-verified; the dialog explains the month-end clamp): the badge
       // must say so instead of a lying "jährlich am 15."
+      const clampSuffix = clampsToMonthEnd(byMonthDay, undefined)
+        ? " (bzw. Monatsende)"
+        : ""
       base =
         interval === 1
-          ? `am ${ordinalizeMonthDays(byMonthDay)} jedes Monats`
-          : `am ${ordinalizeMonthDays(byMonthDay)} jedes Monats (alle ${interval} Jahre)`
+          ? `am ${ordinalizeMonthDays(byMonthDay)} jedes Monats${clampSuffix}`
+          : `am ${ordinalizeMonthDays(byMonthDay)} jedes Monats${clampSuffix} (alle ${interval} Jahre)`
     } else if (
       byMonthRaw === undefined &&
       byDayRaw !== undefined &&
@@ -702,7 +737,11 @@ export function describeRrule(rruleText: string | null): string {
         // that cadence
         base = `in ${byMonth} jeden ${describeByWeekday(byDayRaw)}${interval === 1 ? "" : ` (alle ${interval} Jahre)`}`
       } else {
-        base = `${years}${byMonth ? ` in ${byMonth}` : ""}${byMonthDay ? ` am ${ordinalizeMonthDays(byMonthDay)}` : byDayRaw ? ` am ${describeByWeekday(byDayRaw)}` : ""}`
+        const clampSuffix =
+          byMonthDay !== undefined && clampsToMonthEnd(byMonthDay, byMonthRaw)
+            ? " (bzw. Monatsende)"
+            : ""
+        base = `${years}${byMonth ? ` in ${byMonth}` : ""}${byMonthDay ? ` am ${ordinalizeMonthDays(byMonthDay)}${clampSuffix}` : byDayRaw ? ` am ${describeByWeekday(byDayRaw)}` : ""}`
       }
     }
   } else {

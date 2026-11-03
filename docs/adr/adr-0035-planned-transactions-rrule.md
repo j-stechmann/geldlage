@@ -51,14 +51,19 @@ EXDATE/RDATE` as well as multi-line/`DTSTART:` pastes (dtstart is a
    `YEARLY;BYMONTHDAY=31` fills all 12 month ends. `COUNT` counts the
    clamped occurrences, `UNTIL` includes a clamped month end on/before its
    day, and anchors that clamp to the same month end collapse to one date.
-   Only plain day-of-month rules clamp; `BYDAY`/`BYSETPOS` intersections and
-   raw DAILY/WEEKLY `BYMONTHDAY` filters keep RRULE's semantics. Expansion
-   happens at read time, so this also changes already-stored plans (a
-   `COUNT`-bounded plan can end sooner). The form
-   explains the clamp when day ≥ 29 is picked. `COUNT ≤ 366` + window caps
-   bound every expansion. `UNTIL` inputs are lifted to **noon UTC** (any
-   sub-noon datetime form: date-only, midnight, `06:00Z` …, floating no-Z
-   included; times at/after noon stay) so the named end day stays included —
+   Only plain day-of-month rules clamp; `BYDAY`/`BYSETPOS` intersections,
+   raw DAILY/WEEKLY `BYMONTHDAY` filters, and rules whose day comes from
+   `DTSTART` (no `BYMONTHDAY`) keep RRULE's semantics. Legacy/corrupt rows
+   carrying parts `validateRrule` rejects (an invalid `BYMONTH`, `BYYEARDAY`,
+   `BYEASTER`, time-of-day parts, …) keep RRULE's semantics too instead of
+   being resurrected by the clamp path. Expansion happens at read time, so
+   this also changes already-stored plans (a `COUNT`-bounded plan can end
+   sooner). The form explains the clamp when a clamping day is picked
+   (monthly always; yearly only when a selected month can be short).
+   `COUNT ≤ 366` + window caps bound every expansion. `UNTIL` inputs are
+   lifted to **noon UTC** (any sub-noon datetime form: date-only, midnight,
+   `06:00Z` …, floating no-Z included; times at/after noon stay) so the named
+   end day stays included —
    also applied at read time, lifting pre-fix stored rules. The
    occurrence-productivity check on create/update walks the same bounded
    next-date ladder as `nextOccurrenceDate` (five rungs up to 147 000 days —
