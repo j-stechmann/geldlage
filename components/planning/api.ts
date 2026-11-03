@@ -554,27 +554,53 @@ const MONTHS = [
 const SHORTEST_MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
 /**
+ * Parts the engine's clamp path honors (mirrors CLAMP_SAFE_PARTS in
+ * lib/planning/recurrence.ts). TZID is parser-dropped and therefore
+ * harmless; every other part (BYDAY, BYSETPOS, BYHOUR, inline DTSTART, …)
+ * makes the engine expand through rrule instead.
+ */
+const CLAMP_SAFE_RULE_PARTS = new Set([
+  "FREQ",
+  "INTERVAL",
+  "COUNT",
+  "UNTIL",
+  "BYMONTHDAY",
+  "BYMONTH",
+  "WKST",
+  "TZID",
+])
+
+/**
  * True when a positive BYMONTHDAY anchor (29–31) can exceed the length of a
  * month the rule selects, i.e. the engine clamps it to the month's last day
  * (lib/planning/recurrence.ts). The badge must say so — "am 31." alone
- * reads as an impossible February date.
+ * reads as an impossible February date. Mirrors the engine's gate so a
+ * legacy row that expands through rrule never gets a false clamp claim.
  */
-function clampsToMonthEnd(
-  byMonthDay: string | undefined,
-  byMonth: string | undefined
-): boolean {
-  const days = (byMonthDay ?? "")
+function clampsToMonthEnd(parts: Map<string, string>): boolean {
+  if ([...parts.keys()].some((key) => !CLAMP_SAFE_RULE_PARTS.has(key))) {
+    return false
+  }
+  const days = (parts.get("BYMONTHDAY") ?? "")
     .split(",")
-    .map((v) => Number.parseInt(v, 10))
-    .filter((n) => Number.isInteger(n) && n >= 29 && n <= 31)
+    .filter((token) => /^-?\d+$/.test(token))
+    .map(Number)
+    .filter((n) => n >= 29 && n <= 31)
   if (days.length === 0) return false
-  const months =
-    byMonth === undefined
-      ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-      : byMonth
-          .split(",")
-          .map((v) => Number.parseInt(v, 10))
-          .filter((m) => Number.isInteger(m) && m >= 1 && m <= 12)
+  let months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+  const byMonth = parts.get("BYMONTH")
+  if (byMonth !== undefined) {
+    const tokens = byMonth.split(",")
+    months = tokens.filter((token) => /^\d+$/.test(token)).map(Number)
+    // an invalid/out-of-range BYMONTH makes the engine fall through to rrule
+    // (and the rule dead) — never claim a clamp
+    if (
+      months.length !== tokens.length ||
+      months.some((month) => month < 1 || month > 12)
+    ) {
+      return false
+    }
+  }
   return days.some((day) =>
     months.some((month) => SHORTEST_MONTH_DAYS[month - 1] < day)
   )
@@ -678,7 +704,7 @@ export function describeRrule(rruleText: string | null): string {
       base = `jeden ${weekdays} im Monat${interval === 1 ? "" : ` (alle ${interval} Monate)`}`
     } else if (byMonthDay) {
       base = `${interval === 1 ? "am" : `alle ${interval} Monate am`} ${ordinalizeMonthDays(byMonthDay)}${
-        clampsToMonthEnd(byMonthDay, undefined) ? " (bzw. Monatsende)" : ""
+        clampsToMonthEnd(parts) ? " (bzw. Monatsende)" : ""
       }`
     } else {
       base = interval === 1 ? "monatlich" : `alle ${interval} Monate`
@@ -708,9 +734,7 @@ export function describeRrule(rruleText: string | null): string {
       // yearless BYMONTHDAY repeats the day in EVERY month (12×/year —
       // engine-verified; the dialog explains the month-end clamp): the badge
       // must say so instead of a lying "jährlich am 15."
-      const clampSuffix = clampsToMonthEnd(byMonthDay, undefined)
-        ? " (bzw. Monatsende)"
-        : ""
+      const clampSuffix = clampsToMonthEnd(parts) ? " (bzw. Monatsende)" : ""
       base =
         interval === 1
           ? `am ${ordinalizeMonthDays(byMonthDay)} jedes Monats${clampSuffix}`
@@ -737,10 +761,7 @@ export function describeRrule(rruleText: string | null): string {
         // that cadence
         base = `in ${byMonth} jeden ${describeByWeekday(byDayRaw)}${interval === 1 ? "" : ` (alle ${interval} Jahre)`}`
       } else {
-        const clampSuffix =
-          byMonthDay !== undefined && clampsToMonthEnd(byMonthDay, byMonthRaw)
-            ? " (bzw. Monatsende)"
-            : ""
+        const clampSuffix = clampsToMonthEnd(parts) ? " (bzw. Monatsende)" : ""
         base = `${years}${byMonth ? ` in ${byMonth}` : ""}${byMonthDay ? ` am ${ordinalizeMonthDays(byMonthDay)}${clampSuffix}` : byDayRaw ? ` am ${describeByWeekday(byDayRaw)}` : ""}`
       }
     }

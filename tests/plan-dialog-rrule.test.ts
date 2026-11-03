@@ -493,6 +493,9 @@ describe("describeRrule YEARLY cadence (engine-accurate)", () => {
     )
     // negative anchors are month-end offsets, not clamping day numbers
     expect(describeRrule("FREQ=MONTHLY;BYMONTHDAY=-1")).toBe("am letzten Tag")
+    // a legacy row with a part outside the clamp vocabulary expands through
+    // rrule and must not claim a month-end clamp
+    expect(describeRrule("FREQ=MONTHLY;BYHOUR=9;BYMONTHDAY=31")).toBe("am 31.")
   })
 
   it("BYDAY + BYMONTHDAY intersect — full raw rule instead of a compact lie", () => {
