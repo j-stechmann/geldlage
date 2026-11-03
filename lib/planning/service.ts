@@ -257,7 +257,7 @@ function assertOwnedRef(
  * The check walks the same bounded horizon ladder as nextOccurrenceDate
  * (closing rung ≥ the Gregorian 400-year cycle) instead of a fixed short
  * window: sparse-but-live rules whose next date falls inside that ladder — a
- * plain clamped BYMONTHDAY rule is at most one INTERVAL out (≤100 years), a
+ * live plain clamped BYMONTHDAY rule is at most a century out, a
  * century-cadence weekday intersection up to one 400-year cycle — must be
  * creatable even when their first occurrence lies years ahead, while
  * genuinely dead rules (expired UNTIL, exhausted COUNT) still fail all five

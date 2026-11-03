@@ -52,7 +52,9 @@ EXDATE/RDATE` as well as multi-line/`DTSTART:` pastes (dtstart is a
    clamped occurrences, `UNTIL` includes a clamped month end on/before its
    day, and anchors that clamp to the same month end collapse to one date.
    Only plain day-of-month rules clamp; `BYDAY`/`BYSETPOS` intersections and
-   raw DAILY/WEEKLY `BYMONTHDAY` filters keep RRULE's semantics. The form
+   raw DAILY/WEEKLY `BYMONTHDAY` filters keep RRULE's semantics. Expansion
+   happens at read time, so this also changes already-stored plans (a
+   `COUNT`-bounded plan can end sooner). The form
    explains the clamp when day ≥ 29 is picked. `COUNT ≤ 366` + window caps
    bound every expansion. `UNTIL` inputs are lifted to **noon UTC** (any
    sub-noon datetime form: date-only, midnight, `06:00Z` …, floating no-Z
@@ -61,10 +63,10 @@ EXDATE/RDATE` as well as multi-line/`DTSTART:` pastes (dtstart is a
    occurrence-productivity check on create/update walks the same bounded
    next-date ladder as `nextOccurrenceDate` (five rungs up to 147 000 days —
    the closing rung spans one Gregorian 400-year cycle) — sparse-but-live
-   rules whose next date falls inside that ladder are creatable (a plain
-   clamped `BYMONTHDAY` rule fires at least once per `INTERVAL`, ≤100
-   years; a century-cadence weekday intersection can span up to one
-   400-year cycle), dead ones are rejected. A large `INTERVAL` combined with
+   rules whose next date falls inside that ladder are creatable (a live
+   plain clamped `BYMONTHDAY` rule is at most a century out; a
+   century-cadence weekday intersection can span up to one 400-year cycle),
+   dead ones are rejected. A large `INTERVAL` combined with
    a calendar-dependent `BYDAY`/`BYSETPOS` filter, and raw DAILY/WEEKLY
    `BY*` filters, can space matches thousands of years apart; that
    pre-existing limitation reads as "no next date" rather than scanning

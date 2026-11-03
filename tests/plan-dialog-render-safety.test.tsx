@@ -383,6 +383,45 @@ describe("plan dialog: invalid builder input must not crash the page", () => {
     expect(document.body.textContent).not.toContain("letzten Tag des Monats")
   })
 
+  it("explains the month-end clamp for yearly day-of-month rules", async () => {
+    renderWithQuery(
+      <PlanDialog
+        open
+        onOpenChange={() => {}}
+        plan={{
+          ...BASE_PLAN,
+          dtstart: "2026-01-01",
+          rrule: "FREQ=YEARLY;BYMONTH=2,4;BYMONTHDAY=29",
+        }}
+      />
+    )
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("28. oder 29.")
+    })
+    expect(document.body.textContent).toContain("letzten Tag des Monats")
+
+    // dropping the short month leaves only April, where the 29th exists —
+    // the hint must disappear with it
+    const february = Array.from(document.body.querySelectorAll("button")).find(
+      (b) => b.textContent === "Feb"
+    )
+    expect(february, "Feb month chip should be rendered").toBeTruthy()
+    fireEvent.click(february!)
+    await waitFor(() => {
+      expect(document.body.textContent).not.toContain("letzten Tag des Monats")
+    })
+
+    // the yearly day field is the hint's source: April only, day 31 clamps
+    // (and no February example may sneak in)
+    fireEvent.change(inputByLabel("Tag im Monat"), {
+      target: { value: "31" },
+    })
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("Der 31.")
+    })
+    expect(document.body.textContent).not.toContain("28. oder 29.")
+  })
+
   it("no-month YEARLY hints are mode-accurate (copy once swapped the modes)", async () => {
     // mday: every month (the old text wrongly said "nur im Januar")
     renderWithQuery(

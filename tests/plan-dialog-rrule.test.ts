@@ -381,6 +381,14 @@ describe("shortMonthHint (month-end clamp copy)", () => {
     // a bad entry does not poison a valid one
     expect(shortMonthHint("31", [2, 13])).toContain("letzten Tag")
   })
+
+  it("compares against the actual shortest month length", () => {
+    // April has 30 days: day 30 exists, day 31 clamps
+    expect(shortMonthHint("30", [4])).toBeNull()
+    expect(shortMonthHint("31", [4])).toContain("letzten Tag")
+    // negative anchors are month-end offsets, not clamping day numbers
+    expect(shortMonthHint("-1", null)).toBeNull()
+  })
 })
 
 describe("freqPickPatch (same-value select taps stay no-ops)", () => {

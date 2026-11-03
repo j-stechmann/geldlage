@@ -674,8 +674,8 @@ export function describeRrule(rruleText: string | null): string {
     }
     if (byMonthRaw === undefined && byMonthDay !== undefined) {
       // yearless BYMONTHDAY repeats the day in EVERY month (12×/year —
-      // engine-verified; the dialog warns at creation): the badge must say
-      // so instead of a lying "jährlich am 15."
+      // engine-verified; the dialog explains the month-end clamp): the badge
+      // must say so instead of a lying "jährlich am 15."
       base =
         interval === 1
           ? `am ${ordinalizeMonthDays(byMonthDay)} jedes Monats`

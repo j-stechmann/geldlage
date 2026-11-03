@@ -122,10 +122,30 @@ function dayOfMonthClamp(parsed: RRule): DayOfMonthClamp | null {
     bymonth?: number | number[] | null
     byweekday?: unknown
     bysetpos?: unknown
+    byyearday?: unknown
+    byweekno?: unknown
+    byhour?: unknown
+    byminute?: unknown
+    bysecond?: unknown
     count?: number | null
     until?: Date | null
   }
   if (opts.freq !== RRule.MONTHLY && opts.freq !== RRule.YEARLY) return null
+  // A legacy/corrupt row may carry parts validateRrule rejects. Such parts
+  // limit the expanded set (BYYEARDAY/BYWEEKNO) or carry time-of-day intent,
+  // so it is no longer a plain day-of-month rule — clamp would invent dates
+  // rrule never yields. Fall through to rrule for the row's original meaning.
+  if (
+    [
+      opts.byyearday,
+      opts.byweekno,
+      opts.byhour,
+      opts.byminute,
+      opts.bysecond,
+    ].some((part) => part != null)
+  ) {
+    return null
+  }
   if (opts.byweekday != null || opts.bysetpos != null) return null
   if (opts.bymonthday == null) return null
   const rawDays = Array.isArray(opts.bymonthday)
@@ -142,11 +162,17 @@ function dayOfMonthClamp(parsed: RRule): DayOfMonthClamp | null {
       : Array.isArray(opts.bymonth)
         ? opts.bymonth
         : [opts.bymonth]
-  const months = rawMonths
-    .filter((m): m is number => typeof m === "number" && Number.isInteger(m))
-    .filter((m) => m >= 1 && m <= 12)
-    .filter((m, i, arr) => arr.indexOf(m) === i)
-    .sort((a, b) => a - b)
+  // An out-of-range/non-integer BYMONTH makes the rule dead in rrule; the
+  // clamp path must not resurrect it as live (defence in depth for rows that
+  // predate validation, e.g. BYMONTH=0,2;BYMONTHDAY=31).
+  if (
+    rawMonths.some(
+      (m) => typeof m !== "number" || !Number.isInteger(m) || m < 1 || m > 12
+    )
+  ) {
+    return null
+  }
+  const months = [...new Set(rawMonths as number[])].sort((a, b) => a - b)
   // expandOccurrenceDates rejects corrupt INTERVAL/COUNT rows before this
   // detection runs, so a clampable rule always carries valid end conditions.
   return {
@@ -558,8 +584,9 @@ export function expandOccurrenceDates(
  * still finds its real next date instead of a misleading null. The ladder is
  * bounded: a rule that truly never fires again (expired UNTIL, exhausted
  * COUNT) costs at most five bounded scans. The closing rung covers the
- * common sparse shapes: a plain MONTHLY/YEARLY day-of-month rule (the
- * clamping path) fires at least once per INTERVAL (≤100 years), and a
+ * common sparse shapes: a live plain MONTHLY/YEARLY day-of-month rule (the
+ * clamping path) fires within a century (a BYMONTH filter can add at most
+ * 12 MONTHLY interval steps, and a YEARLY interval is ≤100 years), and a
  * century-cadence weekday intersection can span one Gregorian 400-year
  * cycle (146,097 days, e.g. a Feb-29-that-is-a-Tuesday rule anchored on a
  * century cadence: 2000 → 2400). A large INTERVAL combined with a

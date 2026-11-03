@@ -1041,10 +1041,10 @@ export function PlanDialog({
   }, [effective, form.dtstart])
 
   // short-month hint: day-of-month anchors (29–31) clamp to month end in
-  // months that cannot hold them — monthly always, yearly only when the
-  // selected months include a short one. The raw text is authoritative when
-  // rawDirty (e.g. a stored BYDAY+BYMONTHDAY rule the builder cannot own),
-  // so builder-field hints would contradict the effective rule there.
+  // months that cannot hold them — monthly always, yearly when no month is
+  // selected or a selected month can be short. The raw text is authoritative
+  // when rawDirty (e.g. a stored BYDAY+BYMONTHDAY rule the builder cannot
+  // own), so builder-field hints would contradict the effective rule there.
   const monthDayHint = React.useMemo(
     () =>
       !form.rawDirty && form.freq === "MONTHLY" && form.monthlyMode === "mday"
