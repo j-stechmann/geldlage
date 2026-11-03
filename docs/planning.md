@@ -59,19 +59,25 @@ Indexes: `planned_transactions_user_status_idx` `(user_id, status)` and
   month's **last day** instead of skipping the month — `BYMONTHDAY=31` gives
   Feb 28/29, Apr 30, …; a yearly `BYMONTH=2;BYMONTHDAY=29` fires every year
   (Feb 28 in non-leap years); yearless `YEARLY;BYMONTHDAY=31` fires on all
-  12 month ends. Several clamped days within one month collapse to one
+  12 month ends. Anchors that clamp to the same month end collapse to one
   occurrence, `COUNT` counts the clamped dates and `UNTIL` includes a
   clamped month end on or before its day. Only plain day-of-month rules
   clamp: `BYDAY` / `BYSETPOS` intersections keep RRULE semantics, as do raw
   DAILY/WEEKLY `BYMONTHDAY` filters. The create/edit form explains the rule
-  when day ≥ 29 is chosen (monthly always, yearly when a selected month can
-  be short).
+  when day ≥ 29 is chosen (monthly always, yearly when no month is selected
+  or a selected month can be short).
 - `nextOccurrenceDate` powers the list's "Nächster Termin"; both are
   bounded: window expansion caps at 2000 occurrences, the next-date scan
   walks a five-rung horizon ladder (400 → 147 000 days — the closing rung
   spans one Gregorian 400-year cycle) so unbounded rules can never scan
-  forever while sparse live rules (large INTERVAL, 5th-weekday ordinals,
-  `BYDAY`+`BYMONTHDAY` intersections) still report their real next date.
+  forever while sparse live rules still report their real next date: a
+  plain clamped `BYMONTHDAY` rule fires at least once per `INTERVAL`
+  (≤100 years), and a century-cadence weekday intersection can span up to
+  one 400-year cycle. A large `INTERVAL` combined with a calendar-dependent
+  `BYDAY`/`BYSETPOS` filter (e.g.
+  `YEARLY;INTERVAL=97;BYMONTH=2;BYMONTHDAY=29;BYDAY=TU`) can space matches
+  thousands of years apart, as can raw DAILY/WEEKLY `BY*` filters; past the
+  ladder they honestly read as no next date.
   Rung window ends
   clamp at `9999-12-31` (the last storable ISO date) — an unclamped end
   would cross into toISOString's extended-year form, truncate into an

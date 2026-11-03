@@ -355,8 +355,32 @@ describe("plan dialog: invalid builder input must not crash the page", () => {
       expect(document.body.textContent).toContain("01.02.2126")
     })
     expect(document.body.textContent).toContain("01.02.2226")
+    expect(document.body.textContent).toContain("01.02.2326")
     expect(document.body.textContent).not.toContain("erzeugt keinen Termin")
     expect(saveButton()).toBeEnabled()
+  })
+
+  it("shows no clamp hint while a raw rule is authoritative", async () => {
+    // BYDAY+BYMONTHDAY intersects and skips months whose 31st is not a
+    // Monday; the builder-owned fields would otherwise claim a clamp that
+    // the effective raw rule does not do
+    renderWithQuery(
+      <PlanDialog
+        open
+        onOpenChange={() => {}}
+        plan={{
+          ...BASE_PLAN,
+          dtstart: "2026-01-31",
+          rrule: "FREQ=MONTHLY;BYDAY=MO;BYMONTHDAY=31",
+        }}
+      />
+    )
+    await waitFor(() => {
+      expect(inputByLabel("RRULE").value).toBe(
+        "FREQ=MONTHLY;BYDAY=MO;BYMONTHDAY=31"
+      )
+    })
+    expect(document.body.textContent).not.toContain("letzten Tag des Monats")
   })
 
   it("no-month YEARLY hints are mode-accurate (copy once swapped the modes)", async () => {

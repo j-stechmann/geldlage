@@ -50,9 +50,9 @@ EXDATE/RDATE` as well as multi-line/`DTSTART:` pastes (dtstart is a
    `BYMONTH=2;BYMONTHDAY=29` occurs every year; yearless
    `YEARLY;BYMONTHDAY=31` fills all 12 month ends. `COUNT` counts the
    clamped occurrences, `UNTIL` includes a clamped month end on/before its
-   day, and multiple clamped days in one month collapse to one date. Only
-   plain day-of-month rules clamp; `BYDAY`/`BYSETPOS` intersections and raw
-   DAILY/WEEKLY `BYMONTHDAY` filters keep RRULE's semantics. The form
+   day, and anchors that clamp to the same month end collapse to one date.
+   Only plain day-of-month rules clamp; `BYDAY`/`BYSETPOS` intersections and
+   raw DAILY/WEEKLY `BYMONTHDAY` filters keep RRULE's semantics. The form
    explains the clamp when day ≥ 29 is picked. `COUNT ≤ 366` + window caps
    bound every expansion. `UNTIL` inputs are lifted to **noon UTC** (any
    sub-noon datetime form: date-only, midnight, `06:00Z` …, floating no-Z
@@ -60,10 +60,15 @@ EXDATE/RDATE` as well as multi-line/`DTSTART:` pastes (dtstart is a
    also applied at read time, lifting pre-fix stored rules. The
    occurrence-productivity check on create/update walks the same bounded
    next-date ladder as `nextOccurrenceDate` (five rungs up to 147 000 days —
-   the closing rung spans one Gregorian 400-year cycle, the widest possible
-   gap between consecutive occurrences of any live rule) — sparse-but-live
-   rules (large INTERVAL, `BYDAY`+`BYMONTHDAY` intersections) are creatable,
-   dead ones are rejected.
+   the closing rung spans one Gregorian 400-year cycle) — sparse-but-live
+   rules whose next date falls inside that ladder are creatable (a plain
+   clamped `BYMONTHDAY` rule fires at least once per `INTERVAL`, ≤100
+   years; a century-cadence weekday intersection can span up to one
+   400-year cycle), dead ones are rejected. A large `INTERVAL` combined with
+   a calendar-dependent `BYDAY`/`BYSETPOS` filter, and raw DAILY/WEEKLY
+   `BY*` filters, can space matches thousands of years apart; that
+   pre-existing limitation reads as "no next date" rather than scanning
+   forever.
 
 3. **Read-time matching, zero storage.** Each occurrences request pairs
    planned occurrences with real `Gebucht` rows of the same user (± the

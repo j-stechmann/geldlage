@@ -127,11 +127,13 @@ describe("plan dialog pre-fill from a prefill source (render)", () => {
     expect(rruleInput.value).toBe("FREQ=MONTHLY;BYMONTHDAY=31")
     expect(inputByLabel("Betrag").value).toBe("950,00")
     expect(createButton()).toBeEnabled()
+    // the preview shows the real clamped dates, not a skipped February
     await waitFor(() => {
-      expect(document.body.textContent).toContain(
-        "gilt für den 31. der letzte Tag des Monats"
-      )
+      expect(document.body.textContent).toContain("31.01.2026")
     })
+    expect(document.body.textContent).toContain("28.02.2026")
+    expect(document.body.textContent).toContain("31.03.2026")
+    expect(document.body.textContent).toContain("letzten Tag des Monats")
   })
 
   it("an unparseable source date disarms save like an empty draft", async () => {

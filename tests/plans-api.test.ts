@@ -261,9 +261,17 @@ describe("POST /api/plans", () => {
       rrule: "FREQ=YEARLY;INTERVAL=100;BYMONTH=2;BYMONTHDAY=1",
     })
     expect(sparseYearly.status).toBe(201)
-    expect(getStored((await sparseYearly.json()).plan.id)!.rrule).toBe(
+    const sparseYearlyId = (await sparseYearly.json()).plan.id
+    expect(getStored(sparseYearlyId)!.rrule).toBe(
       "FREQ=YEARLY;INTERVAL=100;BYMONTH=2;BYMONTHDAY=1"
     )
+    const yearlyRow = (
+      (await (await getPlansRow(userId)).json()).plans as Array<{
+        id: string
+        nextDueDate: string | null
+      }>
+    ).find((p) => p.id === sparseYearlyId)
+    expect(yearlyRow!.nextDueDate).toBe("2126-02-01")
 
     // MONTHLY;INTERVAL=100 fires ~8⅓ years out (2034-07-01) — ladder rung 3
     const sparse = await postPlan(`${BASE}/api/plans`, {
@@ -272,9 +280,17 @@ describe("POST /api/plans", () => {
       rrule: "FREQ=MONTHLY;INTERVAL=100;BYMONTHDAY=1",
     })
     expect(sparse.status).toBe(201)
-    expect(getStored((await sparse.json()).plan.id)!.rrule).toBe(
+    const sparseId = (await sparse.json()).plan.id
+    expect(getStored(sparseId)!.rrule).toBe(
       "FREQ=MONTHLY;INTERVAL=100;BYMONTHDAY=1"
     )
+    const monthlyRow = (
+      (await (await getPlansRow(userId)).json()).plans as Array<{
+        id: string
+        nextDueDate: string | null
+      }>
+    ).find((p) => p.id === sparseId)
+    expect(monthlyRow!.nextDueDate).toBe("2034-07-01")
   })
 
   it("accepts a rule whose first occurrence lies beyond the early ladder rungs", async () => {
@@ -805,6 +821,28 @@ describe("GET /api/plans/occurrences", () => {
       (await getOccurrences("from=2026-01-01&to=2026-02-01&accountId=12abc"))
         .status
     ).toBe(400)
+  })
+
+  it("clamps short-month due dates end-to-end (issue #104)", async () => {
+    // a monthly plan due on the 31st must still appear in February and April,
+    // on their last day — not vanish for the month
+    await seedSimplePlan({
+      amountCents: -950_00,
+      dtstart: "2026-01-31",
+      rrule: "FREQ=MONTHLY;BYMONTHDAY=31",
+      counterparty: "Vermieter",
+    })
+    const res = await getOccurrences("from=2026-01-01&to=2026-04-30")
+    expect(res.status).toBe(200)
+    const { occurrences } = (await res.json()) as {
+      occurrences: Array<{ date: string }>
+    }
+    expect(occurrences.map((o) => o.date)).toEqual([
+      "2026-01-31",
+      "2026-02-28",
+      "2026-03-31",
+      "2026-04-30",
+    ])
   })
 
   it("expands occurrences with category + read-time match state", async () => {

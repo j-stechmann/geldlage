@@ -207,15 +207,25 @@ export function shortMonthHint(
   }
   const clamping = days.filter((day) => day >= 29 && day <= 31)
   if (clamping.length === 0) return null
+  let februaryExample = true
   if (months !== null) {
+    // defensive: exported helper, and a bad month index would roll over in
+    // Date.UTC and hint at a month the rule cannot actually select
+    const validMonths = months.filter(
+      (month) => Number.isInteger(month) && month >= 1 && month <= 12
+    )
+    if (validMonths.length === 0) return null
     const canClamp = clamping.some((day) =>
-      months.some((month) => shortestMonthLength(month) < day)
+      validMonths.some((month) => shortestMonthLength(month) < day)
     )
     if (!canClamp) return null
+    // only illustrate February when the rule can actually select it
+    februaryExample = validMonths.includes(2)
   }
+  const example = februaryExample ? " (Februar: 28. oder 29.)" : ""
   return clamping.length === 1
-    ? `In kurzen Monaten (z. B. Februar) gilt für den ${clamping[0]}. der letzte Tag des Monats als Termin.`
-    : "In kurzen Monaten (z. B. Februar) gilt für fehlende Tage der letzte Tag des Monats als Termin."
+    ? `Der ${clamping[0]}. wird in kurzen Monaten auf den letzten Tag des Monats gelegt${example}.`
+    : `Tage, die es in einem Monat nicht gibt, werden auf den letzten Tag des Monats gelegt${example}.`
 }
 
 /** UTF-8 byte length — the unit the server's text caps actually count. */
@@ -1032,23 +1042,31 @@ export function PlanDialog({
 
   // short-month hint: day-of-month anchors (29–31) clamp to month end in
   // months that cannot hold them — monthly always, yearly only when the
-  // selected months include a short one
+  // selected months include a short one. The raw text is authoritative when
+  // rawDirty (e.g. a stored BYDAY+BYMONTHDAY rule the builder cannot own),
+  // so builder-field hints would contradict the effective rule there.
   const monthDayHint = React.useMemo(
     () =>
-      form.freq === "MONTHLY" && form.monthlyMode === "mday"
+      !form.rawDirty && form.freq === "MONTHLY" && form.monthlyMode === "mday"
         ? shortMonthHint(form.byMonthDayText, null)
         : null,
-    [form.freq, form.monthlyMode, form.byMonthDayText]
+    [form.rawDirty, form.freq, form.monthlyMode, form.byMonthDayText]
   )
   const yearlyMonthDayHint = React.useMemo(
     () =>
-      form.freq === "YEARLY" && form.yearlyMode === "mday"
+      !form.rawDirty && form.freq === "YEARLY" && form.yearlyMode === "mday"
         ? shortMonthHint(
             form.yearlyMonthDayText,
             form.byMonth.length === 0 ? null : form.byMonth.map(Number)
           )
         : null,
-    [form.freq, form.yearlyMode, form.yearlyMonthDayText, form.byMonth]
+    [
+      form.rawDirty,
+      form.freq,
+      form.yearlyMode,
+      form.yearlyMonthDayText,
+      form.byMonth,
+    ]
   )
 
   const save = async () => {

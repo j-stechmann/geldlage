@@ -340,14 +340,19 @@ describe("shortMonthHint (month-end clamp copy)", () => {
   it("explains a single clamped day for every-month rules", () => {
     const hint = shortMonthHint("31", null)
     expect(hint).toContain("31.")
-    expect(hint).toContain("letzte Tag des Monats")
+    expect(hint).toContain("letzten Tag des Monats")
     expect(hint).not.toContain("fällt aus")
   })
 
   it("uses the plural copy for several clamping days", () => {
     const hint = shortMonthHint("30, 31", null)
-    expect(hint).toContain("fehlende Tage")
-    expect(hint).toContain("letzte Tag des Monats")
+    expect(hint).toContain("Tage, die es in einem Monat nicht gibt")
+    expect(hint).toContain("letzten Tag des Monats")
+  })
+
+  it("states the February leap/non-leap resolution", () => {
+    expect(shortMonthHint("29", [2])).toContain("28. oder 29.")
+    expect(shortMonthHint("31", null)).toContain("28. oder 29.")
   })
 
   it("stays silent when the chosen days always exist", () => {
@@ -356,14 +361,25 @@ describe("shortMonthHint (month-end clamp copy)", () => {
   })
 
   it("only hints for yearly month picks that can actually be short", () => {
-    expect(shortMonthHint("29", [2])).toContain("letzte Tag")
+    expect(shortMonthHint("29", [2])).toContain("letzten Tag")
     expect(shortMonthHint("29", [1, 3])).toBeNull()
-    expect(shortMonthHint("31", [2, 4])).toContain("letzte Tag")
+    expect(shortMonthHint("31", [2, 4])).toContain("letzten Tag")
+    // February is not selected here, so the February example would mislead
+    expect(shortMonthHint("31", [4])).toContain("letzten Tag")
+    expect(shortMonthHint("31", [4])).not.toContain("Februar")
   })
 
   it("ignores invalid day text (the field's own error owns that case)", () => {
     expect(shortMonthHint("1.5", null)).toBeNull()
     expect(shortMonthHint("", null)).toBeNull()
+  })
+
+  it("ignores out-of-range month indices", () => {
+    expect(shortMonthHint("31", [0])).toBeNull()
+    expect(shortMonthHint("31", [13])).toBeNull()
+    expect(shortMonthHint("31", [])).toBeNull()
+    // a bad entry does not poison a valid one
+    expect(shortMonthHint("31", [2, 13])).toContain("letzten Tag")
   })
 })
 

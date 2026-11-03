@@ -147,6 +147,8 @@ function dayOfMonthClamp(parsed: RRule): DayOfMonthClamp | null {
     .filter((m) => m >= 1 && m <= 12)
     .filter((m, i, arr) => arr.indexOf(m) === i)
     .sort((a, b) => a - b)
+  // expandOccurrenceDates rejects corrupt INTERVAL/COUNT rows before this
+  // detection runs, so a clampable rule always carries valid end conditions.
   return {
     freq: opts.freq,
     interval:
@@ -484,6 +486,7 @@ export function expandOccurrenceDates(
   w: { from: string; to: string },
   cap = 2000
 ): string[] {
+  if (cap <= 0) return []
   if (isEmptyRule(rruleText)) {
     return dtstart >= w.from && dtstart <= w.to ? [dtstart] : []
   }
@@ -492,6 +495,22 @@ export function expandOccurrenceDates(
       forceset: false,
     })
     if (!(parsed instanceof RRule)) return []
+    // Defence in depth for corrupt rows: validateRrule rejects these, but
+    // rrule itself hangs on a non-positive/fractional INTERVAL (only exactly
+    // 0 short-circuits) and ignores invalid COUNTs. Reject before ANY
+    // expansion path so a pathological row can never block a read route.
+    const rawOpts = parsed.origOptions as {
+      interval?: number
+      count?: number | null
+    }
+    const rawInterval = rawOpts.interval ?? 1
+    if (!Number.isInteger(rawInterval) || rawInterval < 1) return []
+    if (
+      rawOpts.count != null &&
+      (!Number.isInteger(rawOpts.count) || rawOpts.count < 1)
+    ) {
+      return []
+    }
     const after = noonUtc(w.from)
     const before = noonUtc(w.to)
     // A rule live at write time expires naturally later (UNTIL passes) —
@@ -538,12 +557,17 @@ export function expandOccurrenceDates(
  * (large INTERVAL, 5th-weekday ordinals, BYDAY+BYMONTHDAY intersections)
  * still finds its real next date instead of a misleading null. The ladder is
  * bounded: a rule that truly never fires again (expired UNTIL, exhausted
- * COUNT) costs at most five bounded scans. The closing rung makes "dead"
- * truthful for every storable unbounded rule — the widest gap between
- * consecutive occurrences of any live rule is one Gregorian 400-year cycle
- * (146,097 days, e.g. a Feb-29-that-is-a-Tuesday rule anchored on a
- * century cadence: 2000 → 2400); dense rules are found on the first rung,
- * only the pathological sparse cadences pay the full ladder.
+ * COUNT) costs at most five bounded scans. The closing rung covers the
+ * common sparse shapes: a plain MONTHLY/YEARLY day-of-month rule (the
+ * clamping path) fires at least once per INTERVAL (≤100 years), and a
+ * century-cadence weekday intersection can span one Gregorian 400-year
+ * cycle (146,097 days, e.g. a Feb-29-that-is-a-Tuesday rule anchored on a
+ * century cadence: 2000 → 2400). A large INTERVAL combined with a
+ * calendar-dependent BYDAY/BYSETPOS filter, and raw DAILY/WEEKLY BY*
+ * filters, can space matches thousands of years apart (e.g.
+ * YEARLY;INTERVAL=97;BYMONTH=2;BYMONTHDAY=29;BYDAY=TU); past the ladder they
+ * answer null instead of scanning unboundedly. Dense rules are found on the
+ * first rung, only the pathological sparse cadences pay the full ladder.
  *
  * Rung ends clamp at MAX_ISO_DATE: an unclamped end would cross into the
  * extended-year form and truncate into an Invalid Date (between throws →

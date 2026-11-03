@@ -211,9 +211,52 @@ describe("expandOccurrenceDates", () => {
       "FREQ=MONTHLY;BYMONTHDAY=29",
       { from: "2024-01-01", to: "2025-03-31" }
     )
-    expect(dates).toContain("2024-02-29")
-    expect(dates).toContain("2025-02-28")
-    expect(dates).not.toContain("2025-02-29")
+    expect(dates).toEqual([
+      "2024-01-29",
+      "2024-02-29",
+      "2024-03-29",
+      "2024-04-29",
+      "2024-05-29",
+      "2024-06-29",
+      "2024-07-29",
+      "2024-08-29",
+      "2024-09-29",
+      "2024-10-29",
+      "2024-11-29",
+      "2024-12-29",
+      "2025-01-29",
+      "2025-02-28",
+      "2025-03-29",
+    ])
+  })
+
+  it("day-of-month anchors before DTSTART are skipped, later ones in the same month stay", () => {
+    // the rule day already passed in the DTSTART month → next month is first
+    expect(
+      expandOccurrenceDates("2026-01-31", "FREQ=MONTHLY;BYMONTHDAY=1", {
+        from: "2026-01-01",
+        to: "2026-02-28",
+      })
+    ).toEqual(["2026-02-01"])
+    // DTSTART mid-month: the clamped month end after it is still the first
+    expect(
+      expandOccurrenceDates("2026-01-15", "FREQ=MONTHLY;BYMONTHDAY=31", {
+        from: "2026-01-01",
+        to: "2026-02-28",
+      })
+    ).toEqual(["2026-01-31", "2026-02-28"])
+    // that DTSTART-month clamp also consumes COUNT (rrule would have skipped
+    // February entirely)
+    expect(
+      expandOccurrenceDates(
+        "2026-02-15",
+        "FREQ=MONTHLY;BYMONTHDAY=31;COUNT=1",
+        {
+          from: "2026-01-01",
+          to: "2026-12-31",
+        }
+      )
+    ).toEqual(["2026-02-28"])
   })
 
   it("several clamped days in one month collapse to a single month end", () => {
@@ -223,6 +266,33 @@ describe("expandOccurrenceDates", () => {
       { from: "2026-02-01", to: "2026-02-28" }
     )
     expect(dates).toEqual(["2026-02-28"])
+  })
+
+  it("keeps both dates when only one of several day anchors clamps", () => {
+    // ascending day order within a month, and a non-clamping day alongside a
+    // clamping one (1 always exists, 31 becomes the month end)
+    expect(
+      expandOccurrenceDates("2026-01-01", "FREQ=MONTHLY;BYMONTHDAY=1,31", {
+        from: "2026-01-01",
+        to: "2026-02-28",
+      })
+    ).toEqual(["2026-01-01", "2026-01-31", "2026-02-01", "2026-02-28"])
+  })
+
+  it("resolves negative anchors alongside a clamping day", () => {
+    // both 31 and -1 resolve to the month end → one date
+    expect(
+      expandOccurrenceDates("2026-01-01", "FREQ=MONTHLY;BYMONTHDAY=31,-1", {
+        from: "2026-02-01",
+        to: "2026-02-28",
+      })
+    ).toEqual(["2026-02-28"])
+    expect(
+      expandOccurrenceDates("2026-01-01", "FREQ=MONTHLY;BYMONTHDAY=31,-1", {
+        from: "2026-01-01",
+        to: "2026-01-31",
+      })
+    ).toEqual(["2026-01-31"])
   })
 
   it("month-end clamping keeps the INTERVAL month phase", () => {
@@ -260,11 +330,102 @@ describe("expandOccurrenceDates", () => {
     expect(dates).toEqual(["2026-01-31", "2026-02-28", "2026-03-31"])
   })
 
+  it("COUNT keeps counting occurrences before the window starts", () => {
+    // Jan 31 and Feb 28 are consumed before the window; only the 3rd remains
+    expect(
+      expandOccurrenceDates(
+        "2026-01-31",
+        "FREQ=MONTHLY;BYMONTHDAY=31;COUNT=3",
+        { from: "2026-03-01", to: "2026-12-31" }
+      )
+    ).toEqual(["2026-03-31"])
+    // with COUNT=4 the 4th clamped date (April 30) is still inside
+    expect(
+      expandOccurrenceDates(
+        "2026-01-31",
+        "FREQ=MONTHLY;BYMONTHDAY=31;COUNT=4",
+        { from: "2026-03-01", to: "2026-12-31" }
+      )
+    ).toEqual(["2026-03-31", "2026-04-30"])
+    expect(
+      nextOccurrenceDate(
+        "2026-01-31",
+        "FREQ=MONTHLY;BYMONTHDAY=31;COUNT=3",
+        "2026-04-01"
+      )
+    ).toBeNull()
+  })
+
+  it("applies the occurrence cap to the clamp path", () => {
+    expect(
+      expandOccurrenceDates(
+        "2026-01-31",
+        "FREQ=MONTHLY;BYMONTHDAY=31",
+        { from: "2026-01-01", to: "2026-12-31" },
+        2
+      )
+    ).toEqual(["2026-01-31", "2026-02-28"])
+    // cap 0 means "none", matching the rrule path's slice(0, cap)
+    expect(
+      expandOccurrenceDates(
+        "2026-01-31",
+        "FREQ=MONTHLY;BYMONTHDAY=31",
+        { from: "2026-01-01", to: "2026-12-31" },
+        0
+      )
+    ).toEqual([])
+    expect(
+      expandOccurrenceDates(
+        "2026-01-31",
+        "FREQ=MONTHLY;BYMONTHDAY=1",
+        { from: "2026-01-01", to: "2026-12-31" },
+        0
+      )
+    ).toEqual([])
+  })
+
+  it("degrades corrupt INTERVAL/COUNT rows to no occurrences", () => {
+    // validateRrule rejects these; a defence-in-depth row must not become a
+    // live rule (or hang rrule's iterator) because it took another path
+    for (const rule of [
+      "FREQ=MONTHLY;INTERVAL=0;BYMONTHDAY=31",
+      "FREQ=MONTHLY;INTERVAL=-1;BYMONTHDAY=31",
+      "FREQ=MONTHLY;INTERVAL=1.5;BYMONTHDAY=31",
+      "FREQ=MONTHLY;BYMONTHDAY=31;COUNT=0",
+      "FREQ=MONTHLY;BYMONTHDAY=31;COUNT=-1",
+      "FREQ=MONTHLY;BYMONTHDAY=31;COUNT=1.5",
+    ]) {
+      expect(
+        expandOccurrenceDates("2026-01-31", rule, {
+          from: "2026-01-01",
+          to: "2026-12-31",
+        }),
+        rule
+      ).toEqual([])
+    }
+    // non-clamp shapes take the same central guard
+    expect(
+      expandOccurrenceDates("2026-01-31", "FREQ=DAILY;INTERVAL=-1", {
+        from: "2026-01-01",
+        to: "2026-12-31",
+      })
+    ).toEqual([])
+  })
+
   it("UNTIL includes a clamped month end on or before its day", () => {
     expect(
       expandOccurrenceDates(
         "2026-01-31",
         "FREQ=MONTHLY;BYMONTHDAY=31;UNTIL=20260228T120000Z",
+        { from: "2026-01-01", to: "2026-12-31" }
+      )
+    ).toEqual(["2026-01-31", "2026-02-28"])
+    // sub-noon UNTIL is lifted to noon (normalizeRuleInput), keeping the
+    // clamped month end on that day
+    expect(
+      expandOccurrenceDates(
+        "2026-01-31",
+        "FREQ=MONTHLY;BYMONTHDAY=31;UNTIL=20260228T115959Z",
         { from: "2026-01-01", to: "2026-12-31" }
       )
     ).toEqual(["2026-01-31", "2026-02-28"])
@@ -339,6 +500,26 @@ describe("expandOccurrenceDates", () => {
     expect(dates).toEqual(["2026-02-28", "2026-04-30"])
   })
 
+  it("yearly February day-30 rules clamp like day-31", () => {
+    expect(
+      expandOccurrenceDates(
+        "2026-01-01",
+        "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=30",
+        { from: "2026-01-01", to: "2028-12-31" }
+      )
+    ).toEqual(["2026-02-28", "2027-02-28", "2028-02-29"])
+  })
+
+  it("deduplicates repeated BYMONTH values", () => {
+    expect(
+      expandOccurrenceDates(
+        "2026-01-01",
+        "FREQ=YEARLY;BYMONTH=2,2;BYMONTHDAY=31",
+        { from: "2026-01-01", to: "2026-12-31" }
+      )
+    ).toEqual(["2026-02-28"])
+  })
+
   it("yearly INTERVAL and COUNT work on clamped occurrences", () => {
     expect(
       expandOccurrenceDates(
@@ -376,6 +557,37 @@ describe("expandOccurrenceDates", () => {
         { from: "2026-02-01", to: "2026-02-28" }
       )
     ).toEqual([])
+    // July 31 2026 is a Friday → the intersection still fires
+    expect(
+      expandOccurrenceDates(
+        "2026-01-01",
+        "FREQ=MONTHLY;BYDAY=FR;BYMONTHDAY=31",
+        { from: "2026-07-01", to: "2026-07-31" }
+      )
+    ).toEqual(["2026-07-31"])
+    // April has no 31st at all: the BYMONTHDAY filter yields nothing and
+    // BYSETPOS must not invent a clamped month end
+    expect(
+      expandOccurrenceDates(
+        "2026-01-01",
+        "FREQ=MONTHLY;BYDAY=TH;BYMONTHDAY=31",
+        { from: "2026-04-01", to: "2026-04-30" }
+      )
+    ).toEqual([])
+    expect(
+      expandOccurrenceDates(
+        "2026-01-01",
+        "FREQ=MONTHLY;BYMONTHDAY=29,30,31;BYSETPOS=-1",
+        { from: "2026-02-01", to: "2026-02-28" }
+      )
+    ).toEqual([])
+    expect(
+      expandOccurrenceDates(
+        "2026-01-01",
+        "FREQ=MONTHLY;BYMONTHDAY=29,30,31;BYSETPOS=-1",
+        { from: "2026-01-01", to: "2026-01-31" }
+      )
+    ).toEqual(["2026-01-31"])
   })
 
   it("weekly BYDAY rules expand in-window", () => {
@@ -597,10 +809,28 @@ describe("nextOccurrenceDate", () => {
         "2027-01-02"
       )
     ).toBe("2126-12-31")
-    // widest gap a storable live rule can have: one Gregorian 400-year
-    // cycle — a Feb-29-that-is-a-Tuesday rule on a century cadence keeps
-    // the day anchor out of the clamp path (BYDAY+BYMONTHDAY), so only
-    // the century-leap sequence matches (2000 → 2400)
+    // the same cadence on a clampable day is no longer sparse: clamping fires
+    // in 2100/2200/2300 too (Feb 28), so the closing rung still finds the
+    // first one after the window
+    expect(
+      nextOccurrenceDate(
+        "2000-03-01",
+        "FREQ=YEARLY;INTERVAL=100;BYMONTH=2;BYMONTHDAY=29",
+        "2026-10-26"
+      )
+    ).toBe("2100-02-28")
+    expect(
+      nextOccurrenceDate(
+        "2000-03-01",
+        "FREQ=YEARLY;INTERVAL=100;BYMONTH=2;BYMONTHDAY=29",
+        "2101-01-01"
+      )
+    ).toBe("2200-02-28")
+    // widest gap the ladder is sized for: a century-cadence weekday
+    // intersection spans one Gregorian 400-year cycle — a Feb-29-that-is-a-
+    // Tuesday rule keeps the day anchor out of the clamp path
+    // (BYDAY+BYMONTHDAY), so only the century-leap sequence matches
+    // (2000 → 2400)
     expect(
       nextOccurrenceDate(
         "2000-02-29",
