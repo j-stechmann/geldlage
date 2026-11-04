@@ -103,6 +103,21 @@ pinch/wheel-zoom and drag-pan through the custom
 the zoom window when the dataset changes). See
 [frontend.md](frontend.md) for the client details.
 
+Top spend categories render a visible euro axis with ticks snapped to the
+1/2/2.5/5 × 10ⁿ candidates (ceiled to whole euros, never Recharts' arbitrary
+adaptive steps). The domain stays pinned to the largest bar total (Ist plus
+planned while the overlay is on) so the bars keep their full width, and that
+maximum is appended as the final tick (unless its rounded label would repeat
+the previous tick), so the longest bar has a label at its end whenever the
+rounded value is distinct. The axis is deliberately euro-only: shares have
+two different denominators and their 100 % point is the total spend rather
+than the largest bar, so a second tick scale would be misread and would thin
+the labels out on the card's width. Shares stay in the tooltips — Ist rows
+divide by the filtered-period total, planned-only rows by the 12-month
+forecast-horizon total — and the tooltip names the basis explicitly. Each
+stacked segment prints only its own amount, so the planned money is not
+repeated on the Ist line.
+
 ## Correctness
 
 The analytics engine is verified **to the cent** against a generated

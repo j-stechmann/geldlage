@@ -80,12 +80,12 @@ export interface CategoryTooltipRow {
 
 /**
  * Tooltip text of one stacked segment of the planned-vs-actual categories
- * chart (exported for the denominator regression tests). The planned
- * (washed) segment entry prints its supplement alone; the Ist entry carries
- * a share ONLY where the row actually has Ist money — a planned-only row
- * would otherwise silently inherit the Ist-period " (N %)" denominator it
- * never contributed to (and the planned segment would double-print the
- * planned amount).
+ * chart (exported for the denominator regression tests). Each segment prints
+ * its own amount exactly once: the planned (washed) entry prints the planned
+ * amount, the Ist entry the Ist amount. The Ist entry carries a share against
+ * the Ist-period total; a planned-only row's planned entry carries its share
+ * against the forecast horizon. Both bases are named explicitly, so the two
+ * scopes overlaid by the chart can never be mistaken for each other.
  */
 export function topCategoriesTooltip(
   value: unknown,
@@ -93,18 +93,77 @@ export function topCategoriesTooltip(
   item: { payload?: CategoryTooltipRow } | undefined | null
 ): string {
   const payload = item?.payload
-  const planned = payload?.planned ?? 0
   const fmt = (n: number) =>
     n.toLocaleString("de-DE", { minimumFractionDigits: 2 })
+  // The two scopes carry DIFFERENT share denominators: Ist rows divide by
+  // the filtered period's total, planned-only rows by the forecast horizon's
+  // total. Name the basis — a bare " (N %)" could silently belong to either.
+  const isIstRow = (payload?.value ?? 0) > 0
+  const share = payload?.share
+  const shareText =
+    share != null
+      ? `(${Math.round(share * 100)} % ${isIstRow ? "der Ist-Ausgaben" : "der geplanten Ausgaben"})`
+      : undefined
   if (name === "planned") {
-    return `${fmt(Number(value))} € geplant`
+    // mixed rows only store the Ist share; the horizon share exists on
+    // planned-only rows, which is where this entry belongs
+    return [`${fmt(Number(value))} € geplant`, isIstRow ? undefined : shareText]
+      .filter((part): part is string => part != null)
+      .join(" ")
   }
-  const actualShare = (payload?.value ?? 0) > 0 ? payload?.share : undefined
-  return (
-    `${fmt(Number(value))} €` +
-    (planned > 0 ? ` + ${fmt(planned)} € geplant` : "") +
-    (actualShare != null ? ` (${Math.round(actualShare * 100)} %)` : "")
+  return [`${fmt(Number(value))} €`, isIstRow ? shareText : undefined]
+    .filter((part): part is string => part != null)
+    .join(" ")
+}
+
+/**
+ * Human-friendly X-axis ticks for the Top-Ausgabenkategorien chart. The
+ * default Recharts algorithm divides the domain into arbitrary steps (650 €,
+ * 1.300 €, …), which reads as random. Snap to the 1/2/2.5/5 × 10^n
+ * candidates instead, ceiled to whole euros so the rounded tick labels stay
+ * unique, and append the data maximum as the final tick: the domain is
+ * pinned to that maximum (bars keep their full width), so without the last
+ * tick the longest bar would run past every label.
+ *
+ * The axis is euro-only on purpose. Percent shares have two different
+ * denominators while the forecast overlay is on (see topCategoriesMerge) and
+ * their 100 % point is the total spend, not the largest bar — as a second
+ * tick scale they would be misread and their labels collapse to 2-3 at the
+ * card's width. Shares stay in the tooltip, where the basis is named.
+ *
+ * A sub-euro maximum degrades to the zero tick: the formatter prints whole
+ * euros, so every finer label would round to the same value.
+ */
+export function topCategoryAxisTicks(maxEuros: number): number[] {
+  if (!(maxEuros > 0) || !Number.isFinite(maxEuros)) return [0]
+  if (maxEuros < 1) return [0]
+  const rough = maxEuros / 5
+  const magnitude = 10 ** Math.floor(Math.log10(rough))
+  const normalized = rough / magnitude
+  const step = Math.max(
+    1,
+    Math.ceil(
+      (normalized <= 1
+        ? 1
+        : normalized <= 2
+          ? 2
+          : normalized <= 2.5
+            ? 2.5
+            : normalized <= 5
+              ? 5
+              : 10) * magnitude
+    )
   )
+  if (!Number.isFinite(step) || step <= 0) return [0]
+  const ticks: number[] = []
+  for (let value = 0; value < maxEuros; value += step) {
+    ticks.push(value)
+  }
+  // Only append the raw maximum when its rounded label is not already the
+  // previous tick's (1,2 € would otherwise share the "1 €" label with 1 €).
+  const last = ticks[ticks.length - 1]
+  if (Math.round(maxEuros) > Math.round(last)) ticks.push(maxEuros)
+  return ticks
 }
 
 function ZoomResetButton({
@@ -500,7 +559,7 @@ export interface TopCategoryRow {
  * merge-identity regression tests). Rows are FRESH COPIES: mutating the
  * memoized Ist rows in place leaked the planned sums into `chartData` —
  * with the toggle off (merged === chartData) that stale planned value kept
- * printing " + X € geplant" in tooltips until the next analytics refetch.
+ * appearing in tooltips until the next analytics refetch.
  * Merge by CATEGORY ID, not name: the engine labels actual uncategorized
  * spending "Unlabeled" while plannedCategories calls the same bucket
  * "ohne Kategorie" — keyed on the id (null == null) the planned money
@@ -509,8 +568,9 @@ export interface TopCategoryRow {
  * Rows WITHOUT planned money carry `planned: undefined` (not 0): recharts
  * keeps tooltip items with `value != null`, so a 0-value planned segment
  * under a purely-Ist category would print a noise "0,00 € geplant" row.
- * Planned-only rows keep `value: 0` — their Ist segment intentionally
- * prints "0,00 € + X € geplant".
+ * Planned-only rows keep `value: 0` — their Ist segment prints a bare
+ * "0,00 €"; the planned segment owns the planned amount and the horizon
+ * share.
  */
 export function topCategoriesMerge(
   chartData: TopCategoryRow[],
@@ -577,6 +637,12 @@ export function TopCategoriesChart({
     () => topCategoriesMerge(chartData, forecast),
     [chartData, forecast]
   )
+  const xMax = React.useMemo(
+    () =>
+      merged.reduce((max, d) => Math.max(max, d.value + (d.planned ?? 0)), 0),
+    [merged]
+  )
+  const xTicks = React.useMemo(() => topCategoryAxisTicks(xMax), [xMax])
   const config = React.useMemo<ChartConfig>(() => {
     const cfg: ChartConfig = {}
     for (const d of merged) {
@@ -592,21 +658,38 @@ export function TopCategoriesChart({
         <CardDescription>
           {forecast
             ? "Ist + geplant (hell): Ist = gewählter Zeitraum, Geplant = Prognose-Horizont"
-            : "Anteil an den Gesamtausgaben"}
+            : "Ausgaben je Kategorie, Anteil im Tooltip"}
         </CardDescription>
       </CardHeader>
       <CardContent>
         {loading ? (
           <Skeleton className="h-72 w-full" />
-        ) : merged.length === 0 ? (
+        ) : merged.length === 0 || !(xMax > 0) ? (
           <p className="py-16 text-center text-sm text-muted-foreground">
             Keine Ausgaben im gewählten Zeitraum.
           </p>
         ) : (
           <ChartContainer config={config} className="mx-auto h-72 w-full">
-            <BarChart data={merged} layout="vertical" accessibilityLayer>
+            <BarChart
+              data={merged}
+              layout="vertical"
+              accessibilityLayer
+              /* the last tick sits on the right edge; without a right margin
+                 its middle-anchored label is clipped by the SVG */
+              margin={{ top: 5, right: 40, bottom: 5, left: 5 }}
+            >
               <CartesianGrid horizontal={false} />
-              <XAxis type="number" hide />
+              <XAxis
+                type="number"
+                domain={[0, xMax]}
+                ticks={xTicks}
+                niceTicks="none"
+                tickLine={false}
+                axisLine={false}
+                interval="preserveStartEnd"
+                minTickGap={16}
+                tickFormatter={(v: number) => `${euroShort(v)} €`}
+              />
               <YAxis
                 dataKey="name"
                 type="category"

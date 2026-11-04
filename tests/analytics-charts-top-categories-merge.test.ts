@@ -61,16 +61,15 @@ describe("topCategoriesMerge", () => {
     expect(topCategoriesMerge(chartData, undefined)).toBe(chartData)
   })
 
-  it("never mutates the memoized Ist rows (stale-planned tooltip regression)", () => {
+  it("never mutates the memoized Ist rows (stale-planned regression)", () => {
     const chartData = [istRow()]
     const merged = topCategoriesMerge(chartData, forecast([plannedEntry()]))
     expect(merged[0].planned).toBe(200)
-    // toggle-off readout: with the forecast off the tooltip must not print a
-    // planned supplement — this stays correct only while chartData's
-    // planned field is untouched by the merge
+    // toggle-off readout: chartData's planned field must stay untouched so the
+    // merge cannot leak planned money into the Ist series
     expect(chartData[0].planned).toBe(0)
     expect(topCategoriesTooltip(100, "value", { payload: chartData[0] })).toBe(
-      "100,00 € (50 %)"
+      "100,00 € (50 % der Ist-Ausgaben)"
     )
   })
 
@@ -123,9 +122,9 @@ describe("topCategoriesMerge", () => {
     )
     const ohnePlan = merged.find((r) => r.name === "Miete")
     expect(ohnePlan?.planned).toBeUndefined()
-    // unchanged Ist readout — no planned supplement, Ist share intact
+    // Ist-only row keeps its share and gets no planned segment
     expect(topCategoriesTooltip(100, "value", { payload: ohnePlan })).toBe(
-      "100,00 € (50 %)"
+      "100,00 € (50 % der Ist-Ausgaben)"
     )
   })
 
