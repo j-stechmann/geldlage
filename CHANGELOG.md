@@ -1,5 +1,33 @@
 # Changelog
 
+## v1.24.2
+
+### Fixed
+
+- **dashboard — readable x-axis on the Top-Ausgabenkategorien chart**: the
+  category chart no longer hides its x-axis. Ticks snap to the
+  `1/2/2.5/5 × 10ⁿ` euro ladder, are pre-thinned to the measured card width
+  and formatted label width, and the data maximum is appended as the final
+  tick so the longest bar normally ends on a label; a round tick the maximum
+  would overlap (`1.000 €` / `1.001 €`) is dropped instead. The domain stays
+  pinned to the data maximum, so the bars keep their full width. While the
+  axis describes Ist money alone, every tick also prints its share of the
+  filtered Ist total on a second line (`2.000 €` / `25 %`); false
+  `0 %` / `100 %` roundings read `<1 %` / `>99 %`, on the axis and in the
+  tooltip. Once planned bars share the axis only euros render, because Ist
+  rows and planned-only rows divide by different totals (filtered period vs.
+  the 12-month forecast horizon). The y-axis pins `interval={0}` so the
+  visible x-axis cannot thin the 12 category labels, the axis height stays at
+  the two-line size whenever Ist data exists (no reflow when the overlay
+  loads), both axes use the themed muted-foreground colour, a
+  non-finite/non-positive domain falls back to the empty state instead of
+  handing Recharts `[0, Infinity]`, and a maximum whose label is wider than
+  the plot degrades to the origin tick. Tooltips name the share basis
+  explicitly and print each stacked segment's amount exactly once.
+  `ChartContainer` gained an optional `onResize` pass-through so the chart can
+  measure its own width; no other chart changes behaviour. Docs and
+  regression tests updated. Closes #108.
+
 ## v1.24.1
 
 ### Fixed
