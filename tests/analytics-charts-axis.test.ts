@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest"
-import { topCategoryAxisTicks } from "@/components/analytics-charts"
+import {
+  topCategoryAxisLabels,
+  topCategoryAxisTicks,
+} from "@/components/analytics-charts"
 
 /**
  * X-axis regression (Top-Ausgabenkategorien): the euro axis is visible, snaps
@@ -7,6 +10,45 @@ import { topCategoryAxisTicks } from "@/components/analytics-charts"
  * domain is pinned to it so the bars keep their full width). Percent shares
  * are tooltip-only — a single euro scale is what the axis must carry.
  */
+
+describe("topCategoryAxisLabels", () => {
+  it("stacks the euro value and its Ist-period share", () => {
+    expect(topCategoryAxisLabels(0, 2000)).toEqual({
+      euro: "0 €",
+      share: "0 %",
+    })
+    expect(topCategoryAxisLabels(500, 2000)).toEqual({
+      euro: "500 €",
+      share: "25 %",
+    })
+    expect(topCategoryAxisLabels(1500, 3000)).toEqual({
+      euro: "1.500 €",
+      share: "50 %",
+    })
+    expect(topCategoryAxisLabels(2000, 2000)).toEqual({
+      euro: "2.000 €",
+      share: "100 %",
+    })
+  })
+
+  it("rounds the share to whole points", () => {
+    expect(topCategoryAxisLabels(333, 1000)).toEqual({
+      euro: "333 €",
+      share: "33 %",
+    })
+  })
+
+  it("drops the share without an Ist denominator (forecast overlay on)", () => {
+    expect(topCategoryAxisLabels(500, 0)).toEqual({
+      euro: "500 €",
+      share: undefined,
+    })
+    expect(topCategoryAxisLabels(0, 0)).toEqual({
+      euro: "0 €",
+      share: undefined,
+    })
+  })
+})
 
 describe("topCategoryAxisTicks", () => {
   it("snaps the grid to round euro steps instead of arbitrary fractions", () => {

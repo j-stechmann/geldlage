@@ -7,7 +7,7 @@
  * has no measurable layout), including the right margin that keeps the last
  * tick label inside the SVG.
  */
-import type { ReactNode } from "react"
+import { type ReactElement, type ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, render, screen } from "@testing-library/react"
 import { TopCategoriesChart } from "@/components/analytics-charts"
@@ -107,6 +107,72 @@ describe("TopCategoriesChart x-axis", () => {
     expect(props.ticks).toEqual([0, 500, 1000, 1500, 2000, 2437])
     const format = props.tickFormatter as (v: number) => string
     expect(format(1500)).toBe("1.500 €")
+    expect(props.height).toBe(44)
+    expect(typeof props.tick).toBe("function")
+  })
+
+  it("renders the euro value and the Ist share on two tick lines", () => {
+    render(<TopCategoriesChart data={DATA} loading={false} />)
+    const tick = captured.xAxis[0].tick as (
+      props: Record<string, unknown>
+    ) => ReactElement
+    const { container } = render(
+      tick({
+        x: 0,
+        y: 0,
+        payload: { value: 500 },
+        textAnchor: "middle",
+        fill: "#666",
+      })
+    )
+    // DATA recovers a 4.874 € Ist total; 500 € is 10 % of it
+    expect(container.textContent).toContain("500 €")
+    expect(container.textContent).toContain("10 %")
+  })
+
+  it("omits the share line while the forecast overlay is on", () => {
+    render(
+      <TopCategoriesChart data={DATA} forecast={FORECAST} loading={false} />
+    )
+    const props = captured.xAxis[0]
+    expect(props.height).toBe(30)
+    const tick = props.tick as (props: Record<string, unknown>) => ReactElement
+    const { container } = render(
+      tick({
+        x: 0,
+        y: 0,
+        payload: { value: 500 },
+        textAnchor: "middle",
+        fill: "#666",
+      })
+    )
+    expect(container.textContent).toBe("500 €")
+  })
+
+  it("keeps the share line when the overlay has no planned expenses", () => {
+    const emptyForecast = {
+      plannedCategories: [],
+    } as unknown as ForecastResult
+    render(
+      <TopCategoriesChart
+        data={DATA}
+        forecast={emptyForecast}
+        loading={false}
+      />
+    )
+    const props = captured.xAxis[0]
+    expect(props.height).toBe(44)
+    const tick = props.tick as (props: Record<string, unknown>) => ReactElement
+    const { container } = render(
+      tick({
+        x: 0,
+        y: 0,
+        payload: { value: 500 },
+        textAnchor: "middle",
+        fill: "#666",
+      })
+    )
+    expect(container.textContent).toContain("10 %")
   })
 
   it("forces every category label despite the visible x axis", () => {

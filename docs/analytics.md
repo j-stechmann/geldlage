@@ -109,14 +109,16 @@ adaptive steps). The domain stays pinned to the largest bar total (Ist plus
 planned while the overlay is on) so the bars keep their full width, and that
 maximum is appended as the final tick (unless its rounded label would repeat
 the previous tick), so the longest bar has a label at its end whenever the
-rounded value is distinct. The axis is deliberately euro-only: shares have
-two different denominators and their 100 % point is the total spend rather
-than the largest bar, so a second tick scale would be misread and would thin
-the labels out on the card's width. Shares stay in the tooltips — Ist rows
-divide by the filtered-period total, planned-only rows by the 12-month
-forecast-horizon total — and the tooltip names the basis explicitly. Each
-stacked segment prints only its own amount, so the planned money is not
-repeated on the Ist line.
+rounded value is distinct. While the forecast overlay is off, each tick also
+prints its share of the filtered Ist total on a second line (e.g. `2.000 €` /
+`25 %`). The share is a readout, not a 0-100 % scale: the axis ends on the
+largest bar total, so the 100 % point is the total spend and is off-chart.
+Stacking the lines keeps the label as narrow as the euro-only one — a
+single-line `€ · %` label thinned out to 2-3 ticks at the card's width. With
+the overlay on only euros render: planned-only rows divide by the 12-month
+forecast-horizon total while Ist rows divide by the filtered-period total, so
+one percentage scale cannot describe both scopes. Tooltips name the basis
+explicitly and print each stacked segment's amount exactly once.
 
 ## Correctness
 

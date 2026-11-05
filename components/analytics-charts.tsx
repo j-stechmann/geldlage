@@ -28,6 +28,7 @@ import {
   LineChart,
   XAxis,
   YAxis,
+  type XAxisTickContentProps,
 } from "recharts"
 import type { AnalyticsResponse } from "@/components/analytics-kpis"
 import type { ForecastResult } from "@/components/planning/api"
@@ -164,6 +165,61 @@ export function topCategoryAxisTicks(maxEuros: number): number[] {
   const last = ticks[ticks.length - 1]
   if (Math.round(maxEuros) > Math.round(last)) ticks.push(maxEuros)
   return ticks
+}
+
+/**
+ * Two-line X-axis tick of the Top-Ausgabenkategorien chart: the euro value and,
+ * while the forecast overlay is off, its share of the filtered Ist total. The
+ * share is a readout, not a 0-100 % scale — the axis ends on the largest bar
+ * total, so the 100 % point (total spend) is off-chart. Stacking the lines
+ * instead of `1.000 € · 13 %` keeps the label as narrow as the euro-only one;
+ * at the card's one-third width a single-line dual label thinned out to 2-3
+ * ticks. With the overlay on there are two share denominators, so only euros
+ * render (see topCategoriesMerge).
+ */
+export function topCategoryAxisLabels(
+  euros: number,
+  totalEuros: number
+): { euro: string; share: string | undefined } {
+  return {
+    euro: `${euroShort(euros)} €`,
+    share:
+      totalEuros > 0
+        ? `${Math.round((euros / totalEuros) * 100)} %`
+        : undefined,
+  }
+}
+
+function TopCategoryAxisTick({
+  x,
+  y,
+  payload,
+  textAnchor,
+  fill,
+  totalEuros,
+}: XAxisTickContentProps & { totalEuros: number }) {
+  const { euro, share } = topCategoryAxisLabels(
+    Number(payload.value),
+    totalEuros
+  )
+  return (
+    <text
+      x={x}
+      y={y}
+      dy={12}
+      textAnchor={textAnchor}
+      fill={fill}
+      fontSize={12}
+      className="recharts-text recharts-cartesian-axis-tick-value"
+    >
+      <tspan x={x}>{euro}</tspan>
+      {share ? (
+        <tspan x={x} dy={14}>
+          {share}
+        </tspan>
+      ) : null}
+    </text>
+  )
 }
 
 function ZoomResetButton({
@@ -643,6 +699,19 @@ export function TopCategoriesChart({
     [merged]
   )
   const xTicks = React.useMemo(() => topCategoryAxisTicks(xMax), [xMax])
+  // Ist-period total behind the API's `share` values. The response is capped
+  // at 12 rows, but share is computed against ALL expense categories, so any
+  // row with money recovers the denominator (before the tick labels append
+  // their percentage readout).
+  const totalIst = React.useMemo(() => {
+    const row = (data ?? []).find((c) => c.totalCents > 0 && c.share > 0)
+    return row ? row.totalCents / 100 / row.share : 0
+  }, [data])
+  // The second tick line needs a single denominator. Hide it once planned
+  // money actually shares the axis (planned-only rows use the horizon total);
+  // an overlay with no planned expenses leaves the chart Ist-only.
+  const hasPlannedMoney = merged.some((d) => (d.planned ?? 0) > 0)
+  const withShareTicks = !hasPlannedMoney && totalIst > 0
   const config = React.useMemo<ChartConfig>(() => {
     const cfg: ChartConfig = {}
     for (const d of merged) {
@@ -658,7 +727,7 @@ export function TopCategoriesChart({
         <CardDescription>
           {forecast
             ? "Ist + geplant (hell): Ist = gewählter Zeitraum, Geplant = Prognose-Horizont"
-            : "Ausgaben je Kategorie, Anteil im Tooltip"}
+            : "Anteil an den Gesamtausgaben"}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -688,7 +757,16 @@ export function TopCategoriesChart({
                 axisLine={false}
                 interval="preserveStartEnd"
                 minTickGap={16}
+                height={withShareTicks ? 44 : 30}
+                /* Recharts measures minTickGap from tickFormatter; the
+                   custom tick below renders the same euro line */
                 tickFormatter={(v: number) => `${euroShort(v)} €`}
+                tick={(props: XAxisTickContentProps) => (
+                  <TopCategoryAxisTick
+                    {...props}
+                    totalEuros={withShareTicks ? totalIst : 0}
+                  />
+                )}
               />
               <YAxis
                 dataKey="name"
@@ -696,7 +774,7 @@ export function TopCategoriesChart({
                 width={120}
                 tickLine={false}
                 axisLine={false}
-                /* the visible XAxis costs ~30px of plot height, so Recharts'
+                /* the visible XAxis costs 30-44px of plot height, so Recharts'
                    default preserveEnd starts dropping every other category
                    label; the chart caps at 12 rows in h-72, where all fit */
                 interval={0}
