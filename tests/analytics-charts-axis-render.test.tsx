@@ -18,6 +18,7 @@ const captured = vi.hoisted(() => ({
   xAxis: [] as Array<Record<string, unknown>>,
   yAxis: [] as Array<Record<string, unknown>>,
   barChart: [] as Array<Record<string, unknown>>,
+  tooltip: [] as Array<Record<string, unknown>>,
 }))
 
 vi.mock("recharts", async () => {
@@ -37,6 +38,10 @@ vi.mock("recharts", async () => {
     captured.barChart.push(props)
     return React.createElement("div", null, props.children as ReactNode)
   }
+  const Tooltip = (props: Record<string, unknown>) => {
+    captured.tooltip.push(props)
+    return null
+  }
   return {
     Bar: Box,
     BarChart,
@@ -47,7 +52,7 @@ vi.mock("recharts", async () => {
     Line: Empty,
     LineChart: Box,
     ResponsiveContainer: Box,
-    Tooltip: Empty,
+    Tooltip,
     XAxis,
     YAxis,
   }
@@ -68,12 +73,21 @@ function category(overrides: Partial<CategoryRow> = {}): CategoryRow {
 }
 
 const DATA: AnalyticsResponse["topCategories"] = [
+  // a zero-share row first pins the "skip rows without money" search
+  category({
+    categoryId: 9,
+    name: "Leer",
+    totalCents: 0,
+    share: 0,
+    txCount: 0,
+  }),
   category(),
   category({
     categoryId: 2,
     name: "Essen",
     totalCents: 50000,
-    share: 0.1,
+    // consistent with the 4.874 € denominator recovered from the Miete row
+    share: 50000 / 487400,
     txCount: 2,
   }),
 ]
@@ -94,6 +108,7 @@ beforeEach(() => {
   captured.xAxis.length = 0
   captured.yAxis.length = 0
   captured.barChart.length = 0
+  captured.tooltip.length = 0
 })
 afterEach(cleanup)
 
@@ -103,6 +118,9 @@ describe("TopCategoriesChart x-axis", () => {
     const props = captured.xAxis[0]
     expect(props.type).toBe("number")
     expect(props.hide).toBeUndefined()
+    // the explicit domain must win over Recharts' adaptive nice ticks, or
+    // the bars no longer fill the [0, max] width
+    expect(props.niceTicks).toBe("none")
     expect(props.domain).toEqual([0, 2437])
     expect(props.ticks).toEqual([0, 500, 1000, 1500, 2000, 2437])
     const format = props.tickFormatter as (v: number) => string
@@ -120,14 +138,27 @@ describe("TopCategoriesChart x-axis", () => {
       tick({
         x: 0,
         y: 0,
-        payload: { value: 500 },
+        payload: { value: 1500 },
         textAnchor: "middle",
         fill: "#666",
       })
     )
-    // DATA recovers a 4.874 € Ist total; 500 € is 10 % of it
-    expect(container.textContent).toContain("500 €")
-    expect(container.textContent).toContain("10 %")
+    // DATA recovers a 4.874 € Ist total; a 5.000 € denominator would print
+    // 30 %, so this pins the actual API denominator
+    expect(container.textContent).toContain("1.500 €")
+    expect(container.textContent).toContain("31 %")
+    // the second line is what keeps the label narrow — assert the stacking,
+    // not just the concatenated text
+    const tspans = container.querySelectorAll("text tspan")
+    expect(tspans).toHaveLength(2)
+    expect(tspans[1].getAttribute("dy")).toBe("14")
+    // themed fill for WCAG contrast in dark mode
+    expect(container.querySelector("text")?.getAttribute("fill")).toBe(
+      "var(--muted-foreground)"
+    )
+    expect(container.querySelector("text")?.getAttribute("aria-label")).toBe(
+      "1.500 €, 31 % der Ist-Ausgaben"
+    )
   })
 
   it("omits the share line while the forecast overlay is on", () => {
@@ -135,7 +166,9 @@ describe("TopCategoriesChart x-axis", () => {
       <TopCategoriesChart data={DATA} forecast={FORECAST} loading={false} />
     )
     const props = captured.xAxis[0]
-    expect(props.height).toBe(30)
+    // the height stays at the two-line size while Ist data exists, so
+    // loading the overlay cannot reflow the bars
+    expect(props.height).toBe(44)
     const tick = props.tick as (props: Record<string, unknown>) => ReactElement
     const { container } = render(
       tick({
@@ -147,6 +180,7 @@ describe("TopCategoriesChart x-axis", () => {
       })
     )
     expect(container.textContent).toBe("500 €")
+    expect(container.querySelectorAll("text tspan")).toHaveLength(1)
   })
 
   it("keeps the share line when the overlay has no planned expenses", () => {
@@ -177,23 +211,19 @@ describe("TopCategoriesChart x-axis", () => {
 
   it("forces every category label despite the visible x axis", () => {
     render(<TopCategoriesChart data={DATA} loading={false} />)
-    // the visible XAxis costs ~30px of plot height; Recharts' default
+    // the visible XAxis costs 30-44px of plot height; Recharts' default
     // preserveEnd then drops every other Y label, so interval=0 is required
     expect(captured.yAxis[0]).toMatchObject({
       dataKey: "name",
       type: "category",
       interval: 0,
+      tick: { fill: "var(--muted-foreground)" },
     })
   })
 
   it("reserves room for the last tick label at the right edge", () => {
     render(<TopCategoriesChart data={DATA} loading={false} />)
-    expect(captured.barChart[0].margin).toEqual({
-      top: 5,
-      right: 40,
-      bottom: 5,
-      left: 5,
-    })
+    expect(captured.barChart[0].margin).toMatchObject({ right: 40 })
   })
 
   it("includes the planned stack in the domain while the overlay is on", () => {
@@ -224,6 +254,45 @@ describe("TopCategoriesChart x-axis", () => {
     const props = captured.xAxis[0]
     expect(props.domain).toEqual([0, 2500])
     expect((props.ticks as number[]).at(-1)).toBe(2500)
+    // no Ist denominator exists here: the axis is single-line (30 px) and
+    // the planned-only bar never grows a share line
+    expect(props.height).toBe(30)
+    const tick = props.tick as (props: Record<string, unknown>) => ReactElement
+    const { container } = render(
+      tick({
+        x: 0,
+        y: 0,
+        payload: { value: 500 },
+        textAnchor: "middle",
+        fill: "#666",
+      })
+    )
+    expect(container.textContent).toBe("500 €")
+  })
+
+  it("wires the tooltip formatter to the share-basis helper", () => {
+    render(<TopCategoriesChart data={DATA} loading={false} />)
+    const content = captured.tooltip[0].content as ReactElement<{
+      formatter: (
+        value: unknown,
+        name: unknown,
+        item: { payload?: Record<string, unknown> }
+      ) => string
+    }>
+    expect(typeof content.props.formatter).toBe("function")
+    expect(
+      content.props.formatter(500, "value", {
+        payload: { value: 500, share: 0.5 },
+      })
+    ).toBe("500,00 € (50 % der Ist-Ausgaben)")
+  })
+
+  it("shows the empty state when the analytics rows are undefined", () => {
+    render(<TopCategoriesChart data={undefined} loading={false} />)
+    expect(captured.xAxis).toHaveLength(0)
+    expect(
+      screen.getByText("Keine Ausgaben im gewählten Zeitraum.")
+    ).toBeTruthy()
   })
 
   it("shows the empty state instead of a zero-width axis without money", () => {
@@ -236,6 +305,15 @@ describe("TopCategoriesChart x-axis", () => {
     render(
       <TopCategoriesChart
         data={[category({ totalCents: 0, share: 0 })]}
+        loading={false}
+      />
+    )
+    expect(captured.xAxis).toHaveLength(0)
+    cleanup()
+    // a malformed payload must not reach Recharts as domain [0, Infinity]
+    render(
+      <TopCategoriesChart
+        data={[category({ totalCents: Number.POSITIVE_INFINITY, share: 0.5 })]}
         loading={false}
       />
     )

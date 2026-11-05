@@ -8,7 +8,8 @@ import {
  * X-axis regression (Top-Ausgabenkategorien): the euro axis is visible, snaps
  * to whole-euro 1/2/2.5/5 × 10ⁿ steps and ends on the largest category (the
  * domain is pinned to it so the bars keep their full width). Percent shares
- * are tooltip-only — a single euro scale is what the axis must carry.
+ * are a second-line readout while the axis is Ist-only, never a second
+ * percentage scale.
  */
 
 describe("topCategoryAxisLabels", () => {
@@ -38,7 +39,7 @@ describe("topCategoryAxisLabels", () => {
     })
   })
 
-  it("drops the share without an Ist denominator (forecast overlay on)", () => {
+  it("drops the share without an Ist denominator", () => {
     expect(topCategoryAxisLabels(500, 0)).toEqual({
       euro: "500 €",
       share: undefined,

@@ -101,9 +101,10 @@ export function topCategoriesTooltip(
   // total. Name the basis — a bare " (N %)" could silently belong to either.
   const isIstRow = (payload?.value ?? 0) > 0
   const share = payload?.share
+  const sharePercent = share != null ? Math.round(share * 100) : 0
   const shareText =
-    share != null
-      ? `(${Math.round(share * 100)} % ${isIstRow ? "der Ist-Ausgaben" : "der geplanten Ausgaben"})`
+    sharePercent > 0
+      ? `(${sharePercent} % ${isIstRow ? "der Ist-Ausgaben" : "der geplanten Ausgaben"})`
       : undefined
   if (name === "planned") {
     // mixed rows only store the Ist share; the horizon share exists on
@@ -126,11 +127,14 @@ export function topCategoriesTooltip(
  * pinned to that maximum (bars keep their full width), so without the last
  * tick the longest bar would run past every label.
  *
- * The axis is euro-only on purpose. Percent shares have two different
- * denominators while the forecast overlay is on (see topCategoriesMerge) and
- * their 100 % point is the total spend, not the largest bar — as a second
- * tick scale they would be misread and their labels collapse to 2-3 at the
- * card's width. Shares stay in the tooltip, where the basis is named.
+ * The euro value is the primary scale. While the axis describes Ist money
+ * alone (no planned bars share it), a second tick line prints the share of
+ * the filtered Ist total. That line is a readout, not a 0-100 % ruler: the
+ * axis ends on the largest bar total, so its 100 % point (the total spend)
+ * is usually off-chart. Once planned money shares the axis there are two
+ * share denominators (Ist period vs. forecast horizon, see
+ * topCategoriesMerge), so only euros render and the basis lives in the
+ * tooltip.
  *
  * A sub-euro maximum degrades to the zero tick: the formatter prints whole
  * euros, so every finer label would round to the same value.
@@ -169,13 +173,14 @@ export function topCategoryAxisTicks(maxEuros: number): number[] {
 
 /**
  * Two-line X-axis tick of the Top-Ausgabenkategorien chart: the euro value and,
- * while the forecast overlay is off, its share of the filtered Ist total. The
- * share is a readout, not a 0-100 % scale — the axis ends on the largest bar
- * total, so the 100 % point (total spend) is off-chart. Stacking the lines
- * instead of `1.000 € · 13 %` keeps the label as narrow as the euro-only one;
- * at the card's one-third width a single-line dual label thinned out to 2-3
- * ticks. With the overlay on there are two share denominators, so only euros
- * render (see topCategoriesMerge).
+ * while the axis describes Ist money alone (`totalEuros > 0`), its share of the
+ * filtered Ist total. The share is a readout, not a 0-100 % scale — the axis
+ * ends on the largest bar total, so the 100 % point (total spend) is usually
+ * off-chart. Stacking the lines instead of `1.000 € · 13 %` keeps the label as
+ * narrow as the euro-only one; at the card's one-third width a single-line dual
+ * label thinned out to 2-3 ticks. Once planned money shares the axis the
+ * component passes `totalEuros = 0`, so only euros render (see
+ * topCategoriesMerge).
  */
 export function topCategoryAxisLabels(
   euros: number,
@@ -195,7 +200,6 @@ function TopCategoryAxisTick({
   y,
   payload,
   textAnchor,
-  fill,
   totalEuros,
 }: XAxisTickContentProps & { totalEuros: number }) {
   const { euro, share } = topCategoryAxisLabels(
@@ -208,7 +212,11 @@ function TopCategoryAxisTick({
       y={y}
       dy={12}
       textAnchor={textAnchor}
-      fill={fill}
+      aria-label={share ? `${euro}, ${share} der Ist-Ausgaben` : euro}
+      /* the ChartContainer's axis-tick selector targets the default tick
+         markup; render the themed fill explicitly so this custom tick keeps
+         WCAG contrast in dark mode instead of Recharts' #666 default */
+      fill="var(--muted-foreground)"
       fontSize={12}
       className="recharts-text recharts-cartesian-axis-tick-value"
     >
@@ -711,7 +719,13 @@ export function TopCategoriesChart({
   // money actually shares the axis (planned-only rows use the horizon total);
   // an overlay with no planned expenses leaves the chart Ist-only.
   const hasPlannedMoney = merged.some((d) => (d.planned ?? 0) > 0)
-  const withShareTicks = !hasPlannedMoney && totalIst > 0
+  const showShareTicks = !hasPlannedMoney && totalIst > 0
+  // Keep the axis height tied to the Ist denominator, not to the overlay:
+  // toggling the forecast re-renders once more when its data lands (the
+  // overlay prop is undefined while loading), and a 44→30 px axis would
+  // reflow every bar by 14 px. The extra line simply stays blank while
+  // planned money is on the axis.
+  const axisHeight = totalIst > 0 ? 44 : 30
   const config = React.useMemo<ChartConfig>(() => {
     const cfg: ChartConfig = {}
     for (const d of merged) {
@@ -733,7 +747,7 @@ export function TopCategoriesChart({
       <CardContent>
         {loading ? (
           <Skeleton className="h-72 w-full" />
-        ) : merged.length === 0 || !(xMax > 0) ? (
+        ) : merged.length === 0 || !(xMax > 0) || !Number.isFinite(xMax) ? (
           <p className="py-16 text-center text-sm text-muted-foreground">
             Keine Ausgaben im gewählten Zeitraum.
           </p>
@@ -756,15 +770,15 @@ export function TopCategoriesChart({
                 tickLine={false}
                 axisLine={false}
                 interval="preserveStartEnd"
-                minTickGap={16}
-                height={withShareTicks ? 44 : 30}
+                minTickGap={8}
+                height={axisHeight}
                 /* Recharts measures minTickGap from tickFormatter; the
                    custom tick below renders the same euro line */
                 tickFormatter={(v: number) => `${euroShort(v)} €`}
                 tick={(props: XAxisTickContentProps) => (
                   <TopCategoryAxisTick
                     {...props}
-                    totalEuros={withShareTicks ? totalIst : 0}
+                    totalEuros={showShareTicks ? totalIst : 0}
                   />
                 )}
               />
@@ -774,6 +788,10 @@ export function TopCategoriesChart({
                 width={120}
                 tickLine={false}
                 axisLine={false}
+                /* the shared ChartContainer selector does not match Recharts
+                   3.x tick labels; theme this chart's category labels too so
+                   the X and Y text share one contrast-safe colour */
+                tick={{ fill: "var(--muted-foreground)" }}
                 /* the visible XAxis costs 30-44px of plot height, so Recharts'
                    default preserveEnd starts dropping every other category
                    label; the chart caps at 12 rows in h-72, where all fit */

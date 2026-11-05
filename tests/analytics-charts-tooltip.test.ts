@@ -65,4 +65,17 @@ describe("topCategoriesTooltip", () => {
       topCategoriesTooltip(0, "value", { payload: { value: 0, share: 0 } })
     ).toBe("0,00 €")
   })
+
+  it("treats a share that rounds to zero as absent", () => {
+    expect(
+      topCategoriesTooltip(100, "planned", {
+        payload: { value: 0, planned: 100, share: 0 },
+      })
+    ).toBe("100,00 € geplant")
+    expect(
+      topCategoriesTooltip(100, "planned", {
+        payload: { value: 0, planned: 100, share: 0.001 },
+      })
+    ).toBe("100,00 € geplant")
+  })
 })
