@@ -363,11 +363,14 @@ planned money are omitted instead of rendering 0-value bars/tooltip rows),
 and the categories chart stacks
 planned expenses (translucent, per-category color) on top of the actual
 bars. Its x-axis is a visible euro scale with whole-euro tick labels, normally
-ending on the largest bar total (Ist + planned while the overlay is on); while
-the axis describes Ist money alone, each tick also prints its share of the
-filtered Ist total on a second line. Once planned bars share the axis only
-euros render — the two scopes have different denominators — and the tooltip
-names its basis. When the forecast read lands, the
+ending on the largest bar total (Ist + planned while the overlay is on) and
+pre-thinned to a stepped ladder that fits the measured card width and its
+formatted labels; while the axis describes Ist money alone, each tick also
+prints its share of the filtered Ist total on a second line (false
+`0 %` / `100 %` roundings read `<1 %` / `>99 %` in the axis and the tooltip).
+Once planned bars share the axis only euros render — the two scopes have
+different denominators — and the tooltip names its basis. When the forecast
+read lands, the
 `ForecastSummary` card (Guthaben
 heute / Projektion / Geplant netto über Horizont) renders above the chart grid. Content
 filters (q/type/category/…) stay out of the money anchored on snapshots — same

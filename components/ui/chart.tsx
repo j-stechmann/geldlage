@@ -45,8 +45,9 @@ function ChartContainer({
   children,
   config,
   initialDimension = INITIAL_DIMENSION,
+  onResize,
   ...props
-}: React.ComponentProps<"div"> & {
+}: Omit<React.ComponentProps<"div">, "onResize"> & {
   config: ChartConfig
   children: React.ComponentProps<
     typeof RechartsPrimitive.ResponsiveContainer
@@ -55,6 +56,8 @@ function ChartContainer({
     width: number
     height: number
   }
+  /** measured container size, for charts that adapt to their width */
+  onResize?: (width: number, height: number) => void
 }) {
   const uniqueId = React.useId()
   const chartId = `chart-${id ?? uniqueId.replace(/:/g, "")}`
@@ -73,6 +76,7 @@ function ChartContainer({
         <ChartStyle id={chartId} config={config} />
         <RechartsPrimitive.ResponsiveContainer
           initialDimension={initialDimension}
+          onResize={onResize}
         >
           {children}
         </RechartsPrimitive.ResponsiveContainer>

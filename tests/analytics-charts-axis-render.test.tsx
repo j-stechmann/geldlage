@@ -9,7 +9,7 @@
  */
 import { type ReactElement, type ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { cleanup, render, screen } from "@testing-library/react"
+import { act, cleanup, render, screen } from "@testing-library/react"
 import { TopCategoriesChart } from "@/components/analytics-charts"
 import type { AnalyticsResponse } from "@/components/analytics-kpis"
 import type { ForecastResult } from "@/components/planning/api"
@@ -19,6 +19,7 @@ const captured = vi.hoisted(() => ({
   yAxis: [] as Array<Record<string, unknown>>,
   barChart: [] as Array<Record<string, unknown>>,
   tooltip: [] as Array<Record<string, unknown>>,
+  responsive: [] as Array<Record<string, unknown>>,
 }))
 
 vi.mock("recharts", async () => {
@@ -42,6 +43,10 @@ vi.mock("recharts", async () => {
     captured.tooltip.push(props)
     return null
   }
+  const ResponsiveContainer = (props: Record<string, unknown>) => {
+    captured.responsive.push(props)
+    return React.createElement("div", null, props.children as ReactNode)
+  }
   return {
     Bar: Box,
     BarChart,
@@ -51,7 +56,7 @@ vi.mock("recharts", async () => {
     Legend: Empty,
     Line: Empty,
     LineChart: Box,
-    ResponsiveContainer: Box,
+    ResponsiveContainer,
     Tooltip,
     XAxis,
     YAxis,
@@ -109,6 +114,7 @@ beforeEach(() => {
   captured.yAxis.length = 0
   captured.barChart.length = 0
   captured.tooltip.length = 0
+  captured.responsive.length = 0
 })
 afterEach(cleanup)
 
@@ -117,16 +123,32 @@ describe("TopCategoriesChart x-axis", () => {
     render(<TopCategoriesChart data={DATA} loading={false} />)
     const props = captured.xAxis[0]
     expect(props.type).toBe("number")
-    expect(props.hide).toBeUndefined()
+    expect(props.hide).not.toBe(true)
     // the explicit domain must win over Recharts' adaptive nice ticks, or
     // the bars no longer fill the [0, max] width
     expect(props.niceTicks).toBe("none")
     expect(props.domain).toEqual([0, 2437])
-    expect(props.ticks).toEqual([0, 500, 1000, 1500, 2000, 2437])
+    // the 320px card fits four slots; the collision guard drops 2.000 so the
+    // appended max (2.437) stays a label-width away from 1.000
+    expect(props.ticks).toEqual([0, 1000, 2437])
+    expect(props.interval).toBe(0)
     const format = props.tickFormatter as (v: number) => string
     expect(format(1500)).toBe("1.500 €")
     expect(props.height).toBe(44)
     expect(typeof props.tick).toBe("function")
+  })
+
+  it("re-thins the ladder when the measured card gets narrower", () => {
+    render(<TopCategoriesChart data={DATA} loading={false} />)
+    expect(captured.xAxis.at(-1)?.ticks).toEqual([0, 1000, 2437])
+    const onResize = captured.responsive[0].onResize as (
+      width: number,
+      height: number
+    ) => void
+    expect(typeof onResize).toBe("function")
+    act(() => onResize(272, 200))
+    // a 272px card leaves ~107px of plot, which fits only 0 € and the max
+    expect(captured.xAxis.at(-1)?.ticks).toEqual([0, 2437])
   })
 
   it("renders the euro value and the Ist share on two tick lines", () => {
@@ -318,5 +340,16 @@ describe("TopCategoriesChart x-axis", () => {
       />
     )
     expect(captured.xAxis).toHaveLength(0)
+    cleanup()
+    for (const totalCents of [Number.NaN, -100]) {
+      render(
+        <TopCategoriesChart
+          data={[category({ totalCents, share: 0.5 })]}
+          loading={false}
+        />
+      )
+      expect(captured.xAxis).toHaveLength(0)
+      cleanup()
+    }
   })
 })

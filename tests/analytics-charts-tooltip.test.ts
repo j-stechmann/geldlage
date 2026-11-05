@@ -52,7 +52,7 @@ describe("topCategoriesTooltip", () => {
       topCategoriesTooltip(1234.5, "value", {
         payload: { value: 1234.5, share: 0.999 },
       })
-    ).toBe("1.234,50 € (100 % der Ist-Ausgaben)")
+    ).toBe("1.234,50 € (>99 % der Ist-Ausgaben)")
   })
 
   it("missing payload/payload fields degrade to the bare amount", () => {
@@ -66,16 +66,23 @@ describe("topCategoriesTooltip", () => {
     ).toBe("0,00 €")
   })
 
-  it("treats a share that rounds to zero as absent", () => {
+  it("bounds a share that would round to a false 0 % / 100 %", () => {
     expect(
       topCategoriesTooltip(100, "planned", {
         payload: { value: 0, planned: 100, share: 0 },
       })
     ).toBe("100,00 € geplant")
+    // non-zero shares below 0.5 % are not zero
     expect(
       topCategoriesTooltip(100, "planned", {
         payload: { value: 0, planned: 100, share: 0.001 },
       })
-    ).toBe("100,00 € geplant")
+    ).toBe("100,00 € geplant (<1 % der geplanten Ausgaben)")
+    // a share just short of the total is not 100 %
+    expect(
+      topCategoriesTooltip(100, "planned", {
+        payload: { value: 0, planned: 100, share: 0.996 },
+      })
+    ).toBe("100,00 € geplant (>99 % der geplanten Ausgaben)")
   })
 })

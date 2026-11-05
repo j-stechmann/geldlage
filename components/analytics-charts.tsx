@@ -80,6 +80,27 @@ export interface CategoryTooltipRow {
 }
 
 /**
+ * Whole-percent text for a share fraction. Rounding must not claim something
+ * false: a non-zero share below 0.5 % would print "0 %", and a share just
+ * short of the total would print "100 %". Those become "<1 %" / ">99 %".
+ * `zeroIsExact` decides what an exact zero means: the axis' 0 € tick is
+ * genuinely 0 %, while a tooltip omits a zero share entirely.
+ */
+function sharePercentText(
+  share: number,
+  zeroIsExact: boolean
+): string | undefined {
+  if (!Number.isFinite(share) || share < 0) return undefined
+  const rounded = Math.round(share * 100)
+  if (rounded <= 0) {
+    if (share === 0) return zeroIsExact ? "0 %" : undefined
+    return "<1 %"
+  }
+  if (rounded >= 100 && share < 1) return ">99 %"
+  return `${rounded} %`
+}
+
+/**
  * Tooltip text of one stacked segment of the planned-vs-actual categories
  * chart (exported for the denominator regression tests). Each segment prints
  * its own amount exactly once: the planned (washed) entry prints the planned
@@ -101,21 +122,89 @@ export function topCategoriesTooltip(
   // total. Name the basis — a bare " (N %)" could silently belong to either.
   const isIstRow = (payload?.value ?? 0) > 0
   const share = payload?.share
-  const sharePercent = share != null ? Math.round(share * 100) : 0
-  const shareText =
-    sharePercent > 0
-      ? `(${sharePercent} % ${isIstRow ? "der Ist-Ausgaben" : "der geplanten Ausgaben"})`
-      : undefined
+  const shareText = share != null ? sharePercentText(share, false) : undefined
+  const withBasis = shareText
+    ? `(${shareText} ${isIstRow ? "der Ist-Ausgaben" : "der geplanten Ausgaben"})`
+    : undefined
   if (name === "planned") {
     // mixed rows only store the Ist share; the horizon share exists on
     // planned-only rows, which is where this entry belongs
-    return [`${fmt(Number(value))} € geplant`, isIstRow ? undefined : shareText]
+    return [`${fmt(Number(value))} € geplant`, isIstRow ? undefined : withBasis]
       .filter((part): part is string => part != null)
       .join(" ")
   }
-  return [`${fmt(Number(value))} €`, isIstRow ? shareText : undefined]
+  return [`${fmt(Number(value))} €`, isIstRow ? withBasis : undefined]
     .filter((part): part is string => part != null)
     .join(" ")
+}
+
+const TOP_CATEGORY_Y_AXIS_WIDTH = 120
+const TOP_CATEGORY_MARGIN = { top: 5, right: 40, bottom: 5, left: 5 }
+/** approximated width of a digit/punctuation at 12px, incl. the ` €` suffix */
+const TOP_CATEGORY_LABEL_CHAR_WIDTH = 6
+const TOP_CATEGORY_MIN_LABEL_WIDTH = 24
+const TOP_CATEGORY_MIN_TICK_GAP = 8
+const TOP_CATEGORY_MAX_TICKS = 6
+
+function topCategoryAxisPlotWidth(chartWidth: number): number {
+  return (
+    chartWidth -
+    TOP_CATEGORY_Y_AXIS_WIDTH -
+    TOP_CATEGORY_MARGIN.left -
+    TOP_CATEGORY_MARGIN.right
+  )
+}
+
+/** Widest X tick label for a domain ending at `maxEuros`. */
+function topCategoryAxisLabelWidth(maxEuros: number): number {
+  const label = `${euroShort(maxEuros)} €`
+  return Math.max(
+    TOP_CATEGORY_MIN_LABEL_WIDTH,
+    Math.ceil(label.length * TOP_CATEGORY_LABEL_CHAR_WIDTH)
+  )
+}
+
+/**
+ * How many X-axis ticks fit the measured chart width. Recharts decides on
+ * its own which ticks to drop, and its `preserveStartEnd` subset is uneven
+ * (0, 500, 1.500, 2.437, …). Pre-thinning to a count that fits lets the axis
+ * pass `interval={0}` and render a stepped ladder instead. The label width
+ * follows the formatted maximum, so six-digit euro amounts get fewer ticks
+ * instead of overlapping labels.
+ */
+export function topCategoryAxisTickCount(
+  chartWidth: number,
+  maxEuros = 0
+): number {
+  if (!Number.isFinite(chartWidth) || chartWidth <= 0) return 2
+  const plotWidth = topCategoryAxisPlotWidth(chartWidth)
+  if (!(plotWidth > 0)) return 2
+  const fit =
+    Math.floor(
+      plotWidth /
+        (topCategoryAxisLabelWidth(maxEuros) + TOP_CATEGORY_MIN_TICK_GAP)
+    ) + 1
+  return Math.max(2, Math.min(TOP_CATEGORY_MAX_TICKS, fit))
+}
+
+/**
+ * Smallest euro distance between two tick centres that keeps their labels
+ * apart at this chart width. The appended data maximum is not part of the
+ * regular 1/2/2.5/5 ladder, so without this guard it can land on top of the
+ * previous tick (1.000 € / 1.001 €).
+ */
+export function topCategoryAxisMinGap(
+  maxEuros: number,
+  chartWidth: number
+): number {
+  if (!(maxEuros > 0) || !Number.isFinite(maxEuros)) return 0
+  const plotWidth = topCategoryAxisPlotWidth(chartWidth)
+  if (!(plotWidth > 0)) return 0
+  return (
+    ((topCategoryAxisLabelWidth(maxEuros) + TOP_CATEGORY_MIN_TICK_GAP) /
+      plotWidth) *
+    maxEuros
+  )
 }
 
 /**
@@ -126,6 +215,15 @@ export function topCategoriesTooltip(
  * unique, and append the data maximum as the final tick: the domain is
  * pinned to that maximum (bars keep their full width), so without the last
  * tick the longest bar would run past every label.
+ *
+ * `maxTicks` caps the ladder for the measured card width (see
+ * topCategoryAxisTickCount), and `minGapEuros` keeps the appended maximum a
+ * label-width away from the previous tick: a max just above a round tick
+ * (1.000,50 €) drops that tick instead of printing "1.000 €" and
+ * "1.001 €" on top of each other. A smaller cap yields a coarser
+ * 1/2/2.5/5 step rather than a Recharts-picked, uneven subset. Callers that
+ * render tick labels must pass the width-derived gap or the raw max can land
+ * on the previous tick.
  *
  * The euro value is the primary scale. While the axis describes Ist money
  * alone (no planned bars share it), a second tick line prints the share of
@@ -139,10 +237,25 @@ export function topCategoriesTooltip(
  * A sub-euro maximum degrades to the zero tick: the formatter prints whole
  * euros, so every finer label would round to the same value.
  */
-export function topCategoryAxisTicks(maxEuros: number): number[] {
+export function topCategoryAxisTicks(
+  maxEuros: number,
+  maxTicks = 6,
+  minGapEuros = 0
+): number[] {
   if (!(maxEuros > 0) || !Number.isFinite(maxEuros)) return [0]
   if (maxEuros < 1) return [0]
-  const rough = maxEuros / 5
+  // Not even the 0 € and max labels fit side by side: overlapping them would
+  // be worse than showing the origin alone.
+  if (minGapEuros > 0 && minGapEuros > maxEuros) return [0]
+  // Never let a caller (Infinity/1e9) unbounded the loop.
+  const requestedIntervals = Number.isFinite(maxTicks)
+    ? Math.floor(maxTicks) - 1
+    : TOP_CATEGORY_MAX_TICKS - 1
+  const intervals = Math.max(
+    1,
+    Math.min(TOP_CATEGORY_MAX_TICKS - 1, requestedIntervals)
+  )
+  const rough = maxEuros / intervals
   const magnitude = 10 ** Math.floor(Math.log10(rough))
   const normalized = rough / magnitude
   const step = Math.max(
@@ -167,7 +280,14 @@ export function topCategoryAxisTicks(maxEuros: number): number[] {
   // Only append the raw maximum when its rounded label is not already the
   // previous tick's (1,2 € would otherwise share the "1 €" label with 1 €).
   const last = ticks[ticks.length - 1]
-  if (Math.round(maxEuros) > Math.round(last)) ticks.push(maxEuros)
+  if (Math.round(maxEuros) > Math.round(last)) {
+    // Drop the regular tick the max would collide with; the previous one is
+    // at least one step away, and the step is >= minGap by construction.
+    if (minGapEuros > 0 && ticks.length > 1 && maxEuros - last < minGapEuros) {
+      ticks.pop()
+    }
+    ticks.push(maxEuros)
+  }
   return ticks
 }
 
@@ -177,21 +297,26 @@ export function topCategoryAxisTicks(maxEuros: number): number[] {
  * filtered Ist total. The share is a readout, not a 0-100 % scale — the axis
  * ends on the largest bar total, so the 100 % point (total spend) is usually
  * off-chart. Stacking the lines instead of `1.000 € · 13 %` keeps the label as
- * narrow as the euro-only one; at the card's one-third width a single-line dual
- * label thinned out to 2-3 ticks. Once planned money shares the axis the
- * component passes `totalEuros = 0`, so only euros render (see
+ * narrow as the euro-only one; at the card's one-third width a single-line
+ * dual label left room for only a few ticks. Once planned money shares the
+ * axis the component passes `totalEuros = 0`, so only euros render (see
  * topCategoriesMerge).
+ *
+ * Rounding must not claim something false: a non-zero tick below 0.5 % would
+ * print "0 %", and a tick just short of the total would round to "100 %".
+ * Those read as "<1 %" / ">99 %" instead, mirroring the tooltip.
  */
 export function topCategoryAxisLabels(
   euros: number,
   totalEuros: number
 ): { euro: string; share: string | undefined } {
+  const euro = `${euroShort(euros)} €`
+  if (!(totalEuros > 0) || !Number.isFinite(totalEuros)) {
+    return { euro, share: undefined }
+  }
   return {
-    euro: `${euroShort(euros)} €`,
-    share:
-      totalEuros > 0
-        ? `${Math.round((euros / totalEuros) * 100)} %`
-        : undefined,
+    euro,
+    share: sharePercentText(euros / totalEuros, true),
   }
 }
 
@@ -707,7 +832,28 @@ export function TopCategoriesChart({
       merged.reduce((max, d) => Math.max(max, d.value + (d.planned ?? 0)), 0),
     [merged]
   )
-  const xTicks = React.useMemo(() => topCategoryAxisTicks(xMax), [xMax])
+  // Recharts' own tick thinning drops a different subset per card width
+  // (0, 500, 1.500, 2.437 at one size; 0, 1.000, 2.437 at another). Measure
+  // the container, pick a count that fits, and let the axis render exactly
+  // that stepped ladder (interval={0}) so the gaps stay predictable.
+  const [chartWidth, setChartWidth] = React.useState(320)
+  const onChartResize = React.useCallback(
+    (width: number) => setChartWidth(width),
+    []
+  )
+  const maxTicks = React.useMemo(
+    () => topCategoryAxisTickCount(chartWidth, xMax),
+    [chartWidth, xMax]
+  )
+  const xTicks = React.useMemo(
+    () =>
+      topCategoryAxisTicks(
+        xMax,
+        maxTicks,
+        topCategoryAxisMinGap(xMax, chartWidth)
+      ),
+    [xMax, maxTicks, chartWidth]
+  )
   // Ist-period total behind the API's `share` values. The response is capped
   // at 12 rows, but share is computed against ALL expense categories, so any
   // row with money recovers the denominator (before the tick labels append
@@ -753,14 +899,18 @@ export function TopCategoriesChart({
             Keine Ausgaben im gewählten Zeitraum.
           </p>
         ) : (
-          <ChartContainer config={config} className="mx-auto h-72 w-full">
+          <ChartContainer
+            config={config}
+            className="mx-auto h-72 w-full"
+            onResize={onChartResize}
+          >
             <BarChart
               data={merged}
               layout="vertical"
               accessibilityLayer
               /* the last tick sits on the right edge; without a right margin
                  its middle-anchored label is clipped by the SVG */
-              margin={{ top: 5, right: 40, bottom: 5, left: 5 }}
+              margin={TOP_CATEGORY_MARGIN}
             >
               <CartesianGrid horizontal={false} />
               <XAxis
@@ -770,11 +920,11 @@ export function TopCategoriesChart({
                 niceTicks="none"
                 tickLine={false}
                 axisLine={false}
-                interval="preserveStartEnd"
-                minTickGap={8}
+                /* xTicks is already thinned for the measured width: render
+                   all of them, because Recharts' string intervals would drop
+                   an uneven subset of the remaining ladder */
+                interval={0}
                 height={axisHeight}
-                /* Recharts measures minTickGap from tickFormatter; the
-                   custom tick below renders the same euro line */
                 tickFormatter={(v: number) => `${euroShort(v)} €`}
                 tick={(props: XAxisTickContentProps) => (
                   <TopCategoryAxisTick
@@ -786,7 +936,7 @@ export function TopCategoriesChart({
               <YAxis
                 dataKey="name"
                 type="category"
-                width={120}
+                width={TOP_CATEGORY_Y_AXIS_WIDTH}
                 tickLine={false}
                 axisLine={false}
                 /* the shared ChartContainer selector does not match Recharts

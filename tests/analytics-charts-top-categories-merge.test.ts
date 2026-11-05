@@ -66,7 +66,9 @@ describe("topCategoriesMerge", () => {
     const merged = topCategoriesMerge(chartData, forecast([plannedEntry()]))
     expect(merged[0].planned).toBe(200)
     // toggle-off readout: chartData's planned field must stay untouched so the
-    // merge cannot leak planned money into the Ist series
+    // merge cannot leak planned money into the Ist series. The direct field
+    // assertion is the guard — the Ist tooltip no longer reads `planned` at
+    // all, so a formatter assertion would not catch the stale mutation.
     expect(chartData[0].planned).toBe(0)
     expect(topCategoriesTooltip(100, "value", { payload: chartData[0] })).toBe(
       "100,00 € (50 % der Ist-Ausgaben)"
