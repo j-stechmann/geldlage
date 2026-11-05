@@ -213,9 +213,10 @@ function TopCategoryAxisTick({
       dy={12}
       textAnchor={textAnchor}
       aria-label={share ? `${euro}, ${share} der Ist-Ausgaben` : euro}
-      /* the ChartContainer's axis-tick selector targets the default tick
-         markup; render the themed fill explicitly so this custom tick keeps
-         WCAG contrast in dark mode instead of Recharts' #666 default */
+      /* Recharts 3.x renders axis labels in .recharts-cartesian-axis-tick-label,
+         which the shared ChartContainer selector does not match; theme this
+         custom tick explicitly so it keeps WCAG contrast in dark mode instead
+         of Recharts' #666 default */
       fill="var(--muted-foreground)"
       fontSize={12}
       className="recharts-text recharts-cartesian-axis-tick-value"
