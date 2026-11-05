@@ -103,6 +103,38 @@ pinch/wheel-zoom and drag-pan through the custom
 the zoom window when the dataset changes). See
 [frontend.md](frontend.md) for the client details.
 
+Top spend categories render a visible euro axis with ticks snapped to the
+1/2/2.5/5 × 10ⁿ candidates (ceiled to whole euros, never Recharts' arbitrary
+adaptive steps). The domain stays pinned to the largest bar total (Ist plus
+planned while the overlay is on) so the bars keep their full width, and that
+maximum is appended as the final tick (unless its rounded label would repeat
+the previous tick), so the longest bar has a label at its end whenever the
+rounded value is distinct. A maximum just above a round tick (1.000,50 €)
+drops that round tick instead of printing overlapping labels. The number of
+ticks follows the measured card width and the width of the formatted euro
+labels — narrow or large-value cards get a coarser 1/2/2.5/5 step, and
+`interval={0}` renders that pre-thinned ladder instead of Recharts' uneven
+subset. A sub-euro maximum degrades to a single zero tick because the labels
+print whole euros; if even the origin and max labels cannot fit side by side,
+only the origin renders.
+
+While the axis describes Ist money alone (no planned bars share it), each tick
+also prints its share of the filtered Ist total on a second line (e.g.
+`2.000 €` / `25 %`). The share is a readout, not a 0-100 % scale: the axis
+ends on the largest bar total, so the 100 % point is the total spend and is
+usually off-chart (it is on-chart only when the largest bar is the whole
+total, e.g. a single-category filter). Shares that would round to a false
+`0 %` / `100 %` print `<1 %` / `>99 %` instead, on the axis and in the
+tooltip. Stacking the lines keeps the label narrow — a single-line `€ · %`
+label left too little room for more than a few ticks at the card's width.
+Once planned bars share the axis, only euros render:
+planned-only rows divide by the 12-month forecast-horizon total while Ist
+rows divide by the filtered-period total, so one percentage scale cannot
+describe both scopes. An active overlay with no planned expenses leaves the
+chart Ist-only and keeps the share line. Tooltips name the basis whenever they
+print a share (Ist-period or forecast-horizon, the latter only on planned-only
+rows) and print each stacked segment's amount exactly once.
+
 ## Correctness
 
 The analytics engine is verified **to the cent** against a generated
