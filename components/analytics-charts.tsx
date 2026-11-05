@@ -696,6 +696,10 @@ export function TopCategoriesChart({
                 width={120}
                 tickLine={false}
                 axisLine={false}
+                /* the visible XAxis costs ~30px of plot height, so Recharts'
+                   default preserveEnd starts dropping every other category
+                   label; the chart caps at 12 rows in h-72, where all fit */
+                interval={0}
               />
               <ChartTooltip
                 content={

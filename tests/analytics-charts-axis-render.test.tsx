@@ -16,6 +16,7 @@ import type { ForecastResult } from "@/components/planning/api"
 
 const captured = vi.hoisted(() => ({
   xAxis: [] as Array<Record<string, unknown>>,
+  yAxis: [] as Array<Record<string, unknown>>,
   barChart: [] as Array<Record<string, unknown>>,
 }))
 
@@ -26,6 +27,10 @@ vi.mock("recharts", async () => {
   const Empty = () => null
   const XAxis = (props: Record<string, unknown>) => {
     captured.xAxis.push(props)
+    return null
+  }
+  const YAxis = (props: Record<string, unknown>) => {
+    captured.yAxis.push(props)
     return null
   }
   const BarChart = (props: Record<string, unknown>) => {
@@ -44,7 +49,7 @@ vi.mock("recharts", async () => {
     ResponsiveContainer: Box,
     Tooltip: Empty,
     XAxis,
-    YAxis: Empty,
+    YAxis,
   }
 })
 
@@ -87,6 +92,7 @@ const FORECAST = {
 
 beforeEach(() => {
   captured.xAxis.length = 0
+  captured.yAxis.length = 0
   captured.barChart.length = 0
 })
 afterEach(cleanup)
@@ -101,6 +107,17 @@ describe("TopCategoriesChart x-axis", () => {
     expect(props.ticks).toEqual([0, 500, 1000, 1500, 2000, 2437])
     const format = props.tickFormatter as (v: number) => string
     expect(format(1500)).toBe("1.500 €")
+  })
+
+  it("forces every category label despite the visible x axis", () => {
+    render(<TopCategoriesChart data={DATA} loading={false} />)
+    // the visible XAxis costs ~30px of plot height; Recharts' default
+    // preserveEnd then drops every other Y label, so interval=0 is required
+    expect(captured.yAxis[0]).toMatchObject({
+      dataKey: "name",
+      type: "category",
+      interval: 0,
+    })
   })
 
   it("reserves room for the last tick label at the right edge", () => {
