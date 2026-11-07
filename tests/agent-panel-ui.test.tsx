@@ -300,6 +300,33 @@ describe("<AgentChat>", () => {
     expect(calls.filter((c) => c.path === "/api/users")).toHaveLength(0)
   })
 
+  it("grows the composer with its content and scrolls beyond the cap", async () => {
+    const { calls } = stubChatFlow({ messages: [], threads: [] })
+    renderWithQuery(createElement(AgentChat))
+    const input = (await screen.findByPlaceholderText(
+      "Nachricht…"
+    )) as HTMLTextAreaElement
+    // A single-line <input> clipped long drafts horizontally; the composer
+    // is a textarea whose height follows the wrapped content.
+    expect(input.tagName).toBe("TEXTAREA")
+    expect(input).toHaveAttribute("rows", "1")
+    // jsdom has no layout: fake the content height of a wrapped draft.
+    Object.defineProperty(input, "scrollHeight", {
+      configurable: true,
+      get: () => 96,
+    })
+    await userEvent.type(
+      input,
+      "Eine lange Nachricht, die über mehrere Zeilen läuft."
+    )
+    await waitFor(() => expect(input.style.height).toBe("96px"))
+    // The max-height cap turns further growth into scrolling.
+    expect(input.className).toContain("max-h-40")
+    expect(input.className).toContain("overflow-y-auto")
+    // Typing must not trigger a send.
+    expect(calls.some((c) => c.path.endsWith("/chat"))).toBe(false)
+  })
+
   it("renders markdown in assistant and user text, keeps raw HTML inert", async () => {
     stubChatFlow({
       messages: [
@@ -1009,10 +1036,11 @@ describe("<AgentChat>", () => {
     await userEvent.click(screen.getByRole("button", { name: "Senden" }))
     // the composer holds the message again once the turn hook resolves
     await waitFor(() => expect(input).toHaveValue("Meine ausgelöschte Frage"))
-    // no optimistic bubble was left hanging either
+    // no optimistic bubble was left hanging either (the restored draft in
+    // the textarea is not a bubble)
     await waitFor(() =>
       expect(
-        screen.queryByText("Meine ausgelöschte Frage")
+        screen.queryByText("Meine ausgelöschte Frage", { selector: "p" })
       ).not.toBeInTheDocument()
     )
   }, 15_000)
