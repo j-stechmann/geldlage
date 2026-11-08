@@ -300,6 +300,158 @@ describe("<AgentChat>", () => {
     expect(calls.filter((c) => c.path === "/api/users")).toHaveLength(0)
   })
 
+  it("grows the composer with its content and shrinks on delete", async () => {
+    const { calls } = stubChatFlow({ messages: [], threads: [] })
+    renderWithQuery(createElement(AgentChat))
+    const input = (await screen.findByPlaceholderText(
+      "Nachricht…"
+    )) as HTMLTextAreaElement
+    // A single-line <input> clipped long drafts horizontally; the composer
+    // is a textarea whose height follows the wrapped content.
+    expect(input.tagName).toBe("TEXTAREA")
+    expect(input).toHaveAttribute("rows", "1")
+    // jsdom has no layout: fake the content height of a wrapped draft and
+    // the 1px top/bottom border (scrollHeight excludes it, the border-box
+    // height includes it).
+    let contentHeight = 96
+    Object.defineProperty(input, "scrollHeight", {
+      configurable: true,
+      get: () => contentHeight,
+    })
+    Object.defineProperty(input, "offsetHeight", {
+      configurable: true,
+      get: () => 34,
+    })
+    Object.defineProperty(input, "clientHeight", {
+      configurable: true,
+      get: () => 32,
+    })
+    await userEvent.type(
+      input,
+      "Eine lange Nachricht, die über mehrere Zeilen läuft."
+    )
+    await waitFor(() => expect(input.style.height).toBe("98px"))
+    // Deleting text shrinks the composer again (the effect resets to
+    // `auto` before re-measuring).
+    contentHeight = 56
+    await userEvent.clear(input)
+    await waitFor(() => expect(input.style.height).toBe("58px"))
+    // The max-height cap turns further growth into scrolling.
+    expect(input.className).toContain("max-h-40")
+    expect(input.className).toContain("overflow-y-auto")
+    // Typing must not trigger a send.
+    expect(calls.some((c) => c.path.endsWith("/chat"))).toBe(false)
+  })
+
+  it("inserts a newline on Shift+Enter instead of sending", async () => {
+    const { calls } = stubChatFlow({ messages: [], threads: [] })
+    renderWithQuery(createElement(AgentChat))
+    const input = await screen.findByPlaceholderText("Nachricht…")
+    await userEvent.type(
+      input,
+      "Erste Zeile{Shift>}{Enter}{/Shift}Zweite Zeile"
+    )
+    // The single-line <input> swallowed the chord; the textarea keeps it.
+    expect(input).toHaveValue("Erste Zeile\nZweite Zeile")
+    expect(calls.some((c) => c.path.endsWith("/chat"))).toBe(false)
+  })
+
+  it("sends the draft on Enter", async () => {
+    // Enter must keep submitting from the textarea too (Shift+Enter is the
+    // newline branch above). Guard against the browser inserting a newline
+    // AND the handler firing.
+    const { calls } = stubChatFlow({
+      messages: [],
+      threads: [
+        {
+          id: "t1",
+          title: "Haushaltsfragen",
+          role: "owner",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    })
+    renderWithQuery(createElement(AgentChat))
+    await waitFor(() =>
+      expect(screen.getByText("Haushaltsfragen")).toBeInTheDocument()
+    )
+    const input = screen.getByPlaceholderText("Nachricht…")
+    await userEvent.type(input, "Wie viel?{Enter}")
+    await waitFor(() =>
+      expect(calls.some((c) => c.path === "/api/agent/threads/t1/chat")).toBe(
+        true
+      )
+    )
+    expect(input).toHaveValue("")
+    // let the held stream finish so the turn does not dangle past the test
+    await act(async () => {
+      releaseTurn()
+      await Promise.resolve()
+    })
+  })
+
+  it("re-measures the composer when the dock width changes", async () => {
+    const { calls } = stubChatFlow({ messages: [], threads: [] })
+
+    // jsdom has no observer callbacks: capture the composer's observer so
+    // the test can emulate a dock/window width change (no real layout).
+    class ControlledResizeObserver implements ResizeObserver {
+      static instances: ControlledResizeObserver[] = []
+      callback: ResizeObserverCallback
+      target: Element | null = null
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback
+        ControlledResizeObserver.instances.push(this)
+      }
+      observe(target: Element) {
+        this.target = target
+      }
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal("ResizeObserver", ControlledResizeObserver)
+
+    renderWithQuery(createElement(AgentChat))
+    const input = (await screen.findByPlaceholderText(
+      "Nachricht…"
+    )) as HTMLTextAreaElement
+    let contentHeight = 40
+    let width = 320
+    Object.defineProperty(input, "scrollHeight", {
+      configurable: true,
+      get: () => contentHeight,
+    })
+    Object.defineProperty(input, "offsetHeight", {
+      configurable: true,
+      get: () => 34,
+    })
+    Object.defineProperty(input, "clientHeight", {
+      configurable: true,
+      get: () => 32,
+    })
+    Object.defineProperty(input, "offsetWidth", {
+      configurable: true,
+      get: () => width,
+    })
+    const observer = ControlledResizeObserver.instances.find(
+      (o) => o.target === input
+    )
+    expect(observer).toBeDefined()
+    // establish the initial width once the fake box exists
+    act(() => observer!.callback([], observer!))
+    expect(input.style.height).toBe("42px")
+    // narrowing the dock wraps the same draft onto more lines
+    width = 200
+    contentHeight = 80
+    act(() => observer!.callback([], observer!))
+    expect(input.style.height).toBe("82px")
+    // a height-only change (our own write) must not feed back into a loop
+    contentHeight = 100
+    act(() => observer!.callback([], observer!))
+    expect(input.style.height).toBe("82px")
+    expect(calls.some((c) => c.path.endsWith("/chat"))).toBe(false)
+  })
+
   it("renders markdown in assistant and user text, keeps raw HTML inert", async () => {
     stubChatFlow({
       messages: [
@@ -1009,10 +1161,11 @@ describe("<AgentChat>", () => {
     await userEvent.click(screen.getByRole("button", { name: "Senden" }))
     // the composer holds the message again once the turn hook resolves
     await waitFor(() => expect(input).toHaveValue("Meine ausgelöschte Frage"))
-    // no optimistic bubble was left hanging either
+    // no optimistic bubble was left hanging either (the restored draft in
+    // the textarea is not a bubble)
     await waitFor(() =>
       expect(
-        screen.queryByText("Meine ausgelöschte Frage")
+        screen.queryByText("Meine ausgelöschte Frage", { selector: "p" })
       ).not.toBeInTheDocument()
     )
   }, 15_000)
