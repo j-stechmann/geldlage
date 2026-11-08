@@ -42,9 +42,29 @@ export function ChatInput(props: ChatInputProps) {
   useIsoLayoutEffect(() => {
     const el = textareaRef.current
     if (!el) return
-    el.style.height = "auto"
-    const border = el.offsetHeight - el.clientHeight
-    el.style.height = `${el.scrollHeight + border}px`
+
+    const grow = () => {
+      el.style.height = "auto"
+      const border = el.offsetHeight - el.clientHeight
+      el.style.height = `${el.scrollHeight + border}px`
+    }
+    grow()
+
+    // The dock is resizable (and the window cap re-flows it): a width change
+    // re-wraps the draft, so re-measure even though `input` did not change.
+    // Compare the border-box width — the height writes above can toggle the
+    // scrollbar and with it clientWidth; watching that would feed back into
+    // another grow and oscillate at the max-height boundary.
+    if (typeof ResizeObserver === "undefined") return
+    let lastWidth = el.offsetWidth
+    const observer = new ResizeObserver(() => {
+      const width = el.offsetWidth
+      if (width === lastWidth) return
+      lastWidth = width
+      grow()
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
   }, [props.input])
 
   return (
