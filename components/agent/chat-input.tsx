@@ -1,14 +1,20 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useLayoutEffect, useRef } from "react"
 import { Square, SendHorizontal } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { CHAT_MESSAGE_MAX_CHARS } from "@/lib/agent/constants"
 
+// Measure before paint (the textarea must never paint a new line clipped
+// for one frame); on the server the plain effect is a no-op but avoids the
+// SSR useLayoutEffect warning.
+const useIsoLayoutEffect =
+  typeof window !== "undefined" ? useLayoutEffect : useEffect
+
 /**
- * Message composer (ADR-0033): Enter sends (Shift+Enter and IME
- * composition excluded), the send button swaps to stop while a turn
- * streams. The textarea grows with its content up to max-h-40 (then
+ * Message composer (ADR-0033): Enter sends; Shift+Enter inserts a newline
+ * and IME composition is excluded, the send button swaps to stop while a
+ * turn streams. The textarea grows with its content up to max-h-40 (then
  * scrolls) so a long or multi-line draft stays visible instead of
  * disappearing past the single-line edge. maxLength enforces the route's
  * char contract client-side (mirrors THREAD_TITLE_MAX_INPUT_CHARS for the
@@ -29,12 +35,16 @@ export function ChatInput(props: ChatInputProps) {
 
   // Auto-grow: reset to `auto` first so deleting text shrinks the box too,
   // then match the content height. The CSS max-height caps the inline
-  // height and turns the overflow into a scrollbar.
-  useEffect(() => {
+  // height and turns the overflow into a scrollbar. `border-box` sizing:
+  // scrollHeight excludes the border while the inline height includes it,
+  // so add it back — otherwise a fitting draft overflows by the border
+  // width and overflow-y-auto shows a scrollbar even when nothing is cut.
+  useIsoLayoutEffect(() => {
     const el = textareaRef.current
     if (!el) return
     el.style.height = "auto"
-    el.style.height = `${el.scrollHeight}px`
+    const border = el.offsetHeight - el.clientHeight
+    el.style.height = `${el.scrollHeight + border}px`
   }, [props.input])
 
   return (

@@ -300,7 +300,7 @@ describe("<AgentChat>", () => {
     expect(calls.filter((c) => c.path === "/api/users")).toHaveLength(0)
   })
 
-  it("grows the composer with its content and scrolls beyond the cap", async () => {
+  it("grows the composer with its content and shrinks on delete", async () => {
     const { calls } = stubChatFlow({ messages: [], threads: [] })
     renderWithQuery(createElement(AgentChat))
     const input = (await screen.findByPlaceholderText(
@@ -310,20 +310,49 @@ describe("<AgentChat>", () => {
     // is a textarea whose height follows the wrapped content.
     expect(input.tagName).toBe("TEXTAREA")
     expect(input).toHaveAttribute("rows", "1")
-    // jsdom has no layout: fake the content height of a wrapped draft.
+    // jsdom has no layout: fake the content height of a wrapped draft and
+    // the 1px top/bottom border (scrollHeight excludes it, the border-box
+    // height includes it).
+    let contentHeight = 96
     Object.defineProperty(input, "scrollHeight", {
       configurable: true,
-      get: () => 96,
+      get: () => contentHeight,
+    })
+    Object.defineProperty(input, "offsetHeight", {
+      configurable: true,
+      get: () => 34,
+    })
+    Object.defineProperty(input, "clientHeight", {
+      configurable: true,
+      get: () => 32,
     })
     await userEvent.type(
       input,
       "Eine lange Nachricht, die über mehrere Zeilen läuft."
     )
-    await waitFor(() => expect(input.style.height).toBe("96px"))
+    await waitFor(() => expect(input.style.height).toBe("98px"))
+    // Deleting text shrinks the composer again (the effect resets to
+    // `auto` before re-measuring).
+    contentHeight = 56
+    await userEvent.clear(input)
+    await waitFor(() => expect(input.style.height).toBe("58px"))
     // The max-height cap turns further growth into scrolling.
     expect(input.className).toContain("max-h-40")
     expect(input.className).toContain("overflow-y-auto")
     // Typing must not trigger a send.
+    expect(calls.some((c) => c.path.endsWith("/chat"))).toBe(false)
+  })
+
+  it("inserts a newline on Shift+Enter instead of sending", async () => {
+    const { calls } = stubChatFlow({ messages: [], threads: [] })
+    renderWithQuery(createElement(AgentChat))
+    const input = await screen.findByPlaceholderText("Nachricht…")
+    await userEvent.type(
+      input,
+      "Erste Zeile{Shift>}{Enter}{/Shift}Zweite Zeile"
+    )
+    // The single-line <input> swallowed the chord; the textarea keeps it.
+    expect(input).toHaveValue("Erste Zeile\nZweite Zeile")
     expect(calls.some((c) => c.path.endsWith("/chat"))).toBe(false)
   })
 
