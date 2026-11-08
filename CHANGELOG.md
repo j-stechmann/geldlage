@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.24.3
+
+### Fixed
+
+- **agent — chat composer grows with the draft**: the message composer is a
+  textarea again instead of a fixed single-line input, so a long or
+  multi-line draft stays visible as it wraps instead of disappearing past
+  the edge; Enter still sends, Shift+Enter inserts a newline, and IME
+  composition is still excluded. The box is measured before paint in a
+  layout effect and resets to `auto` before applying `scrollHeight`, so
+  deleting text shrinks it again; the 1px border is compensated (a
+  `border-box` height includes what `scrollHeight` leaves out), so a fitting
+  draft no longer shows a scrollbar, and the `max-h-40` cap turns longer
+  drafts into an inner scrollbar. A `ResizeObserver` re-measures the
+  re-wrapped draft when the resizable dock or the window re-flows it
+  (height-only writes are ignored, so the cap's scrollbar cannot oscillate).
+  jsdom regression tests cover growth, shrink, the border compensation,
+  Enter-to-send and Shift+Enter, plus the width re-measure;
+  `docs/frontend.md` is updated. Closes #109.
+
 ## v1.24.2
 
 ### Fixed
