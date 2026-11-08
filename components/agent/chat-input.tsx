@@ -30,42 +30,47 @@ interface ChatInputProps {
   onStop: () => void
 }
 
+/**
+ * Auto-grow: reset to `auto` first so deleting text shrinks the box too,
+ * then match the content height. The CSS max-height caps the inline height
+ * and turns the overflow into a scrollbar. `border-box` sizing: scrollHeight
+ * excludes the border while the inline height includes it, so add it back —
+ * otherwise a fitting draft overflows by the border width and overflow-y-auto
+ * shows a scrollbar even when nothing is cut.
+ */
+function growTextarea(el: HTMLTextAreaElement) {
+  el.style.height = "auto"
+  const border = el.offsetHeight - el.clientHeight
+  el.style.height = `${el.scrollHeight + border}px`
+}
+
 export function ChatInput(props: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  // Auto-grow: reset to `auto` first so deleting text shrinks the box too,
-  // then match the content height. The CSS max-height caps the inline
-  // height and turns the overflow into a scrollbar. `border-box` sizing:
-  // scrollHeight excludes the border while the inline height includes it,
-  // so add it back — otherwise a fitting draft overflows by the border
-  // width and overflow-y-auto shows a scrollbar even when nothing is cut.
+  useIsoLayoutEffect(() => {
+    if (textareaRef.current) growTextarea(textareaRef.current)
+  }, [props.input])
+
+  // The dock is resizable (and the window cap re-flows it): a width change
+  // re-wraps the draft, so re-measure even though `input` did not change.
+  // Compare the border-box width — the height writes above can toggle the
+  // scrollbar and with it clientWidth; watching that would feed back into
+  // another grow and oscillate at the max-height boundary. Set up once:
+  // input changes only need the measure effect above.
   useIsoLayoutEffect(() => {
     const el = textareaRef.current
-    if (!el) return
+    if (!el || typeof ResizeObserver === "undefined") return
 
-    const grow = () => {
-      el.style.height = "auto"
-      const border = el.offsetHeight - el.clientHeight
-      el.style.height = `${el.scrollHeight + border}px`
-    }
-    grow()
-
-    // The dock is resizable (and the window cap re-flows it): a width change
-    // re-wraps the draft, so re-measure even though `input` did not change.
-    // Compare the border-box width — the height writes above can toggle the
-    // scrollbar and with it clientWidth; watching that would feed back into
-    // another grow and oscillate at the max-height boundary.
-    if (typeof ResizeObserver === "undefined") return
     let lastWidth = el.offsetWidth
     const observer = new ResizeObserver(() => {
       const width = el.offsetWidth
       if (width === lastWidth) return
       lastWidth = width
-      grow()
+      growTextarea(el)
     })
     observer.observe(el)
     return () => observer.disconnect()
-  }, [props.input])
+  }, [])
 
   return (
     <form
