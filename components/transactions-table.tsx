@@ -46,13 +46,7 @@ import { PlanDialog } from "@/components/planning/plan-dialog"
 import type { PlanRow } from "@/components/planning/api"
 import { AssignLabelDialog } from "@/components/assign-label-dialog"
 import { useRowActivation } from "@/hooks/use-row-activation"
-
-interface TransactionsResponse {
-  rows: TxRow[]
-  total: number
-  page: number
-  pageCount: number
-}
+import type { TransactionPage } from "@/lib/contracts/transactions"
 
 type SortKey = "bookingDate" | "valueDate" | "amountCents" | "payee" | "status"
 
@@ -236,7 +230,7 @@ export function TransactionsTable({
   }
 
   const { data, isLoading, isFetching, isError, refetch } =
-    useQuery<TransactionsResponse>({
+    useQuery<TransactionPage>({
       queryKey: ["transactions", params.toString()],
       queryFn: async () => {
         const res = await apiFetch(`/api/transactions?${params}`)
