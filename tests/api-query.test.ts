@@ -2,10 +2,10 @@ import { describe, it, expect } from "vitest"
 import {
   parseOptionalAccountId,
   parseOptionalClampedInt,
+  parsePage,
   parsePagination,
   parseWindow,
   positiveInt,
-  safePage,
 } from "@/lib/api/query"
 
 function sp(query: string): URLSearchParams {
@@ -22,13 +22,24 @@ describe("positiveInt", () => {
   })
 })
 
-describe("safePage", () => {
-  it("keeps valid pages and guards the OFFSET product", () => {
-    expect(safePage("1", 25)).toBe(1)
-    expect(safePage("4", 25)).toBe(4)
-    expect(safePage("0", 25)).toBe(1)
-    expect(safePage("abc", 25)).toBe(1)
-    expect(safePage(String(Number.MAX_SAFE_INTEGER), 100)).toBe(1)
+describe("parsePage", () => {
+  it("falls back to page 1 for missing, non-positive or overflowing input", () => {
+    expect(parsePage("0")).toBe(1)
+    expect(parsePage("-3")).toBe(1)
+    expect(parsePage("abc")).toBe(1)
+    expect(parsePage(null)).toBe(1)
+    // parseInt stops at "e", so exponential notation is page 1 — not 1e18
+    expect(parsePage("1e18")).toBe(1)
+    expect(parsePage("9".repeat(400))).toBe(1) // Infinity
+  })
+
+  it("echoes valid pages, including values above 2^53", () => {
+    expect(parsePage("1")).toBe(1)
+    expect(parsePage("4")).toBe(4)
+    expect(parsePage(String(Number.MAX_SAFE_INTEGER))).toBe(
+      Number.MAX_SAFE_INTEGER
+    )
+    expect(parsePage(String(1e18))).toBe(1e18)
   })
 })
 

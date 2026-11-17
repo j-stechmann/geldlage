@@ -2,9 +2,10 @@
  * Shared query-parameter contracts for the list/window routes (ADR-0037).
  *
  * Server-only. The helpers reproduce the existing route semantics exactly:
- * lenient pagination (parseInt permissiveness, unsafe OFFSET → page 1),
- * strict digits-only ids, and the calendar window precedence
- * (from → to → order → distance → width).
+ * lenient pagination (parseInt permissiveness; an invalid page falls back to
+ * 1, while an unrepresentable OFFSET yields an empty page — guarded in
+ * lib/pagination.ts), strict digits-only ids, and the calendar window
+ * precedence (from → to → order → distance → width).
  */
 import { isValidIsoDate, isoDatePlus } from "@/lib/dates"
 
@@ -14,16 +15,14 @@ export function positiveInt(raw: string | null, fallback: number): number {
 }
 
 /**
- * Page number whose OFFSET stays a safe integer. A page that is itself safe
- * can still produce an unsafe `(page - 1) * pageSize`, which better-sqlite3
- * binds as a REAL — an unhandled "datatype mismatch" 500 once that REAL
- * leaves SQLite's int64 range. Keep both representable; an unsafe page falls
- * back to 1.
+ * Positive page number, 1 for missing/malformed/overflowing input. Pages
+ * above 2^53 are accepted and echoed: SQLite can bind their integral offsets
+ * up to 2^63, and beyond that `paginate` answers an empty page. `parseInt`
+ * stays deliberately lenient (`"3abc"` → 3, `"1e18"` → 1).
  */
-export function safePage(raw: string | null, pageSize: number): number {
+export function parsePage(raw: string | null): number {
   const n = Number.parseInt(raw ?? "", 10)
-  if (!Number.isSafeInteger(n) || n <= 0) return 1
-  return (n - 1) * pageSize <= Number.MAX_SAFE_INTEGER ? n : 1
+  return Number.isInteger(n) && n > 0 ? n : 1
 }
 
 export interface PaginationOptions {
@@ -50,7 +49,7 @@ export function parsePagination(
     positiveInt(sp.get("pageSize"), opts.defaultPageSize),
     opts.maxPageSize
   )
-  return { page: safePage(sp.get("page"), pageSize), pageSize, paginated }
+  return { page: parsePage(sp.get("page")), pageSize, paginated }
 }
 
 export type ParamResult<T> = { ok: true; value: T } | { ok: false }

@@ -53,9 +53,10 @@ Keep the virtuality invariant and share every reusable concern:
    never accepts `TransactionFilters`.
 
 4. **Generic plumbing, domain predicates local.** `lib/pagination.ts` owns
-   count/offset/pageCount; `lib/greedy.ts` owns the sort-and-consume-once
-   pairing loop. Plans and transactions keep their own row projections,
-   WHERE builders and matching viability predicates.
+   count/offset/pageCount and the unrepresentable-OFFSET guard; `lib/greedy.ts`
+   owns the sort-and-consume-once pairing loop. Plans and transactions keep
+   their own row projections, WHERE builders and matching viability
+   predicates.
 
 5. **One plan field vocabulary.** `lib/planning/fields.ts` is the single
    source for the plan field names, snake_case aliases and text byte caps.
@@ -96,9 +97,10 @@ Keep the virtuality invariant and share every reusable concern:
   transactions calendar no longer depends on the planning service or its
   limits, and the forecast uses the same anchor rule as the balance KPI by
   construction.
-- Positive: the transaction list gains the plans route's unsafe-OFFSET
-  fallback (an absurd page now answers page 1 instead of a SQLite binding
-  error).
+- Positive: the transaction list gains the plans route's unsafe-OFFSET guard
+  (an absurd page answers an empty page echoing the requested number instead
+  of a SQLite binding error; a page above 2^53 whose OFFSET is still a valid
+  int64 is queried and simply matches no rows).
 - Negative: a small amount of coupling between planning and the transaction
   read layer; the contracts module must stay import-safe for clients, and the
   shared parameter/date helpers must preserve their original edge semantics.

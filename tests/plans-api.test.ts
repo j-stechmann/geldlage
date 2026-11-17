@@ -546,16 +546,18 @@ describe("GET /api/plans", () => {
     expect("nextDueDate" in without.plans[0]).toBe(false)
   })
 
-  it("falls back to page 1 for an unsafe page number", async () => {
+  it("answers an empty page when the OFFSET exceeds SQLite's int64 range", async () => {
     await seedSimplePlan({ counterparty: "A" })
-    // (page - 1) * pageSize would exceed SQLite's int64 OFFSET range
+    // (page - 1) * pageSize is 2e19, beyond SQLite's int64 OFFSET range
     const res = await getPlansQuery("page=1000000000000000000&pageSize=20")
     expect(res.status).toBe(200)
     const data = await res.json()
-    expect(data.page).toBe(1)
-    expect(data.plans).toHaveLength(1)
+    expect(data.page).toBe(1e18)
+    expect(data.plans).toHaveLength(0)
+    expect(data.total).toBe(1)
+    expect(data.pageCount).toBe(1)
 
-    // non-positive / non-numeric pages fall back too (paging params are
+    // non-positive / non-numeric pages fall back to 1 (paging params are
     // lenient, unlike the strict status allowlist)
     for (const page of ["0", "-3", "abc"]) {
       const fallback = await getPlansQuery(`page=${page}&pageSize=20`)
@@ -566,17 +568,18 @@ describe("GET /api/plans", () => {
     }
   })
 
-  it("falls back to page 1 when the OFFSET product leaves the safe range", async () => {
+  it("echoes a huge page whose OFFSET is still representable", async () => {
     await seedSimplePlan({ counterparty: "A" })
-    // the page itself is a safe integer, but (page - 1) * 100 is not — the
-    // OFFSET would be bound as a REAL
+    // (page - 1) * 100 ≈ 9.0e17 is above 2^53 but inside SQLite's int64
+    // range, so the query runs and simply matches no rows
     const res = await getPlansQuery(
       `page=${Number.MAX_SAFE_INTEGER}&pageSize=100`
     )
     expect(res.status).toBe(200)
     const data = await res.json()
-    expect(data.page).toBe(1)
-    expect(data.plans).toHaveLength(1)
+    expect(data.page).toBe(Number.MAX_SAFE_INTEGER)
+    expect(data.plans).toHaveLength(0)
+    expect(data.total).toBe(1)
   })
 
   it("filters by status and paginates with a stable total/pageCount", async () => {
@@ -1170,16 +1173,23 @@ describe("GET /api/transactions id lookup", () => {
     expect(list.rows).toHaveLength(1)
   })
 
-  it("falls back to page 1 for an unsafe page number", async () => {
-    // (page - 1) * pageSize would exceed SQLite's int64 OFFSET range; the
-    // shared safePage guard answers page 1 instead of binding a REAL
-    const res = await getTransactions(
+  it("echoes huge pages and answers empty when the OFFSET is unrepresentable", async () => {
+    // 9.0e17 is above 2^53 but inside SQLite's int64 range: the query runs
+    // and matches no rows; the page number is echoed back
+    const representable = await getTransactions(
       `page=${Number.MAX_SAFE_INTEGER}&pageSize=100`
     )
-    expect(res.status).toBe(200)
-    const data = await res.json()
-    expect(data.page).toBe(1)
-    expect(data.rows).toHaveLength(1)
+    expect(representable.status).toBe(200)
+    const representableData = await representable.json()
+    expect(representableData.page).toBe(Number.MAX_SAFE_INTEGER)
+    expect(representableData.rows).toHaveLength(0)
+
+    // 2e19 exceeds int64: guard in paginate, same empty-page answer
+    const huge = await getTransactions("page=1000000000000000000&pageSize=25")
+    expect(huge.status).toBe(200)
+    const hugeData = await huge.json()
+    expect(hugeData.page).toBe(1e18)
+    expect(hugeData.rows).toHaveLength(0)
 
     for (const page of ["0", "-3", "abc"]) {
       const fallback = await getTransactions(`page=${page}&pageSize=25`)
