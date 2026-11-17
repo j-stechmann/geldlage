@@ -9,7 +9,7 @@ afterEach(() => vi.useRealTimers())
 describe("useDebouncedSearch", () => {
   it("emits the trimmed draft after the delay", () => {
     const onCommit = vi.fn()
-    const { result } = renderHook(() => useDebouncedSearch("", onCommit, 300))
+    const { result } = renderHook(() => useDebouncedSearch("", onCommit))
 
     act(() => result.current.setDraft("  abc  "))
     expect(onCommit).not.toHaveBeenCalled()
@@ -24,7 +24,7 @@ describe("useDebouncedSearch", () => {
   it("resyncs the draft when the external value changes", () => {
     const onCommit = vi.fn()
     const { result, rerender } = renderHook(
-      ({ value }) => useDebouncedSearch(value, onCommit, 300),
+      ({ value }) => useDebouncedSearch(value, onCommit),
       { initialProps: { value: "" } }
     )
 
@@ -35,7 +35,7 @@ describe("useDebouncedSearch", () => {
   it("does not clobber the draft with its own emitted value", () => {
     const onCommit = vi.fn()
     const { result, rerender } = renderHook(
-      ({ value }) => useDebouncedSearch(value, onCommit, 300),
+      ({ value }) => useDebouncedSearch(value, onCommit),
       { initialProps: { value: "" } }
     )
 
@@ -49,7 +49,7 @@ describe("useDebouncedSearch", () => {
 
   it("commitNow cancels the pending timer and emits immediately", () => {
     const onCommit = vi.fn()
-    const { result } = renderHook(() => useDebouncedSearch("", onCommit, 300))
+    const { result } = renderHook(() => useDebouncedSearch("", onCommit))
 
     act(() => result.current.setDraft("stale"))
     act(() => result.current.commitNow(""))
@@ -57,5 +57,17 @@ describe("useDebouncedSearch", () => {
 
     act(() => vi.advanceTimersByTime(300))
     expect(onCommit).toHaveBeenCalledTimes(1)
+  })
+
+  it("cancel drops a pending emit", () => {
+    const onCommit = vi.fn()
+    const { result } = renderHook(() => useDebouncedSearch("", onCommit))
+
+    act(() => result.current.setDraft("stale"))
+    act(() => vi.advanceTimersByTime(299))
+    act(() => result.current.cancel())
+
+    act(() => vi.advanceTimersByTime(300))
+    expect(onCommit).not.toHaveBeenCalled()
   })
 })

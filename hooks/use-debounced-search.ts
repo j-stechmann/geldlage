@@ -2,23 +2,26 @@
 
 import * as React from "react"
 
+const DEBOUNCE_MS = 300
+
 /**
  * Debounced search draft shared by the transactions FilterBar and the plans
  * list (ADR-0037).
  *
- * - the draft is emitted trimmed after `delayMs`;
+ * - the draft is emitted trimmed after a fixed debounce;
  * - an external `value` change (back/forward, shared link) resyncs the draft
  *   unless it is our own just-emitted value;
  * - `commitNow` cancels a pending timer and emits synchronously (the plans
- *   reset button must clear the applied filter immediately).
+ *   reset button must clear the applied filter immediately);
+ * - `cancel` drops a pending emit without emitting (the FilterBar reset
+ *   supplies the full replacement state itself).
  *
  * `onCommit` is held in a ref so callers can pass an inline closure without
  * restarting the timer on every filter change.
  */
 export function useDebouncedSearch(
   value: string,
-  onCommit: (next: string) => void,
-  delayMs = 300
+  onCommit: (next: string) => void
 ) {
   const [draft, setDraft] = React.useState(value)
   const lastEmitted = React.useRef(value)
@@ -47,16 +50,15 @@ export function useDebouncedSearch(
   }, [value])
 
   React.useEffect(() => {
-    cancel()
     timerRef.current = setTimeout(() => {
       const q = draft.trim()
       if (q !== lastEmitted.current) {
         lastEmitted.current = q
         onCommitRef.current(q)
       }
-    }, delayMs)
+    }, DEBOUNCE_MS)
     return cancel
-  }, [draft, delayMs, cancel])
+  }, [draft, cancel])
 
   const commitNow = React.useCallback(
     (next: string) => {
