@@ -137,10 +137,7 @@ describe("parseWindow", () => {
     expect(far).toMatchObject({ ok: false, error: "window_too_far" })
 
     // far and wide: only the distance-first order yields window_too_far
-    const farAndWide = parseWindow(
-      sp("from=2035-01-01&to=2036-06-01"),
-      today
-    )
+    const farAndWide = parseWindow(sp("from=2035-01-01&to=2036-06-01"), today)
     expect(farAndWide).toMatchObject({ ok: false, error: "window_too_far" })
 
     // the width check's isoDatePlus would overflow past year 9999; the

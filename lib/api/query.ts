@@ -125,8 +125,7 @@ export function parseWindow(
   }
 
   const rawTo = sp.get("to")
-  const to =
-    rawTo ?? (opts ? isoDatePlus(from, opts.defaultToDays) : null)
+  const to = rawTo ?? (opts ? isoDatePlus(from, opts.defaultToDays) : null)
   if (to === null || !isValidIsoDate(to)) {
     return {
       ok: false,

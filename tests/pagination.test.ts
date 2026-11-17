@@ -38,10 +38,9 @@ describe("paginate", () => {
   })
 
   it("echoes a page whose OFFSET is representable (even above 2^53)", () => {
-    const pageRows = vi.fn((limit: number, offset: number) => [
-      limit,
-      offset,
-    ] as unknown as string[])
+    const pageRows = vi.fn(
+      (limit: number, offset: number) => [limit, offset] as unknown as string[]
+    )
     const result = paginate(
       { page: Number.MAX_SAFE_INTEGER, pageSize: 100 },
       () => 55,
@@ -58,11 +57,7 @@ describe("paginate", () => {
 
   it("answers an empty page when the OFFSET leaves SQLite's int64 range", () => {
     const pageRows = vi.fn(() => ["unexpected"])
-    const result = paginate(
-      { page: 1e18, pageSize: 20 },
-      () => 55,
-      pageRows
-    )
+    const result = paginate({ page: 1e18, pageSize: 20 }, () => 55, pageRows)
 
     expect(pageRows).not.toHaveBeenCalled()
     expect(result).toEqual({
