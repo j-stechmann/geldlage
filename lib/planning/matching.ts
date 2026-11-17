@@ -7,15 +7,23 @@
  * spirit); a rule change can never leave stale match rows behind.
  */
 import { normalizeWhitespace } from "@/lib/money"
+import { isoShift } from "@/lib/dates"
+import { greedyAssign } from "@/lib/greedy"
 
-/** A real transaction may post BEFORE the due date (max 5 days early). */
-export const MATCH_DAYS_BEFORE = 5
-/** …or after (SEPA debits commonly post 1–2 days late; max 7). */
-export const MATCH_DAYS_AFTER = 7
-/** Smallest accepted amount deviation: 5 €. */
-export const AMOUNT_TOLERANCE_FLOOR_CENTS = 500
-/** …or 1 % of the planned amount, whichever is larger. */
-export const AMOUNT_TOLERANCE_PCT = 0.01
+import {
+  AMOUNT_TOLERANCE_FLOOR_CENTS,
+  AMOUNT_TOLERANCE_PCT,
+  MATCH_DAYS_AFTER,
+  MATCH_DAYS_BEFORE,
+} from "@/lib/planning/limits"
+
+// Re-exported for existing consumers/tests (ADR-0037).
+export {
+  AMOUNT_TOLERANCE_FLOOR_CENTS,
+  AMOUNT_TOLERANCE_PCT,
+  MATCH_DAYS_AFTER,
+  MATCH_DAYS_BEFORE,
+}
 
 export interface MatchableOccurrence {
   /** stable occurrence key: `${planId}::${date}` */
@@ -42,13 +50,6 @@ export interface MatchCandidate {
 export interface OccurrenceMatch {
   occurrenceKey: string
   transactionId: string
-}
-
-/** ISO date ± days (UTC calendar arithmetic); "" for non-date input. */
-function isoShift(iso: string, days: number): string {
-  const t = Date.parse(`${iso}T00:00:00Z`)
-  if (!Number.isFinite(t)) return ""
-  return new Date(t + days * 86_400_000).toISOString().slice(0, 10)
 }
 
 /** First index with bookingDate >= from ("": no bound → 0). */
@@ -118,13 +119,14 @@ function viable(occ: MatchableOccurrence, tx: MatchCandidate): number | null {
 }
 
 interface PairCandidate {
-  occurrenceKey: string
-  transactionId: string
+  /** occurrence side of the 1:1 pair */
+  leftKey: string
+  /** transaction side of the 1:1 pair */
+  rightKey: string
   /** |date offset| in whole days (sort key 1) */
   offsetAbs: number
   /** |amount difference| (sort key 2) */
   amountDiff: number
-  txId: string
 }
 
 /**
@@ -159,33 +161,25 @@ export function matchPlannedOccurrences(
       const offsetAbs = viable(occ, tx)
       if (offsetAbs === null) continue
       pairs.push({
-        occurrenceKey: occ.occurrenceKey,
-        transactionId: tx.id,
+        leftKey: occ.occurrenceKey,
+        rightKey: tx.id,
         offsetAbs,
         amountDiff: Math.abs(occ.amountCents - tx.amountCents),
-        txId: tx.id,
       })
     }
   }
-  pairs.sort(
+  const chosen = greedyAssign(
+    pairs,
     (a, b) =>
       a.offsetAbs - b.offsetAbs ||
       a.amountDiff - b.amountDiff ||
-      a.txId.localeCompare(b.txId) ||
-      a.occurrenceKey.localeCompare(b.occurrenceKey)
+      a.rightKey.localeCompare(b.rightKey) ||
+      a.leftKey.localeCompare(b.leftKey)
   )
-  const usedTx = new Set<string>()
-  const usedOcc = new Set<string>()
-  const matches: OccurrenceMatch[] = []
-  for (const p of pairs) {
-    if (usedTx.has(p.transactionId) || usedOcc.has(p.occurrenceKey)) continue
-    usedTx.add(p.transactionId)
-    usedOcc.add(p.occurrenceKey)
-    matches.push({
-      occurrenceKey: p.occurrenceKey,
-      transactionId: p.transactionId,
-    })
-  }
+  const matches: OccurrenceMatch[] = chosen.map((p) => ({
+    occurrenceKey: p.leftKey,
+    transactionId: p.rightKey,
+  }))
   matches.sort((a, b) => a.occurrenceKey.localeCompare(b.occurrenceKey))
   return matches
 }

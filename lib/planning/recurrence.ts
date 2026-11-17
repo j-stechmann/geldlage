@@ -18,6 +18,18 @@
  * keep rrule's intersection semantics. See `dayOfMonthClamp`.
  */
 import { RRule, rrulestr } from "rrule"
+import {
+  daysInMonth,
+  isoDate,
+  isValidIsoDate,
+  isoDatePlus,
+  MAX_ISO_DATE,
+  noonUtc,
+} from "@/lib/dates"
+
+// Date primitives live in lib/dates.ts (ADR-0037); re-exported here for the
+// recurrence engine's existing consumers and tests.
+export { isValidIsoDate, isoDatePlus, MAX_ISO_DATE, noonUtc }
 
 export class RuleValidationError extends Error {
   constructor(message: string) {
@@ -26,55 +38,10 @@ export class RuleValidationError extends Error {
   }
 }
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
-
-/** Last calendar day of a 1-based month (UTC calendar). */
-function daysInMonth(year: number, month: number): number {
-  return new Date(Date.UTC(year, month, 0)).getUTCDate()
-}
-
-/** "YYYY-MM-DD" from UTC calendar parts (year 1900–9999). */
-function isoDate(year: number, month: number, day: number): string {
-  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`
-}
-
-/** True for "YYYY-MM-DD" names of real calendar days (incl. leap years). */
-export function isValidIsoDate(s: string): boolean {
-  if (!ISO_DATE.test(s)) return false
-  const [y, m, d] = s.split("-").map(Number)
-  if (m < 1 || m > 12) return false
-  return d >= 1 && d <= daysInMonth(y, m)
-}
-
-/** Noon UTC instant of an ISO date — see module doc. */
-export function noonUtc(iso: string): Date {
-  const [y, m, d] = iso.split("-").map(Number)
-  return new Date(Date.UTC(y, m - 1, d, 12))
-}
-
-/** ISO date exactly `days` days from an ISO date (UTC calendar arithmetic). */
-export function isoDatePlus(iso: string, days: number): string {
-  const [y, m, d] = iso.split("-").map(Number)
-  return new Date(Date.UTC(y, m - 1, d + days, 12)).toISOString().slice(0, 10)
-}
-
 /** ISO date (UTC parts) of a noon-anchored instant. */
 function isoOf(date: Date): string {
   return date.toISOString().slice(0, 10)
 }
-
-/**
- * Highest storable ISO date. All dates (dtstart, windows, expansion output)
- * are plain 4-digit-year "YYYY-MM-DD"; for instants at/after year 10000
- * toISOString() switches to the extended six-digit form ("+010001-…"),
- * whose slice-based day extraction truncates into strings noonUtc cannot
- * parse (Invalid Date → rrule.between throws). dtstart above this bound
- * is already rejected by validation, so occurrence horizons clamp here.
- * Exported so consumers that WALK occurrence dates (the dialog's 3-slot
- * preview) can stop at the same boundary — a cursor past it is not a
- * comparable ISO date.
- */
-export const MAX_ISO_DATE = "9999-12-31"
 
 /** Rung window end, clamped at the last storable ISO date. */
 function ladderWindowEnd(

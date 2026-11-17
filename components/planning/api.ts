@@ -2,102 +2,33 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "@/lib/api-fetch"
-import { isValidIsoDate, isoDatePlus } from "@/lib/planning/recurrence"
-import { MATCH_DAYS_BEFORE, MATCH_DAYS_AFTER } from "@/lib/planning/matching"
+import { isValidIsoDate, isoDatePlus } from "@/lib/dates"
+import { MATCH_DAYS_BEFORE, MATCH_DAYS_AFTER } from "@/lib/planning/limits"
 
-// ── DTOs (mirror the server contract in lib/planning/service.ts) ──────────
+// ── DTOs (single source: lib/contracts/planning.ts, ADR-0037) ────────────
 
-export interface PlanRow {
-  id: string
-  accountId: number | null
-  accountName: string | null
-  counterparty: string | null
-  purpose: string | null
-  amountCents: number
-  categoryId: number | null
-  categoryName: string | null
-  categoryColor: string | null
-  dtstart: string
-  rrule: string | null
-  status: "active" | "paused" | "finished"
-  notes: string | null
-  createdAt: string
-  updatedAt: string
-}
+import type {
+  ForecastResult,
+  PlanListFilters,
+  PlanListPage,
+  PlanListRow,
+  PlanOccurrence,
+  PlanPrefill,
+  PlanRow,
+  PlanStatusFilter,
+} from "@/lib/contracts/planning"
+import type { CalendarTransaction } from "@/lib/contracts/transactions"
 
-/**
- * Prefill source for the plan dialog's create mode — built from an
- * existing context (e.g. a booked transaction being "umgewandelt"). Pure
- * data: the dialog derives the direction from the amount sign and guesses
- * a monthly recurrence from the dtstart day-of-month. No linkage is
- * stored — plans keep being read-time matched against bookings
- * (lib/planning/matching.ts).
- */
-export interface PlanPrefill {
-  amountCents: number
-  dtstart: string
-  counterparty: string | null
-  purpose: string | null
-  accountId: number | null
-  categoryId: number | null
-}
-
-export interface PlanListRow extends PlanRow {
-  nextDueDate: string | null
-}
-
-export interface PlanListPage {
-  plans: PlanListRow[]
-  total: number
-  page: number
-  pageCount: number
-}
-
-export type PlanStatusFilter = PlanRow["status"] | "all"
-
-export interface PlanListFilters {
-  q: string
-  status: PlanStatusFilter
-}
-
-export interface PlanOccurrence {
-  id: string
-  planId: string
-  date: string
-  amountCents: number
-  counterparty: string | null
-  purpose: string | null
-  categoryId: number | null
-  categoryName: string | null
-  categoryColor: string | null
-  accountId: number | null
-  planStatus: "active" | "paused"
-  matched: {
-    transactionId: string
-    bookingDate: string
-    amountCents: number
-  } | null
-}
-
-export interface ForecastResult {
-  startingBalanceCents: number
-  withoutSnapshot: boolean
-  today: string
-  horizon: { from: string; to: string }
-  monthlyPlanned: Array<{
-    month: string
-    incomeCents: number
-    expensesCents: number
-    netCents: number
-  }>
-  projectedBalance: Array<{ date: string; balanceCents: number }>
-  plannedCategories: Array<{
-    categoryId: number | null
-    name: string
-    color: string | null
-    totalCents: number
-    share: number
-  }>
+export type {
+  CalendarTransaction,
+  ForecastResult,
+  PlanListFilters,
+  PlanListPage,
+  PlanListRow,
+  PlanOccurrence,
+  PlanPrefill,
+  PlanRow,
+  PlanStatusFilter,
 }
 
 // ── query keys (house convention: two-phase, serializable params) ─────────
@@ -122,21 +53,6 @@ export function calendarTransactionsKey(
   const sp = new URLSearchParams({ from, to })
   if (accountId !== null) sp.set("accountId", String(accountId))
   return ["transactions-calendar", sp.toString()] as const
-}
-
-export interface CalendarTransaction {
-  id: string
-  date: string
-  /** verbatim DKB status: Gebucht | Nicht gebucht */
-  status: "Gebucht" | "Nicht gebucht"
-  counterparty: string | null
-  purpose: string | null
-  amountCents: number
-  categoryId: number | null
-  categoryName: string | null
-  categoryColor: string | null
-  /** legacy rows carry no account (transactions.account_id is nullable) */
-  accountId: number | null
 }
 
 export function forecastKey(months: number, accountId: number | null) {
@@ -220,7 +136,9 @@ export function plansPageKey(
     pageSize: String(pageSize),
   })
   if (filters.q) sp.set("q", filters.q)
-  if (filters.status !== "all") sp.set("status", filters.status)
+  if (filters.status && filters.status !== "all") {
+    sp.set("status", filters.status)
+  }
   return ["plans", sp.toString()] as const
 }
 

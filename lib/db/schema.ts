@@ -10,6 +10,7 @@ import {
 import { sql } from "drizzle-orm"
 import { randomUUID } from "node:crypto"
 import { DEFAULT_THREAD_TITLE } from "@/lib/agent/constants"
+import type { PlanStatus } from "@/lib/contracts/planning"
 
 export const users = sqliteTable(
   "users",
@@ -356,6 +357,6 @@ export type Category = typeof categories.$inferSelect
 export type LabelRule = typeof labelRules.$inferSelect
 export type Transaction = typeof transactions.$inferSelect
 export type PlannedTransaction = typeof plannedTransactions.$inferSelect
-export type PlanStatus = "active" | "paused" | "finished"
+export type { PlanStatus }
 export type NewPlannedTransaction = typeof plannedTransactions.$inferInsert
 export type NewTransaction = typeof transactions.$inferInsert

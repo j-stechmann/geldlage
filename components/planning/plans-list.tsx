@@ -3,8 +3,6 @@
 import * as React from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import {
-  ChevronLeft,
-  ChevronRight,
   CircleStop,
   MoreHorizontal,
   Pause,
@@ -52,6 +50,8 @@ import {
 } from "@/components/ui/dialog"
 import { PlanDialog } from "@/components/planning/plan-dialog"
 import { ErrorState } from "@/components/error-state"
+import { Pager } from "@/components/pager"
+import { useDebouncedSearch } from "@/hooks/use-debounced-search"
 import {
   deletePlan,
   describeRrule,
@@ -64,7 +64,7 @@ import {
   type PlanStatusFilter,
 } from "@/components/planning/api"
 import { euro } from "@/lib/money"
-import { resolveCategoryColor } from "@/lib/category-colors"
+import { CategoryBadge } from "@/components/category-badge"
 
 const PAGE_SIZE = 20
 const COLUMN_COUNT = 8
@@ -188,7 +188,6 @@ function PlanActions({
  */
 export function PlansList() {
   const queryClient = useQueryClient()
-  const [qDraft, setQDraft] = React.useState("")
   const [q, setQ] = React.useState("")
   const [status, setStatus] = React.useState<PlanStatusFilter>("all")
   const [page, setPage] = React.useState(1)
@@ -198,19 +197,14 @@ export function PlansList() {
   const [deleting, setDeleting] = React.useState<PlanRow | null>(null)
   const [deleteBusy, setDeleteBusy] = React.useState(false)
 
-  // debounce the text input, emitting the trimmed value so the URL/query
-  // key does not churn on trailing whitespace (the transactions FilterBar
-  // pattern). The timer id lives in a ref so the reset button can cancel an
-  // already-due timer synchronously, instead of waiting for the effect
-  // cleanup and briefly re-applying the pre-reset search.
-  const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
-  React.useEffect(() => {
-    debounceRef.current = setTimeout(() => setQ(qDraft.trim()), 300)
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current)
-      debounceRef.current = null
-    }
-  }, [qDraft])
+  // debounce the text input, emitting the trimmed value so the query key
+  // does not churn on trailing whitespace. `commitNow` lets the reset button
+  // cancel an already-due timer synchronously.
+  const {
+    draft: qDraft,
+    setDraft: setQDraft,
+    commitNow: commitSearchNow,
+  } = useDebouncedSearch(q, setQ)
 
   const filters: PlanListFilters = { q, status }
   const filterKey = `${q}\u0000${status}`
@@ -360,12 +354,7 @@ export function PlansList() {
             // clear the applied filter immediately, not only via the 300 ms
             // debounce: otherwise the empty input would still fetch the old
             // query (and the old page) until the timer fires
-            if (debounceRef.current) {
-              clearTimeout(debounceRef.current)
-              debounceRef.current = null
-            }
-            setQDraft("")
-            setQ("")
+            commitSearchNow("")
             setStatus("all")
             setPage(1)
           }}
@@ -453,20 +442,11 @@ export function PlansList() {
                     </TableCell>
                     <TableCell>
                       {plan.categoryName ? (
-                        <Badge
-                          variant="outline"
-                          className="category-badge font-normal"
-                          style={
-                            {
-                              "--category-color": resolveCategoryColor(
-                                plan.categoryId,
-                                plan.categoryColor
-                              ),
-                            } as React.CSSProperties
-                          }
-                        >
-                          {plan.categoryName}
-                        </Badge>
+                        <CategoryBadge
+                          categoryId={plan.categoryId}
+                          name={plan.categoryName}
+                          color={plan.categoryColor}
+                        />
                       ) : (
                         <span className="text-muted-foreground">—</span>
                       )}
@@ -512,37 +492,24 @@ export function PlansList() {
         </Table>
       </div>
 
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-sm text-muted-foreground">
-          {data && !settling
+      <Pager
+        className="gap-2"
+        page={page}
+        pageCount={pageCount}
+        onPageChange={setPage}
+        nextDisabled={settling}
+        summary={
+          data && !settling
             ? `${data.total.toLocaleString("de-DE")} ${data.total === 1 ? "Plan" : "Pläne"}`
-            : "…"}
-        </p>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page <= 1}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-          >
-            <ChevronLeft className="size-4" />
-            Zurück
-          </Button>
-          <span className="text-sm text-muted-foreground tabular-nums">
+            : "…"
+        }
+        indicator={
+          <>
             {page} /{" "}
             {settling || (plansQuery.isError && !data) ? "…" : pageCount}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page >= pageCount || settling}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            Weiter
-            <ChevronRight className="size-4" />
-          </Button>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       <PlanDialog
         open={dialogOpen}

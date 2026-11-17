@@ -11,65 +11,24 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { TableRow, TableCell } from "@/components/ui/table"
-import { resolveCategoryColor } from "@/lib/category-colors"
+import { CategoryBadge } from "@/components/category-badge"
 import { euro } from "@/lib/money"
 import { cn } from "@/lib/utils"
 import type { ColumnKey } from "@/components/table-columns"
 import type { RowActivation } from "@/hooks/use-row-activation"
-import {
-  useMatchedPlanForTx,
-  type PlanPrefill,
-  type PlanRow,
-} from "@/components/planning/api"
+import { useMatchedPlanForTx, type PlanRow } from "@/components/planning/api"
+import type { TransactionRow as TransactionRowDto } from "@/lib/contracts/transactions"
+import { counterpartyOf } from "@/lib/transactions"
+import { planPrefillFromTx } from "@/lib/planning/prefill"
 
 /**
- * Client-side DTO mirroring the /api/transactions row — single source,
- * no inline copies (see components/agent/types.ts convention).
+ * Client-side DTO mirroring the /api/transactions row — the shared
+ * ADR-0037 contract, aliased to the name the existing consumers/tests use.
  */
-export interface TxRow {
-  id: string
-  bookingDate: string
-  valueDate: string | null
-  status: string
-  payer: string | null
-  payee: string | null
-  purpose: string | null
-  type: string
-  counterpartyIban: string | null
-  amountCents: number
-  creditorId: string | null
-  mandateRef: string | null
-  customerRef: string | null
-  accountId: number
-  accountName: string | null
-  categoryId: number | null
-  categoryName: string | null
-  categoryColor: string | null
-  labelStatus: string
-}
+export type TxRow = TransactionRowDto
 
-/** Counterparty in row direction: the payee of outgoing, payer of incoming. */
-export function counterpartyOf(row: TxRow): string | null {
-  return row.type === "Ausgang" ? row.payee : row.payer
-}
-
-/**
- * Derive the plan dialog's create prefill from a booked transaction: the
- * counterparty in row direction (payee of outgoing / payer of incoming),
- * purpose, amount, booking date and account/category. Pure data — the
- * dialog derives direction from the amount sign and guesses a monthly
- * recurrence; no linkage between plan and transaction is stored.
- */
-export function planPrefillFromTx(row: TxRow): PlanPrefill {
-  return {
-    counterparty: counterpartyOf(row),
-    purpose: row.purpose,
-    amountCents: row.amountCents,
-    dtstart: row.bookingDate,
-    accountId: row.accountId,
-    categoryId: row.categoryId,
-  }
-}
+// Re-exported for the existing consumers/tests (ADR-0037).
+export { counterpartyOf, planPrefillFromTx }
 
 /**
  * DOM id of a row's expanded detail <tr>, shared by the chevron's
@@ -101,20 +60,11 @@ function CategoryCell({ row }: { row: TxRow }) {
     )
   }
   return (
-    <Badge
-      variant="outline"
-      className="category-badge font-normal"
-      style={
-        {
-          "--category-color": resolveCategoryColor(
-            row.categoryId,
-            row.categoryColor
-          ),
-        } as React.CSSProperties
-      }
-    >
-      {row.categoryName}
-    </Badge>
+    <CategoryBadge
+      categoryId={row.categoryId}
+      name={row.categoryName}
+      color={row.categoryColor}
+    />
   )
 }
 

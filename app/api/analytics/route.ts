@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { parseFilters } from "@/lib/analytics/queries"
 import { computeAnalytics } from "@/lib/analytics/engine"
-import { todayLocal } from "@/lib/analytics/date"
+import { todayLocal } from "@/lib/dates"
 import { requireSession, unauthorized } from "@/lib/auth/guard"
 
 export const runtime = "nodejs"

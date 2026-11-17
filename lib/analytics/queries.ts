@@ -12,7 +12,18 @@ import {
 } from "drizzle-orm"
 import { getDb } from "@/lib/db"
 import { escapeLike, likeEscaped } from "@/lib/db/search"
+import { paginate } from "@/lib/pagination"
 import { accounts, categories, transactions } from "@/lib/db/schema"
+import type {
+  CalendarTransaction,
+  TransactionPage,
+} from "@/lib/contracts/transactions"
+import { counterpartyOf } from "@/lib/transactions"
+
+export type {
+  TransactionPage,
+  TransactionRow,
+} from "@/lib/contracts/transactions"
 
 export type SortField =
   "booking_date" | "value_date" | "amount_cents" | "payee" | "status"
@@ -133,33 +144,6 @@ export function buildOrderBy(f: TransactionFilters) {
   }
 }
 
-export interface TransactionPage {
-  rows: Array<{
-    id: string
-    bookingDate: string
-    valueDate: string | null
-    status: string
-    payer: string | null
-    payee: string | null
-    purpose: string | null
-    type: string
-    counterpartyIban: string | null
-    amountCents: number
-    creditorId: string | null
-    mandateRef: string | null
-    customerRef: string | null
-    accountId: number
-    accountName: string | null
-    categoryId: number | null
-    categoryName: string | null
-    categoryColor: string | null
-    labelStatus: string
-  }>
-  total: number
-  page: number
-  pageCount: number
-}
-
 /** The shared row projection of both transactions queries. */
 function txRowSelect() {
   const db = getDb()
@@ -199,26 +183,88 @@ export function queryTransactions(
   const db = getDb()
   const where = buildWhere(f, userId)
 
-  const total =
-    db
-      .select({ count: sql<number>`count(*)` })
-      .from(transactions)
-      .where(where)
-      .get()?.count ?? 0
-
-  const rows = txRowSelect()
-    .where(where)
-    .orderBy(...buildOrderBy(f))
-    .limit(pageSize)
-    .offset((page - 1) * pageSize)
-    .all()
+  const result = paginate(
+    { page, pageSize },
+    () =>
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(transactions)
+        .where(where)
+        .get()?.count ?? 0,
+    (limit, offset) =>
+      txRowSelect()
+        .where(where)
+        .orderBy(...buildOrderBy(f))
+        .limit(limit)
+        .offset(offset)
+        .all()
+  )
 
   return {
-    rows,
-    total,
-    page,
-    pageCount: Math.max(1, Math.ceil(total / pageSize)),
+    rows: result.items,
+    total: result.total,
+    page: result.page,
+    pageCount: result.pageCount,
   }
+}
+
+/**
+ * Compact bank rows for a calendar window — both booked and pending rows.
+ *
+ * Deliberately has its own allowlist instead of `buildWhere`: the flow filter
+ * defaults to `Gebucht` and accepts content filters that must never apply to
+ * the calendar chip query (ADR-0022/0037). Ordering by booking date matches
+ * the previous route-level query.
+ */
+export function queryCalendarTransactions(
+  userId: number,
+  window: { from: string; to: string },
+  accountId?: number
+): CalendarTransaction[] {
+  const db = getDb()
+  const conditions: SQL[] = [
+    eq(transactions.userId, userId),
+    inArray(transactions.status, ["Gebucht", "Nicht gebucht"]),
+    sql`${transactions.bookingDate} >= ${window.from}`,
+    sql`${transactions.bookingDate} <= ${window.to}`,
+  ]
+  if (accountId !== undefined) {
+    conditions.push(eq(transactions.accountId, accountId))
+  }
+
+  const rows = db
+    .select({
+      id: transactions.id,
+      date: transactions.bookingDate,
+      status: transactions.status,
+      type: transactions.type,
+      payer: transactions.payer,
+      payee: transactions.payee,
+      purpose: transactions.purpose,
+      amountCents: transactions.amountCents,
+      categoryId: transactions.categoryId,
+      categoryName: categories.name,
+      categoryColor: categories.color,
+      accountId: transactions.accountId,
+    })
+    .from(transactions)
+    .leftJoin(categories, eq(categories.id, transactions.categoryId))
+    .where(and(...conditions))
+    .orderBy(transactions.bookingDate)
+    .all()
+
+  return rows.map((r) => ({
+    id: r.id,
+    date: r.date,
+    status: r.status as CalendarTransaction["status"],
+    counterparty: counterpartyOf(r),
+    purpose: r.purpose,
+    amountCents: r.amountCents,
+    categoryId: r.categoryId,
+    categoryName: r.categoryName,
+    categoryColor: r.categoryColor,
+    accountId: r.accountId,
+  }))
 }
 
 /**
