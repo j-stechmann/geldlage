@@ -95,77 +95,14 @@ export function validatePlanInput(
   }
   const out: Partial<PlanInput> = {}
 
-  if ("amountCents" in input) {
-    const v = input.amountCents
-    if (typeof v !== "number" || !Number.isSafeInteger(v) || v === 0) {
-      throw new PlanValidationError(
-        "amount must be a non-zero safe integer of cents",
-        "invalid_amount"
-      )
-    }
-    out.amountCents = v
-  }
-
-  if ("dtstart" in input) {
-    // dtstart is not clearable (NOT NULL column) — an explicit null is as
-    // invalid as any other non-date value, never a silent no-op that reads
-    // back as a successful update
-    const v = input.dtstart
-    if (
-      typeof v !== "string" ||
-      !isValidIsoDate(v) ||
-      Number.parseInt(v.slice(0, 4), 10) < MIN_DTSTART_YEAR
-    ) {
-      throw new PlanValidationError(
-        `dtstart must be an ISO date (YYYY-MM-DD) from ${MIN_DTSTART_YEAR}-01-01 onward`,
-        "invalid_dtstart"
-      )
-    }
-    out.dtstart = v
-  }
-
-  if ("rrule" in input) {
-    const v = input.rrule
-    if (
-      v === null ||
-      typeof v === "undefined" ||
-      (typeof v === "string" && isEmptyRule(v))
-    ) {
-      out.rrule = null
-    } else if (typeof v === "string") {
-      try {
-        out.rrule = validateRrule(v)
-      } catch (err) {
-        if (err instanceof RuleValidationError) {
-          throw new PlanValidationError(err.message, "invalid_rrule")
-        }
-        throw err
-      }
-    } else {
-      throw new PlanValidationError(
-        "rrule must be a string or null",
-        "invalid_rrule"
-      )
-    }
-  }
-
-  if ("status" in input) {
-    const v = input.status
-    if (!isPlanStatus(v)) {
-      throw new PlanValidationError(
-        "status must be active|paused|finished",
-        "invalid_status"
-      )
-    }
-    out.status = v
-  }
-
+  // One pass in table order, so error precedence matches the vocabulary.
   for (const spec of PLAN_FIELDS) {
-    if (spec.kind !== "text") continue
-    const key = spec.key
-    const max = spec.maxBytes ?? 0
-    const code = spec.errorCode
-    if (key in input) {
+    if (!(spec.key in input)) continue
+
+    if (spec.kind === "text") {
+      const key = spec.key
+      const max = spec.maxBytes
+      const code = spec.errorCode
       const v = input[key]
       if (v === null || typeof v === "undefined") {
         ;(out as Record<string, unknown>)[key] = null
@@ -178,23 +115,97 @@ export function validatePlanInput(
       } else {
         throw new PlanValidationError("must be a string or null", code)
       }
+      continue
     }
-  }
 
-  if ("accountId" in input) {
-    out.accountId = normalizeOptionalId(input.accountId)
-  }
-  if ("categoryId" in input) {
-    out.categoryId = normalizeOptionalId(input.categoryId)
+    switch (spec.key) {
+      case "amountCents": {
+        const v = input.amountCents
+        if (typeof v !== "number" || !Number.isSafeInteger(v) || v === 0) {
+          throw new PlanValidationError(
+            "amount must be a non-zero safe integer of cents",
+            spec.errorCode
+          )
+        }
+        out.amountCents = v
+        break
+      }
+      case "dtstart": {
+        // dtstart is not clearable (NOT NULL column) — an explicit null is as
+        // invalid as any other non-date value, never a silent no-op that reads
+        // back as a successful update
+        const v = input.dtstart
+        if (
+          typeof v !== "string" ||
+          !isValidIsoDate(v) ||
+          Number.parseInt(v.slice(0, 4), 10) < MIN_DTSTART_YEAR
+        ) {
+          throw new PlanValidationError(
+            `dtstart must be an ISO date (YYYY-MM-DD) from ${MIN_DTSTART_YEAR}-01-01 onward`,
+            spec.errorCode
+          )
+        }
+        out.dtstart = v
+        break
+      }
+      case "rrule": {
+        const v = input.rrule
+        if (
+          v === null ||
+          typeof v === "undefined" ||
+          (typeof v === "string" && isEmptyRule(v))
+        ) {
+          out.rrule = null
+        } else if (typeof v === "string") {
+          try {
+            out.rrule = validateRrule(v)
+          } catch (err) {
+            if (err instanceof RuleValidationError) {
+              throw new PlanValidationError(err.message, spec.errorCode)
+            }
+            throw err
+          }
+        } else {
+          throw new PlanValidationError(
+            "rrule must be a string or null",
+            spec.errorCode
+          )
+        }
+        break
+      }
+      case "status": {
+        const v = input.status
+        if (!isPlanStatus(v)) {
+          throw new PlanValidationError(
+            "status must be active|paused|finished",
+            spec.errorCode
+          )
+        }
+        out.status = v
+        break
+      }
+      case "accountId":
+        out.accountId = normalizeOptionalId(input.accountId, spec.errorCode)
+        break
+      case "categoryId":
+        out.categoryId = normalizeOptionalId(input.categoryId, spec.errorCode)
+        break
+      default: {
+        // Exhaustiveness: a new non-text PLAN_FIELDS key fails tsc here until
+        // a validation branch is added.
+        const unhandled: never = spec
+        throw new Error(`unhandled plan field: ${String(unhandled)}`)
+      }
+    }
   }
   return out
 }
 
-function normalizeOptionalId(v: unknown): number | null {
+function normalizeOptionalId(v: unknown, code: string): number | null {
   if (v === null || typeof v === "undefined" || v === "") return null
   if (typeof v === "number" && Number.isInteger(v) && v > 0) return v
   if (typeof v === "string" && /^\d+$/.test(v)) return Number.parseInt(v, 10)
-  throw new PlanValidationError("invalid id", "invalid_reference")
+  throw new PlanValidationError("invalid id", code)
 }
 
 /** Ensure an optional referenced id exists and belongs to the user. */

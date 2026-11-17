@@ -20,14 +20,26 @@ import { MAX_COUNTERPARTY, MAX_TEXT } from "@/lib/planning/limits"
 export type PlanFieldKind =
   "amount" | "date" | "rrule" | "status" | "text" | "reference"
 
-export interface PlanFieldMeta {
+interface PlanFieldBase {
   readonly key: PlanInputKey
   readonly agentKey: string
-  readonly kind: PlanFieldKind
-  readonly errorCode: string
   readonly agentOrder: number
-  readonly maxBytes?: number
+  readonly errorCode: string
 }
+
+/** Free-text fields are the only ones with a byte cap, and it is required. */
+export interface TextPlanFieldMeta extends PlanFieldBase {
+  readonly kind: "text"
+  readonly maxBytes: number
+}
+
+export interface NonTextPlanFieldMeta extends PlanFieldBase {
+  readonly kind: Exclude<PlanFieldKind, "text">
+}
+
+export type PlanFieldMeta = TextPlanFieldMeta | NonTextPlanFieldMeta
+
+export type TextPlanKey = "counterparty" | "purpose" | "notes"
 
 export const PLAN_FIELDS = [
   {
@@ -111,11 +123,12 @@ export const PLAN_AGENT_KEYS: readonly string[] = [...PLAN_FIELDS]
   .sort((a, b) => a.agentOrder - b.agentOrder)
   .map((f) => f.agentKey)
 
-export function planTextLimit(
-  key: "counterparty" | "purpose" | "notes"
-): number {
+export function planTextLimit(key: TextPlanKey): number {
   const spec = PLAN_FIELDS.find((f) => f.key === key)
-  return spec && "maxBytes" in spec ? spec.maxBytes : MAX_TEXT
+  if (!spec || spec.kind !== "text") {
+    throw new Error(`missing text plan field: ${key}`)
+  }
+  return spec.maxBytes
 }
 
 export function isPlanStatus(value: unknown): value is PlanStatus {

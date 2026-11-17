@@ -69,12 +69,13 @@ describe("isPlanStatus", () => {
 })
 
 describe("PLAN_FIELDS metadata", () => {
-  it("declares text specs with a byte cap", () => {
+  it("declares an error code for every field and a cap for every text field", () => {
     for (const spec of PLAN_FIELDS) {
+      expect(spec.errorCode).not.toBe("")
       if (spec.kind === "text") {
-        expect("maxBytes" in spec ? spec.maxBytes : undefined).toBeGreaterThan(
-          0
-        )
+        expect(spec.maxBytes).toBeGreaterThan(0)
+      } else {
+        expect("maxBytes" in spec).toBe(false)
       }
     }
   })
