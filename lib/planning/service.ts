@@ -622,15 +622,6 @@ function enrichWithMatches(
   const db = getDb()
   const txFrom = isoDatePlus(w.from, -MATCH_DAYS_BEFORE)
   const txTo = isoDatePlus(w.to, MATCH_DAYS_AFTER)
-  const conditions: SQL[] = [
-    eq(transactions.userId, userId),
-    eq(transactions.status, "Gebucht"),
-    sql`${transactions.bookingDate} >= ${txFrom}`,
-    sql`${transactions.bookingDate} <= ${txTo}`,
-  ]
-  if (accountId !== undefined) {
-    conditions.push(eq(transactions.accountId, accountId))
-  }
   const rows: MatchCandidate[] = db
     .select({
       id: transactions.id,
@@ -641,7 +632,7 @@ function enrichWithMatches(
       accountId: transactions.accountId,
     })
     .from(transactions)
-    .where(and(...conditions))
+    .where(buildTimeScopedWhere(userId, accountId, { from: txFrom, to: txTo }))
     .all()
 
   const matchables: MatchableOccurrence[] = occurrences.map((o) => ({
