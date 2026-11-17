@@ -103,18 +103,20 @@ export const MAX_OCCURRENCE_WINDOW_DAYS = 400
 export const MAX_WINDOW_DISTANCE_DAYS = 1826
 
 /**
- * Shared calendar-window contract. Distance cap runs before the width cap:
- * expansion walks rrule from dtstart (no seek), and the width cap's own
- * isoDatePlus arithmetic overflows near year 9999. Validating `from` before
- * deriving the default `to` keeps a malformed `from` a 400, not a 500.
+ * Shared calendar-window contract. With no options both bounds are required;
+ * passing `defaultToDays` defaults `from` to today and `to` to
+ * `from + defaultToDays`. Distance cap runs before the width cap: expansion
+ * walks rrule from dtstart (no seek), and the width cap's own isoDatePlus
+ * arithmetic overflows near year 9999. Validating `from` before deriving the
+ * default `to` keeps a malformed `from` a 400, not a 500.
  */
 export function parseWindow(
   sp: URLSearchParams,
   today: string,
-  opts: { fromDefault: "today" | "required"; toDefaultDays: number | null }
+  opts?: { defaultToDays: number }
 ): WindowParse {
   const rawFrom = sp.get("from")
-  const from = rawFrom ?? (opts.fromDefault === "today" ? today : null)
+  const from = rawFrom ?? (opts ? today : null)
   if (from === null || !isValidIsoDate(from)) {
     return {
       ok: false,
@@ -125,8 +127,7 @@ export function parseWindow(
 
   const rawTo = sp.get("to")
   const to =
-    rawTo ??
-    (opts.toDefaultDays !== null ? isoDatePlus(from, opts.toDefaultDays) : null)
+    rawTo ?? (opts ? isoDatePlus(from, opts.defaultToDays) : null)
   if (to === null || !isValidIsoDate(to)) {
     return {
       ok: false,

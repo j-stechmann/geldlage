@@ -91,15 +91,14 @@ describe("parseOptionalClampedInt", () => {
 
 describe("parseWindow", () => {
   const today = "2026-11-17"
-  const required = { fromDefault: "required" as const, toDefaultDays: null }
-  const defaults = { fromDefault: "today" as const, toDefaultDays: 89 }
+  const defaults = { defaultToDays: 89 }
 
   it("requires from/to when no fallback is configured", () => {
-    expect(parseWindow(sp(""), today, required)).toMatchObject({
+    expect(parseWindow(sp(""), today)).toMatchObject({
       ok: false,
       error: "invalid_window",
     })
-    expect(parseWindow(sp("from=2026-11-01"), today, required)).toMatchObject({
+    expect(parseWindow(sp("from=2026-11-01"), today)).toMatchObject({
       ok: false,
       error: "invalid_window",
     })
@@ -123,20 +122,12 @@ describe("parseWindow", () => {
   })
 
   it("rejects far windows before the width cap", () => {
-    const far = parseWindow(
-      sp("from=2035-01-01&to=2035-01-02"),
-      today,
-      required
-    )
+    const far = parseWindow(sp("from=2035-01-01&to=2035-01-02"), today)
     expect(far).toMatchObject({ ok: false, error: "window_too_far" })
   })
 
   it("rejects windows wider than the cap", () => {
-    const wide = parseWindow(
-      sp("from=2026-01-01&to=2027-06-01"),
-      today,
-      required
-    )
+    const wide = parseWindow(sp("from=2026-01-01&to=2027-06-01"), today)
     expect(wide).toMatchObject({ ok: false, error: "window_too_large" })
   })
 })

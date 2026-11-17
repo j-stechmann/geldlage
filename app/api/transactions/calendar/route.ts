@@ -19,10 +19,7 @@ export async function GET(request: NextRequest) {
 
   // Same window contract as GET /api/plans/occurrences: the two calendar
   // reads must fail together, so the helper owns the precedence and caps.
-  const window = parseWindow(sp, todayLocal(), {
-    fromDefault: "required",
-    toDefaultDays: null,
-  })
+  const window = parseWindow(sp, todayLocal())
   if (!window.ok) {
     return NextResponse.json(
       { error: window.error, message: window.message },

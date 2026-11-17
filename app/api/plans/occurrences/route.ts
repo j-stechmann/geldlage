@@ -16,10 +16,7 @@ export async function GET(request: NextRequest) {
   if (!session) return unauthorized()
   const sp = request.nextUrl.searchParams
 
-  const window = parseWindow(sp, todayLocal(), {
-    fromDefault: "today",
-    toDefaultDays: 89,
-  })
+  const window = parseWindow(sp, todayLocal(), { defaultToDays: 89 })
   if (!window.ok) {
     return NextResponse.json(
       { error: window.error, message: window.message },
