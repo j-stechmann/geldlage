@@ -7,10 +7,6 @@
  * (from → to → order → distance → width).
  */
 import { isValidIsoDate, isoDatePlus } from "@/lib/dates"
-import {
-  MAX_OCCURRENCE_WINDOW_DAYS,
-  MAX_WINDOW_DISTANCE_DAYS,
-} from "@/lib/planning/limits"
 
 export function positiveInt(raw: string | null, fallback: number): number {
   const n = Number.parseInt(raw ?? "", 10)
@@ -91,6 +87,20 @@ export type WindowErrorCode =
 export type WindowParse =
   | { ok: true; from: string; to: string }
   | { ok: false; error: WindowErrorCode; message: string }
+
+/** occurrence-window cap for the occurrences/calendar endpoints (days) */
+export const MAX_OCCURRENCE_WINDOW_DAYS = 400
+/**
+ * Window distance cap, each side of today (= 60 months, the forecast
+ * horizon cap). rrule expansion iterates occurrence by occurrence from
+ * dtstart up to the window start — it cannot seek — so an arbitrary far
+ * window would make every recurring plan cost CPU linear in that distance
+ * on every read (measured: ~0.6 s per DAILY plan for a window at year
+ * 2999, ~6 s at 9999). Everything that actually queries occurrences stays
+ * far inside: the /calendar page navigates month-sized windows. The two
+ * calendar endpoints share these caps so they fail together.
+ */
+export const MAX_WINDOW_DISTANCE_DAYS = 1826
 
 /**
  * Shared calendar-window contract. Distance cap runs before the width cap:

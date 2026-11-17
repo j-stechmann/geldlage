@@ -10,19 +10,6 @@
 export const MAX_COUNTERPARTY = 128
 export const MAX_TEXT = 500
 
-/** occurrence-window cap for the occurrences/calendar endpoints (days) */
-export const MAX_OCCURRENCE_WINDOW_DAYS = 400
-/**
- * Window distance cap, each side of today (= 60 months, the forecast
- * horizon cap). rrule expansion iterates occurrence by occurrence from
- * dtstart up to the window start — it cannot seek — so an arbitrary far
- * window would make every recurring plan cost CPU linear in that distance
- * on every read (measured: ~0.6 s per DAILY plan for a window at year
- * 2999, ~6 s at 9999). Everything that actually queries occurrences stays
- * far inside: the /calendar page navigates month-sized windows. The two
- * calendar endpoints share these caps so they fail together.
- */
-export const MAX_WINDOW_DISTANCE_DAYS = 1826
 /** forecast horizon cap (months) */
 export const MAX_FORECAST_MONTHS = 60
 

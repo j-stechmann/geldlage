@@ -40,9 +40,11 @@ Keep the virtuality invariant and share every reusable concern:
 2. **Shared date and query-parameter helpers.** `lib/dates.ts` owns ISO/local
    date arithmetic, keeping the original invalid-input contracts
    (`isoDatePlus` throws, `isoShift` returns `""`, `dayDiff` returns `NaN`).
-   `lib/api/query.ts` owns the digits-only account/month parsing, the safe
-   pagination parsing (including the OFFSET-overflow fallback) and the calendar
-   window precedence shared by both calendar reads.
+   `lib/api/query.ts` owns the digits-only account/month parsing, the lenient
+   page-number parsing and the calendar window caps and precedence shared by
+   both calendar reads. The OFFSET-overflow guard lives in
+   `lib/pagination.ts` (see 4); the window caps sit beside `parseWindow`, so
+   the bank calendar no longer imports anything from `lib/planning/`.
 
 3. **Shared balance machinery, separate scopes.** `lib/analytics/balance.ts`
    owns `latestAnchor`, `isLaterAnchor` and the time-scoped booked predicate.
@@ -91,8 +93,9 @@ Keep the virtuality invariant and share every reusable concern:
 
 - Positive: one implementation per shared concern; drifting DTOs, param
   contracts, anchor math and UI copy become compile/test failures. The
-  transactions calendar no longer depends on the planning service, and the
-  forecast uses the same anchor rule as the balance KPI by construction.
+  transactions calendar no longer depends on the planning service or its
+  limits, and the forecast uses the same anchor rule as the balance KPI by
+  construction.
 - Positive: the transaction list gains the plans route's unsafe-OFFSET
   fallback (an absurd page now answers page 1 instead of a SQLite binding
   error).
