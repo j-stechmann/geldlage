@@ -108,8 +108,11 @@ describe("month helpers", () => {
 })
 
 describe("local calendar helpers", () => {
-  it("format the local calendar day, not the UTC day", () => {
-    const d = new Date(2025, 0, 2, 23, 30) // local Jan 2, 23:30
+  it("formats the local calendar day, not the UTC day", () => {
+    // 00:30 in the pinned Europe/Berlin zone is 23:30 UTC on the previous
+    // day, so a toISOString()-based implementation returns 2025-01-01
+    const d = new Date(2025, 0, 2, 0, 30)
+    expect(d.toISOString().slice(0, 10)).toBe("2025-01-01")
     expect(isoDateLocal(d)).toBe("2025-01-02")
     expect(todayLocal()).toMatch(/^\d{4}-\d{2}-\d{2}$/)
   })

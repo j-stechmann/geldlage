@@ -127,6 +127,8 @@ random sample, so failures are reproducible and assertions are exact.
 - `tests/setup.ts` pins env: `DATABASE_PATH=":memory:"`,
   `LLM_BATCH_SIZE="100"`, `LLM_MAX_RETRIES="0"` (the LLM-client tests
   override retries to 2 locally).
+- `vitest.config.ts` pins `TZ="Europe/Berlin"`, so local-calendar tests are
+  meaningful on UTC CI hosts (Berlin local midnight is the previous UTC day).
 - `lib/db/index.ts` exposes `createTestDb()` / `setTestDb()` /
   `resetDefaultDbForTest()`; `getDb()` branches on `process.env.VITEST`.
 - `resetConfigCache()` (lib/config.ts) lets tests change env between cases.
