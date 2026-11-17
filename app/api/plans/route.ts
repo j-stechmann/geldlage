@@ -8,6 +8,7 @@ import {
   PlanValidationError,
 } from "@/lib/planning/service"
 import type { PlanListFilters } from "@/lib/contracts/planning"
+import { isPlanStatus } from "@/lib/planning/fields"
 import type { PlanStatus } from "@/lib/db/schema"
 import { todayLocal } from "@/lib/dates"
 import { parsePagination } from "@/lib/api/query"
@@ -32,8 +33,7 @@ const MAX_PAGE_SIZE = 100
  */
 function parseStatus(raw: string | null): PlanStatus | "all" | null {
   if (raw === null || raw === "" || raw === "all") return "all"
-  if (raw === "active" || raw === "paused" || raw === "finished") return raw
-  return null
+  return isPlanStatus(raw) ? raw : null
 }
 
 export async function GET(request: NextRequest) {

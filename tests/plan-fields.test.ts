@@ -8,6 +8,7 @@ import {
   planTextLimit,
 } from "@/lib/planning/fields"
 import { MAX_COUNTERPARTY, MAX_TEXT } from "@/lib/planning/limits"
+import { PLAN_STATUSES } from "@/lib/contracts/planning"
 
 describe("PLAN_FIELDS", () => {
   it("keeps the REST vocabulary order", () => {
@@ -57,11 +58,11 @@ describe("planTextLimit", () => {
 })
 
 describe("isPlanStatus", () => {
-  it("accepts only the three statuses", () => {
-    for (const value of ["active", "paused", "finished"]) {
+  it("accepts exactly the shared status vocabulary", () => {
+    for (const value of PLAN_STATUSES) {
       expect(isPlanStatus(value)).toBe(true)
     }
-    for (const value of ["", "all", "ACTIVE", null, undefined, 1]) {
+    for (const value of ["", "all", "ACTIVE", "archived", null, undefined, 1]) {
       expect(isPlanStatus(value)).toBe(false)
     }
   })

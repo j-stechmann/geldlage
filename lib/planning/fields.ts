@@ -10,7 +10,11 @@
  * `agentOrder` preserves the agent's allowed-fields message order, which
  * differs from the REST key order (notes last for the model).
  */
-import type { PlanInputKey, PlanStatus } from "@/lib/contracts/planning"
+import {
+  PLAN_STATUSES,
+  type PlanInputKey,
+  type PlanStatus,
+} from "@/lib/contracts/planning"
 import { MAX_COUNTERPARTY, MAX_TEXT } from "@/lib/planning/limits"
 
 export type PlanFieldKind =
@@ -115,5 +119,5 @@ export function planTextLimit(
 }
 
 export function isPlanStatus(value: unknown): value is PlanStatus {
-  return value === "active" || value === "paused" || value === "finished"
+  return (PLAN_STATUSES as readonly unknown[]).includes(value)
 }
