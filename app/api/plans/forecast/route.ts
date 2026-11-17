@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
-import { computeForecast, MAX_FORECAST_MONTHS } from "@/lib/planning/service"
+import { computeForecast } from "@/lib/planning/service"
+import { MAX_FORECAST_MONTHS } from "@/lib/planning/limits"
+import {
+  parseOptionalAccountId,
+  parseOptionalClampedInt,
+} from "@/lib/api/query"
 import { requireSession, unauthorized } from "@/lib/auth/guard"
 
 export const runtime = "nodejs"
@@ -16,36 +21,22 @@ export async function GET(request: NextRequest) {
   if (!session) return unauthorized()
   const sp = request.nextUrl.searchParams
 
-  let months = 12
-  const monthsRaw = sp.get("months")
-  if (monthsRaw !== null) {
-    // digits-only, like every other numeric query param: parseInt alone
-    // would coerce "12abc" → 12 (and accept "-1") — a mangled horizon
-    // instead of the invalid_months 400 garbage gets; in-range clamping
-    // ("0", "50") stays numeric
-    if (!/^\d+$/.test(monthsRaw)) {
-      return NextResponse.json({ error: "invalid_months" }, { status: 400 })
-    }
-    const n = Number.parseInt(monthsRaw, 10)
-    months = Math.min(Math.max(n, 1), MAX_FORECAST_MONTHS)
+  const months = parseOptionalClampedInt(sp.get("months"), {
+    min: 1,
+    max: MAX_FORECAST_MONTHS,
+    fallback: 12,
+  })
+  if (!months.ok) {
+    return NextResponse.json({ error: "invalid_months" }, { status: 400 })
   }
-  const accountIdRaw = sp.get("accountId")
-  let accountId: number | undefined
-  if (accountIdRaw !== null) {
-    // digits-only (the normalizeOptionalId pattern in
-    // lib/planning/service.ts): parseInt alone would coerce "12.9" → 12 or
-    // "12abc" → 12 — a mangled param silently reading a different account
-    // than the client asked for, instead of the invalid_account 400
-    if (!/^\d+$/.test(accountIdRaw)) {
-      return NextResponse.json({ error: "invalid_account" }, { status: 400 })
-    }
-    const n = Number.parseInt(accountIdRaw, 10)
-    if (!Number.isInteger(n) || n <= 0) {
-      return NextResponse.json({ error: "invalid_account" }, { status: 400 })
-    }
-    accountId = n
+  const account = parseOptionalAccountId(sp.get("accountId"))
+  if (!account.ok) {
+    return NextResponse.json({ error: "invalid_account" }, { status: 400 })
   }
 
-  const forecast = computeForecast(session.uid, { months, accountId })
+  const forecast = computeForecast(session.uid, {
+    months: months.value,
+    accountId: account.value,
+  })
   return NextResponse.json({ forecast })
 }

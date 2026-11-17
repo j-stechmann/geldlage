@@ -4,6 +4,7 @@ import {
   queryTransactionById,
   queryTransactions,
 } from "@/lib/analytics/queries"
+import { parsePagination } from "@/lib/api/query"
 import { requireSession, unauthorized } from "@/lib/auth/guard"
 
 export const runtime = "nodejs"
@@ -22,14 +23,10 @@ export async function GET(request: NextRequest) {
   }
 
   const filters = parseFilters(sp)
-
-  const pageRaw = Number.parseInt(sp.get("page") ?? "1", 10)
-  const page = Number.isSafeInteger(pageRaw) && pageRaw > 0 ? pageRaw : 1
-  const pageSizeRaw = Number.parseInt(sp.get("pageSize") ?? "25", 10)
-  const pageSize =
-    Number.isSafeInteger(pageSizeRaw) && pageSizeRaw > 0
-      ? Math.min(pageSizeRaw, 100)
-      : 25
+  const { page, pageSize } = parsePagination(sp, {
+    defaultPageSize: 25,
+    maxPageSize: 100,
+  })
 
   const result = queryTransactions(filters, session.uid, page, pageSize)
   return NextResponse.json(result)

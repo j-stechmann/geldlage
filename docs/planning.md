@@ -4,9 +4,27 @@ Future money, planned by hand: the `/plans` page manages **virtual plans**
 — recurring (full RFC 5545 RRULE) or one-off — and `/calendar` renders their
 occurrences next to real bookings, checks them off, and projects the balance
 on the dashboard. Implemented per
-[ADR-0035](adr/adr-0035-planned-transactions-rrule.md); the design invariant
-is _not touching a single line of the analytics/import/labelling core_:
-plans are virtual, matching is read-time, the forecast is its own endpoint.
+[ADR-0035](adr/adr-0035-planned-transactions-rrule.md); the design
+invariants are: plans stay virtual (no row ever enters `transactions`),
+matching is read-time, and the forecast is its own scope. Shared read
+implementations ([ADR-0037](adr/adr-0037-virtual-plans-shared-machinery.md))
+never change bank-truth data.
+
+## Shared machinery
+
+The virtuality invariant still holds, but the implementation now reuses the
+transaction read machinery wherever a concern is genuinely shared
+([ADR-0037](adr/adr-0037-virtual-plans-shared-machinery.md)): the wire DTOs
+live once in `lib/contracts/`; ISO date arithmetic in `lib/dates.ts`; the
+calendar window / digits-only account / pagination parsing in
+`lib/api/query.ts`; the snapshot anchor and time-scoped booked predicate in
+`lib/analytics/balance.ts` (the forecast and the balance KPI use the same
+implementation, while the analytics scopes stay separate); the greedy 1:1
+pairing skeleton in `lib/greedy.ts`; the plan field vocabulary in
+`lib/planning/fields.ts`; the counterparty/prefill mapping in
+`lib/transactions.ts` + `lib/planning/prefill.ts`; and the pager/debounce/
+category badge in the shared UI modules. Plan occurrences still never enter
+`transactions`, and the forecast remains the separate third scope.
 
 ## Data model
 
@@ -138,7 +156,8 @@ is left untouched; the forecast endpoint is deliberately separate.
   `withoutSnapshot`. Account filter respected like the balance timeline.
   Same-snapshotDate batches (two accounts imported on one day) tie-break
   deterministically — freshest import first (`createdAt`, then `id`,
-  `isLaterAnchor`), the identical rule the balance KPI applies; both scopes
+  `isLaterAnchor` — the shared `lib/analytics/balance.ts` implementation),
+  the identical rule the balance KPI applies; both scopes
   also ignore snapshots dated **after** today (a future-dated Saldo line
   never anchors one scope while the other rejects it), so the KPI and the
   forecast can never pick different snapshots for the same user.

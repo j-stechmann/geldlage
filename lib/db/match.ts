@@ -1,5 +1,10 @@
 import type { ParsedTransactionRow } from "@/lib/csv/parser"
 import type { Transaction } from "@/lib/db/schema"
+import { dayDiff } from "@/lib/dates"
+import { greedyAssign } from "@/lib/greedy"
+
+// Re-exported for the existing match tests/consumers (ADR-0037).
+export { dayDiff }
 
 export const MATCH_WINDOW_DAYS = 7
 
@@ -46,13 +51,6 @@ export function toDbMatchRow(t: Transaction): DbMatchRow {
     sourceHash: t.sourceHash,
     occurrenceIndex: t.occurrenceIndex,
   }
-}
-
-/** Absolute day difference between two ISO date strings. */
-export function dayDiff(isoA: string, isoB: string): number {
-  const a = Date.parse(`${isoA}T00:00:00Z`)
-  const b = Date.parse(`${isoB}T00:00:00Z`)
-  return Math.abs(Math.round((a - b) / 86_400_000))
 }
 
 interface Matchable {
@@ -125,33 +123,6 @@ function sameDbContent(a: DbMatchRow, b: DbMatchRow): boolean {
   )
 }
 
-/**
- * Greedy 1:1 pairing over candidates: smallest |date diff| first, then
- * kind priority (upgrades before skips before refreshes), then earliest
- * DB bookingDate, then row ids/positions for determinism. Each side is
- * consumed at most once.
- */
-function greedyAssign<T extends Candidate>(candidates: T[]): T[] {
-  const sorted = [...candidates].sort(
-    (a, b) =>
-      a.diff - b.diff ||
-      a.rank - b.rank ||
-      a.dbBookingDate.localeCompare(b.dbBookingDate) ||
-      a.leftKey.localeCompare(b.leftKey) ||
-      a.rightKey.localeCompare(b.rightKey)
-  )
-  const usedLeft = new Set<string>()
-  const usedRight = new Set<string>()
-  const chosen: T[] = []
-  for (const c of sorted) {
-    if (usedLeft.has(c.leftKey) || usedRight.has(c.rightKey)) continue
-    usedLeft.add(c.leftKey)
-    usedRight.add(c.rightKey)
-    chosen.push(c)
-  }
-  return chosen
-}
-
 interface Candidate {
   kind: "upgrade" | "skip" | "refresh"
   rank: number
@@ -159,6 +130,21 @@ interface Candidate {
   rightKey: string
   diff: number
   dbBookingDate: string
+}
+
+/**
+ * Smallest |date diff| first, then kind priority (upgrades before skips
+ * before refreshes), then earliest DB bookingDate, then row ids/positions
+ * for determinism. The consume-once loop is the shared greedy skeleton.
+ */
+function compareCandidates(a: Candidate, b: Candidate): number {
+  return (
+    a.diff - b.diff ||
+    a.rank - b.rank ||
+    a.dbBookingDate.localeCompare(b.dbBookingDate) ||
+    a.leftKey.localeCompare(b.leftKey) ||
+    a.rightKey.localeCompare(b.rightKey)
+  )
 }
 
 const KIND_RANK: Record<Candidate["kind"], number> = {
@@ -266,7 +252,7 @@ export function matchIncoming(
   }
 
   const result: FuzzyMatch = { upgrades: [], refreshes: [], skips: [] }
-  for (const c of greedyAssign(candidates)) {
+  for (const c of greedyAssign(candidates, compareCandidates)) {
     const entry = { incomingIndex: Number(c.rightKey), dbId: c.leftKey }
     if (c.kind === "upgrade") result.upgrades.push(entry)
     else if (c.kind === "skip") result.skips.push(entry)
@@ -299,7 +285,7 @@ export function findDbSelfHealPairs(
       })
     }
   }
-  return greedyAssign(candidates).map((c) => ({
+  return greedyAssign(candidates, compareCandidates).map((c) => ({
     pendingId: c.leftKey,
     bookedId: c.rightKey,
   }))

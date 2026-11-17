@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { RRule, rrulestr } from "rrule"
 import { normalizeRuleInput } from "@/lib/planning/recurrence"
-import { todayLocal } from "@/lib/analytics/date"
+import { todayLocal } from "@/lib/dates"
 import {
   Dialog,
   DialogContent,
@@ -41,14 +41,11 @@ import {
 } from "@/components/planning/api"
 import {
   expandOccurrenceDates,
-  isValidIsoDate,
-  isoDatePlus,
-  MAX_ISO_DATE,
   nextOccurrenceDate,
-  noonUtc,
   validateRrule,
 } from "@/lib/planning/recurrence"
-import { MAX_COUNTERPARTY, MAX_TEXT } from "@/lib/planning/limits"
+import { isValidIsoDate, isoDatePlus, MAX_ISO_DATE, noonUtc } from "@/lib/dates"
+import { planTextLimit } from "@/lib/planning/fields"
 
 interface AccountOption {
   id: number
@@ -960,10 +957,14 @@ export function PlanDialog({
       counterparty: textLimitError(
         "Vertragspartner",
         form.counterparty,
-        MAX_COUNTERPARTY
+        planTextLimit("counterparty")
       ),
-      purpose: textLimitError("Verwendungszweck", form.purpose, MAX_TEXT),
-      notes: textLimitError("Notizen", form.notes, MAX_TEXT),
+      purpose: textLimitError(
+        "Verwendungszweck",
+        form.purpose,
+        planTextLimit("purpose")
+      ),
+      notes: textLimitError("Notizen", form.notes, planTextLimit("notes")),
     }),
     [form.counterparty, form.purpose, form.notes]
   )

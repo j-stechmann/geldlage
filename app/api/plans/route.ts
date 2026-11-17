@@ -9,7 +9,8 @@ import {
   type PlanListFilters,
 } from "@/lib/planning/service"
 import type { PlanStatus } from "@/lib/db/schema"
-import { todayLocal } from "@/lib/analytics/date"
+import { todayLocal } from "@/lib/dates"
+import { parsePagination } from "@/lib/api/query"
 import {
   assertSameOrigin,
   requireSession,
@@ -21,25 +22,6 @@ export const dynamic = "force-dynamic"
 
 const DEFAULT_PAGE_SIZE = 20
 const MAX_PAGE_SIZE = 100
-
-function positiveInt(raw: string | null, fallback: number): number {
-  const n = Number.parseInt(raw ?? "", 10)
-  return Number.isSafeInteger(n) && n > 0 ? n : fallback
-}
-
-/**
- * Page number whose OFFSET stays a safe integer. A page that is itself safe
- * can still produce an unsafe `(page - 1) * pageSize` (page ~2^53 with a
- * pageSize > 1), which better-sqlite3 binds as a REAL — an unhandled
- * "datatype mismatch" 500 once that REAL leaves SQLite's int64 range. Keep
- * both the page and the product representable; an unsafe page falls back to
- * 1 (an empty page is still the honest answer for a huge in-range offset).
- */
-function safePage(raw: string | null, pageSize: number): number {
-  const n = Number.parseInt(raw ?? "", 10)
-  if (!Number.isSafeInteger(n) || n <= 0) return 1
-  return (n - 1) * pageSize <= Number.MAX_SAFE_INTEGER ? n : 1
-}
 
 /**
  * Strict `status` parsing: absent/empty/`all` = all. An unknown value is
@@ -68,12 +50,11 @@ export async function GET(request: NextRequest) {
     q: sp.get("q")?.trim() ?? "",
     status,
   }
-  const paginate = sp.has("page") || sp.has("pageSize")
-  const pageSize = Math.min(
-    positiveInt(sp.get("pageSize"), DEFAULT_PAGE_SIZE),
-    MAX_PAGE_SIZE
-  )
-  const page = safePage(sp.get("page"), pageSize)
+  const { page, pageSize, paginated } = parsePagination(sp, {
+    defaultPageSize: DEFAULT_PAGE_SIZE,
+    maxPageSize: MAX_PAGE_SIZE,
+    onlyWhenPresent: true,
+  })
   // The full-list lookups (calendar chip → plan row, matched-plan reverse
   // lookup) never read `nextDueDate`, and the per-plan recurrence walk is the
   // expensive part of a list read (docs/planning.md cost note): let them opt
@@ -83,7 +64,7 @@ export async function GET(request: NextRequest) {
   // Backward-compatible shape: callers that only need the full list (the
   // calendar's plan lookup and the read-time match reverse lookup) send no
   // paging params and keep receiving every plan.
-  const result = paginate
+  const result = paginated
     ? listPlansPage(session.uid, filters, page, pageSize)
     : (() => {
         const plans =

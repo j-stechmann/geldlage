@@ -22,6 +22,7 @@ import { EMPTY_FILTERS, type TableFilters } from "@/lib/filters"
 import { resolveCategoryColor } from "@/lib/category-colors"
 import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
+import { useDebouncedSearch } from "@/hooks/use-debounced-search"
 
 interface CategoryOption {
   id: number
@@ -52,34 +53,14 @@ export function FilterBar({
   filters: TableFilters
   onChange: (f: TableFilters) => void
 }) {
-  const [qDraft, setQDraft] = React.useState(filters.q)
-  const lastEmitted = React.useRef(filters.q)
-
-  // resync the draft when filters.q changes externally (back/forward,
-  // shared links); our own debounced emits are already reflected in the draft
-  const lastSyncedQ = React.useRef(filters.q)
-  React.useEffect(() => {
-    if (filters.q === lastSyncedQ.current) return
-    lastSyncedQ.current = filters.q
-    if (filters.q !== lastEmitted.current) {
-      lastEmitted.current = filters.q
-      setQDraft(filters.q)
-    }
-  }, [filters.q])
-
-  // debounce search input → propagate to parent via timeout callback;
-  // emit the trimmed value so the URL round-trip (paramsToFilters trims q)
-  // stays stable and echo keys match
-  React.useEffect(() => {
-    const t = setTimeout(() => {
-      const q = qDraft.trim()
-      if (q !== lastEmitted.current) {
-        lastEmitted.current = q
-        onChange({ ...filters, q })
-      }
-    }, 300)
-    return () => clearTimeout(t)
-  }, [qDraft, filters, onChange])
+  // debounce search input → propagate the trimmed value so the URL
+  // round-trip (paramsToFilters trims q) stays stable and echo keys match.
+  // The hook resyncs the draft on external q changes (back/forward, shared
+  // links) and ignores our own emits.
+  const { draft: qDraft, setDraft: setQDraft } = useDebouncedSearch(
+    filters.q,
+    (q) => onChange({ ...filters, q })
+  )
 
   const { data: categories } = useQuery<CategoryOption[]>({
     queryKey: ["categories"],

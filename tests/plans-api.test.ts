@@ -17,7 +17,7 @@ import { GET as getOccurrencesRoute } from "@/app/api/plans/occurrences/route"
 import { GET as getForecastRoute } from "@/app/api/plans/forecast/route"
 import { GET as getCalendarRoute } from "@/app/api/transactions/calendar/route"
 import { GET as getTransactionsRoute } from "@/app/api/transactions/route"
-import { todayLocal } from "@/lib/analytics/date"
+import { todayLocal } from "@/lib/dates"
 import { authedRequest, setupTestDb, seedUser } from "./helpers"
 
 const BASE = "http://localhost:3000"
@@ -1168,6 +1168,24 @@ describe("GET /api/transactions id lookup", () => {
     // without id → regular list semantics return the user's own rows only
     const list = await (await getTransactions("status=all")).json()
     expect(list.rows).toHaveLength(1)
+  })
+
+  it("falls back to page 1 for an unsafe page number", async () => {
+    // (page - 1) * pageSize would exceed SQLite's int64 OFFSET range; the
+    // shared safePage guard answers page 1 instead of binding a REAL
+    const res = await getTransactions(
+      `page=${Number.MAX_SAFE_INTEGER}&pageSize=100`
+    )
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(data.page).toBe(1)
+    expect(data.rows).toHaveLength(1)
+
+    for (const page of ["0", "-3", "abc"]) {
+      const fallback = await getTransactions(`page=${page}&pageSize=25`)
+      expect(fallback.status).toBe(200)
+      expect((await fallback.json()).page).toBe(1)
+    }
   })
 })
 

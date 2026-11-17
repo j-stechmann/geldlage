@@ -112,9 +112,10 @@ here. Guides cross-link to the ADRs they implement.
 
 ### Planning & forecast
 
-| ADR                                                | Decision                                                            |
-| -------------------------------------------------- | ------------------------------------------------------------------- |
-| [0035](adr/adr-0035-planned-transactions-rrule.md) | Geplante Transaktionen — virtual overlay, read-time matching, RRULE |
+| ADR                                                    | Decision                                                                     |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| [0035](adr/adr-0035-planned-transactions-rrule.md)     | Geplante Transaktionen — virtual overlay, read-time matching, RRULE          |
+| [0037](adr/adr-0037-virtual-plans-shared-machinery.md) | Virtual plans, shared read machinery (contracts, dates, params, balance, UI) |
 
 ### API & frontend
 

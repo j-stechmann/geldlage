@@ -9,7 +9,7 @@ import {
   planOccurrencesKey,
   type PlanOccurrence,
 } from "@/components/planning/api"
-import { isoDatePlus } from "@/lib/planning/recurrence"
+import { isoDatePlus } from "@/lib/dates"
 import { MATCH_DAYS_AFTER, MATCH_DAYS_BEFORE } from "@/lib/planning/matching"
 
 const ROW_A = {
