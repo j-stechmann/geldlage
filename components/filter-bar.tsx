@@ -57,10 +57,11 @@ export function FilterBar({
   // round-trip (paramsToFilters trims q) stays stable and echo keys match.
   // The hook resyncs the draft on external q changes (back/forward, shared
   // links) and ignores our own emits.
-  const { draft: qDraft, setDraft: setQDraft } = useDebouncedSearch(
-    filters.q,
-    (q) => onChange({ ...filters, q })
-  )
+  const {
+    draft: qDraft,
+    setDraft: setQDraft,
+    cancel: cancelSearch,
+  } = useDebouncedSearch(filters.q, (q) => onChange({ ...filters, q }))
 
   const { data: categories } = useQuery<CategoryOption[]>({
     queryKey: ["categories"],
@@ -264,6 +265,9 @@ export function FilterBar({
         size="icon"
         title="Filter zurücksetzen"
         onClick={() => {
+          // cancel a timer that may already be due before the reset lands;
+          // otherwise its pre-reset closure re-applies the old search
+          cancelSearch()
           setQDraft("")
           onChange(EMPTY_FILTERS)
         }}
