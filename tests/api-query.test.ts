@@ -135,6 +135,18 @@ describe("parseWindow", () => {
   it("rejects far windows before the width cap", () => {
     const far = parseWindow(sp("from=2035-01-01&to=2035-01-02"), today)
     expect(far).toMatchObject({ ok: false, error: "window_too_far" })
+
+    // far and wide: only the distance-first order yields window_too_far
+    const farAndWide = parseWindow(
+      sp("from=2035-01-01&to=2036-06-01"),
+      today
+    )
+    expect(farAndWide).toMatchObject({ ok: false, error: "window_too_far" })
+
+    // the width check's isoDatePlus would overflow past year 9999; the
+    // distance check must catch this window first
+    const nearMax = parseWindow(sp("from=9999-01-01&to=9999-12-31"), today)
+    expect(nearMax).toMatchObject({ ok: false, error: "window_too_far" })
   })
 
   it("rejects windows wider than the cap", () => {
