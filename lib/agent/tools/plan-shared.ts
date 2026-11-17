@@ -1,8 +1,5 @@
-import {
-  nextDueDate,
-  PlanValidationError,
-  type PlanRow,
-} from "@/lib/planning/service"
+import { nextDueDate, PlanValidationError } from "@/lib/planning/service"
+import type { PlanRow } from "@/lib/contracts/planning"
 import { TOOL_RESULT_MAX_CHARS } from "@/lib/agent/window"
 import { todayLocal } from "@/lib/dates"
 import { PLAN_AGENT_FIELD_MAP, PLAN_AGENT_KEYS } from "@/lib/planning/fields"

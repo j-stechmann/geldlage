@@ -1,5 +1,6 @@
 import type { AgentTool } from "@/lib/agent/types"
-import { updatePlan, type PlanRow } from "@/lib/planning/service"
+import { updatePlan } from "@/lib/planning/service"
+import type { PlanRow } from "@/lib/contracts/planning"
 import {
   assertArgsObject,
   planIdFromArgs,

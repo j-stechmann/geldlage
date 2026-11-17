@@ -6,8 +6,8 @@ import {
   listPlansPage,
   nextDueDate,
   PlanValidationError,
-  type PlanListFilters,
 } from "@/lib/planning/service"
+import type { PlanListFilters } from "@/lib/contracts/planning"
 import type { PlanStatus } from "@/lib/db/schema"
 import { todayLocal } from "@/lib/dates"
 import { parsePagination } from "@/lib/api/query"

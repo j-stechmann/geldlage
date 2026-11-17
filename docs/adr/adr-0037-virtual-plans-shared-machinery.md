@@ -34,8 +34,8 @@ Keep the virtuality invariant and share every reusable concern:
 1. **Single-source contracts.** `lib/contracts/planning.ts` and
    `lib/contracts/transactions.ts` (types only, client-safe) are the one
    declaration of the wire DTOs. `PlanStatus` lives there; the schema imports
-   and re-exports it. Existing import paths re-export the contracts, so
-   client/server drift becomes a compile error rather than a runtime surprise.
+   and re-exports it. Client/server drift becomes a compile error rather than
+   a runtime surprise.
 
 2. **Shared date and query-parameter helpers.** `lib/dates.ts` owns ISO/local
    date arithmetic, keeping the original invalid-input contracts

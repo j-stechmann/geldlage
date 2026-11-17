@@ -54,22 +54,6 @@ import {
 import { paginate } from "@/lib/pagination"
 import { buildTimeScopedWhere, latestAnchor } from "@/lib/analytics/balance"
 
-// Shared with the calendar routes and the forecast route (ADR-0037).
-export {
-  MAX_FORECAST_MONTHS,
-  MAX_OCCURRENCE_WINDOW_DAYS,
-  MAX_WINDOW_DISTANCE_DAYS,
-} from "@/lib/planning/limits"
-
-export type {
-  ForecastResult,
-  PlanInput,
-  PlanListFilters,
-  PlanOccurrence,
-  PlanPage,
-  PlanRow,
-} from "@/lib/contracts/planning"
-
 /**
  * dtstart floor (year): occurrence expansion walks forward from dtstart on
  * every read (plan list, occurrences, forecast) and rrule has no internal
