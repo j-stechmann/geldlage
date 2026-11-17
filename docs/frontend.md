@@ -167,7 +167,7 @@ lives on its own tab. Flow aggregates (cashflow, categories, transaction
 count) react to every filter including Status; balance is
 time-scoped by design: snapshots anchor an absolute booked account balance,
 so content filters (q/type/category/labelStatus/**status**) are ignored
-([lib/analytics/engine.ts](../lib/analytics/engine.ts),
+([lib/analytics/balance.ts](../lib/analytics/balance.ts),
 `buildTimeScopedWhere`).
 
 ### `/transactions`
