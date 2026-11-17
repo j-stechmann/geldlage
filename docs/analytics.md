@@ -29,7 +29,7 @@ All list values are allow-listed; sort keys are restricted to
 `amount_cents / payee / booking_date`. The client serializes the same filter
 state into query params ([frontend.md](frontend.md)).
 
-`todayLocal()` ([lib/analytics/date.ts](../lib/analytics/date.ts)) returns
+`todayLocal()` / `isoDateLocal()` ([lib/dates.ts](../lib/dates.ts)) return
 the local-calendar date — deliberately **not** `new Date().toISOString()`,
 which would shift month boundaries for non-UTC timezones.
 
