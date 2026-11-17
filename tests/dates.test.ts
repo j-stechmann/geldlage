@@ -82,6 +82,8 @@ describe("month helpers", () => {
     expect(monthOffset("2025-06-15", 0)).toBe("2025-06")
     expect(prevMonth("2025-01")).toBe("2024-12")
     expect(nextMonth("2025-12")).toBe("2026-01")
+    expect(prevMonth("2025-07")).toBe("2025-06")
+    expect(nextMonth("2025-06")).toBe("2025-07")
   })
 
   it("lists inclusive month keys between dates", () => {
@@ -97,9 +99,11 @@ describe("month helpers", () => {
     expect(lastDayOfMonthIso("2025-02")).toBe("2025-02-28")
     expect(lastDayOfMonthIso("2024-02")).toBe("2024-02-29")
     expect(lastDayOfMonthIso("2025-04")).toBe("2025-04-30")
+    expect(lastDayOfMonthIso("2025-12")).toBe("2025-12-31")
     expect(lastDayOfMonthDay("2025-02-10")).toBe("28")
     expect(lastDayOfMonthDay("2024-02-10")).toBe("29")
     expect(lastDayOfMonthDay("2025-04-01")).toBe("30")
+    expect(lastDayOfMonthDay("2025-12-01")).toBe("31")
   })
 })
 

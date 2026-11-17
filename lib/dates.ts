@@ -101,32 +101,30 @@ export function monthOffset(baseIso: string, offset: number): string {
   return `${String(ny).padStart(4, "0")}-${String(nm).padStart(2, "0")}`
 }
 
-/** Last day of the month named by a "YYYY-MM" key, as "YYYY-MM-DD". */
+/**
+ * Last day of the month named by a "YYYY-MM" key, as "YYYY-MM-DD".
+ * Month keys must be valid `YYYY-MM` (they come from `monthOf` and chained
+ * `prevMonth`/`nextMonth` calls).
+ */
 export function lastDayOfMonthIso(monthKey: string): string {
   const [y, m] = monthKey.split("-").map(Number)
-  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)
+  return isoDate(y, m, daysInMonth(y, m))
 }
 
 /** Zero-padded day-of-month of the last calendar day of iso's month. */
 export function lastDayOfMonthDay(iso: string): string {
   const [y, m] = iso.split("-").map(Number)
-  return String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")
+  return String(daysInMonth(y, m)).padStart(2, "0")
 }
 
-/** Previous "YYYY-MM" month key. */
+/** Previous "YYYY-MM" month key (valid month keys only). */
 export function prevMonth(month: string): string {
-  const [y, m] = month.split("-").map(Number)
-  const ny = m === 1 ? y - 1 : y
-  const nm = m === 1 ? 12 : m - 1
-  return `${String(ny).padStart(4, "0")}-${String(nm).padStart(2, "0")}`
+  return monthOffset(month, -1)
 }
 
-/** Next "YYYY-MM" month key. */
+/** Next "YYYY-MM" month key (valid month keys only). */
 export function nextMonth(month: string): string {
-  const [y, m] = month.split("-").map(Number)
-  const ny = m === 12 ? y + 1 : y
-  const nm = m === 12 ? 1 : m + 1
-  return `${String(ny).padStart(4, "0")}-${String(nm).padStart(2, "0")}`
+  return monthOffset(month, 1)
 }
 
 /** List of "YYYY-MM" keys between two ISO dates/months, inclusive. */
