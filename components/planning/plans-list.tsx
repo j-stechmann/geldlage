@@ -253,8 +253,11 @@ export function PlansList() {
   // toast as the only confirmation that the create worked.
   const handleSaved = (created: boolean) => {
     if (!created) return
-    setQDraft("")
-    setQ("")
+    // commitNow, not setDraft+setQ: it cancels a timer that may already be due
+    // before the reset lands, whose pre-reset closure would otherwise re-apply
+    // the old search after we cleared it. `onCommit` here is plain setQ, so
+    // this emits exactly once (unlike FilterBar's merge-based onCommit).
+    commitSearchNow("")
     setStatus("all")
     setPage(1)
   }
