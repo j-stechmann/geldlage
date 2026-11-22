@@ -62,10 +62,11 @@ export function useDebouncedSearch(
 
   const commitNow = React.useCallback(
     (next: string) => {
+      const q = next.trim()
       cancel()
-      lastEmitted.current = next
-      setDraft(next)
-      onCommitRef.current(next)
+      lastEmitted.current = q
+      setDraft(q)
+      onCommitRef.current(q)
     },
     [cancel]
   )

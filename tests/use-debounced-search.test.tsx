@@ -59,6 +59,19 @@ describe("useDebouncedSearch", () => {
     expect(onCommit).toHaveBeenCalledTimes(1)
   })
 
+  it("commitNow trims the emitted value like the debounce path", () => {
+    const onCommit = vi.fn()
+    const { result } = renderHook(() => useDebouncedSearch("", onCommit))
+
+    act(() => result.current.commitNow("  abc  "))
+    expect(onCommit).toHaveBeenCalledTimes(1)
+    expect(onCommit).toHaveBeenCalledWith("abc")
+    expect(result.current.draft).toBe("abc")
+
+    act(() => vi.advanceTimersByTime(300))
+    expect(onCommit).toHaveBeenCalledTimes(1)
+  })
+
   it("cancel drops a pending emit", () => {
     const onCommit = vi.fn()
     const { result } = renderHook(() => useDebouncedSearch("", onCommit))
