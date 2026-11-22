@@ -6,10 +6,14 @@
  * the *implementation* both scopes share; the scopes themselves stay
  * separate (ADR-0022): this predicate never accepts `TransactionFilters`.
  */
-import { and, eq, gt, gte, lt, lte, sql } from "drizzle-orm"
+import { and, eq, isNotNull, lte } from "drizzle-orm"
 import type { SQL } from "drizzle-orm"
 import { getDb } from "@/lib/db"
-import { importBatches, transactions } from "@/lib/db/schema"
+import { importBatches } from "@/lib/db/schema"
+import {
+  buildTransactionScope,
+  type TransactionScopeDateBounds,
+} from "@/lib/analytics/scope"
 
 export interface BalanceAnchor {
   snapshotDate: string
@@ -31,46 +35,42 @@ export function isLaterAnchor(
   return r.id > latest.id
 }
 
-export interface TimeScopedDateBounds {
-  /** inclusive lower bound */
-  from?: string
-  /** inclusive upper bound */
-  to?: string
-  /** exclusive lower bound (`>`) */
-  after?: string
-  /** exclusive upper bound (`<`) */
-  before?: string
-}
+export type TimeScopedDateBounds = TransactionScopeDateBounds
 
 /**
  * Time-scoped balance predicate: user + booked rows + optional account and
- * caller-supplied date bounds. Built from an allowlist, never by stripping
- * fields off the flow filters — a new filter added to `TransactionFilters`
- * cannot leak here.
+ * caller-supplied date bounds. Delegates the shared scaffold but keeps the
+ * booked-only status predicate local to this scope.
  */
 export function buildTimeScopedWhere(
   userId: number,
   accountId: number | undefined,
   dateBounds?: TimeScopedDateBounds
 ): SQL {
+  return buildTransactionScope({
+    userId,
+    accountId,
+    statuses: ["Gebucht"],
+    dateBounds,
+  })
+}
+
+/** Snapshot rows that can anchor a balance as of `today`. */
+function snapshotWhere(
+  userId: number,
+  accountId: number | undefined,
+  today: string
+): SQL {
   const conditions: SQL[] = [
-    eq(transactions.userId, userId),
-    eq(transactions.status, "Gebucht"),
+    eq(importBatches.userId, userId),
+    isNotNull(importBatches.snapshotDate),
+    isNotNull(importBatches.snapshotAmountCents),
+    // a snapshot dated after today is not a "current balance" point yet —
+    // anchoring on it would let the KPI name a snapshot the forecast rejects
+    lte(importBatches.snapshotDate, today),
   ]
   if (accountId !== undefined) {
-    conditions.push(eq(transactions.accountId, accountId))
-  }
-  if (dateBounds?.from !== undefined) {
-    conditions.push(gte(transactions.bookingDate, dateBounds.from))
-  }
-  if (dateBounds?.to !== undefined) {
-    conditions.push(lte(transactions.bookingDate, dateBounds.to))
-  }
-  if (dateBounds?.after !== undefined) {
-    conditions.push(gt(transactions.bookingDate, dateBounds.after))
-  }
-  if (dateBounds?.before !== undefined) {
-    conditions.push(lt(transactions.bookingDate, dateBounds.before))
+    conditions.push(eq(importBatches.accountId, accountId))
   }
   return and(...conditions)!
 }
@@ -98,23 +98,13 @@ export function latestAnchor(
       snapshotAmountCents: importBatches.snapshotAmountCents,
     })
     .from(importBatches)
-    .where(
-      accountId !== undefined
-        ? and(
-            eq(importBatches.userId, userId),
-            eq(importBatches.accountId, accountId),
-            sql`${importBatches.snapshotDate} IS NOT NULL AND ${importBatches.snapshotAmountCents} IS NOT NULL`
-          )
-        : sql`${importBatches.userId} = ${userId} AND ${importBatches.snapshotDate} IS NOT NULL AND ${importBatches.snapshotAmountCents} IS NOT NULL`
-    )
+    .where(snapshotWhere(userId, accountId, today))
     .all()
+  // the WHERE clause does not narrow Drizzle's inferred row type, so re-check
+  // nullability for the BalanceAnchor type guard
   const valid = rows.filter(
     (r): r is BalanceAnchor =>
-      r.snapshotDate !== null &&
-      r.snapshotAmountCents !== null &&
-      // a snapshot dated after today is not a "current balance" point yet —
-      // anchoring on it would let the KPI name a snapshot the forecast rejects
-      r.snapshotDate <= today
+      r.snapshotDate !== null && r.snapshotAmountCents !== null
   )
   if (valid.length === 0) return null
   return valid.reduce(

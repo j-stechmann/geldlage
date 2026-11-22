@@ -19,6 +19,7 @@ import type {
   TransactionPage,
 } from "@/lib/contracts/transactions"
 import { counterpartyOf } from "@/lib/transactions"
+import { buildTransactionScope } from "@/lib/analytics/scope"
 
 export type {
   TransactionPage,
@@ -213,8 +214,10 @@ export function queryTransactions(
  *
  * Deliberately has its own allowlist instead of `buildWhere`: the flow filter
  * defaults to `Gebucht` and accepts content filters that must never apply to
- * the calendar chip query (ADR-0022/0037). Ordering by booking date matches
- * the previous route-level query.
+ * the calendar chip query (ADR-0022/0037). It shares the generic user/
+ * account/date scaffold with the balance predicate but supplies its own
+ * booked-and-pending status list. Ordering by booking date matches the
+ * previous route-level query.
  */
 export function queryCalendarTransactions(
   userId: number,
@@ -222,15 +225,12 @@ export function queryCalendarTransactions(
   accountId?: number
 ): CalendarTransaction[] {
   const db = getDb()
-  const conditions: SQL[] = [
-    eq(transactions.userId, userId),
-    inArray(transactions.status, ["Gebucht", "Nicht gebucht"]),
-    sql`${transactions.bookingDate} >= ${window.from}`,
-    sql`${transactions.bookingDate} <= ${window.to}`,
-  ]
-  if (accountId !== undefined) {
-    conditions.push(eq(transactions.accountId, accountId))
-  }
+  const where = buildTransactionScope({
+    userId,
+    accountId,
+    statuses: ["Gebucht", "Nicht gebucht"],
+    dateBounds: { from: window.from, to: window.to },
+  })
 
   const rows = db
     .select({
@@ -249,7 +249,7 @@ export function queryCalendarTransactions(
     })
     .from(transactions)
     .leftJoin(categories, eq(categories.id, transactions.categoryId))
-    .where(and(...conditions))
+    .where(where)
     .orderBy(transactions.bookingDate)
     .all()
 

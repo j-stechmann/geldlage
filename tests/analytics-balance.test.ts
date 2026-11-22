@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest"
-import { sql } from "drizzle-orm"
+import { sql, type SQL } from "drizzle-orm"
 import type { Db } from "@/lib/db"
 import { accounts, transactions } from "@/lib/db/schema"
 import { buildTimeScopedWhere, latestAnchor } from "@/lib/analytics/balance"
+import { buildTransactionScope } from "@/lib/analytics/scope"
 import { seedUser, setupTestDb } from "./helpers"
 
 let db: Db
@@ -74,7 +75,7 @@ beforeEach(() => {
     .run()
 })
 
-function sum(where: ReturnType<typeof buildTimeScopedWhere>): number {
+function sum(where: SQL): number {
   return Number(
     db
       .select({
@@ -113,6 +114,35 @@ describe("buildTimeScopedWhere", () => {
         buildTimeScopedWhere(userId, accountId, {
           after: "2026-01-10",
           before: "2026-01-12",
+        })
+      )
+    ).toBe(200)
+  })
+})
+
+describe("buildTransactionScope", () => {
+  it("applies the caller's status allowlist within the user scope", () => {
+    expect(sum(buildTransactionScope({ userId, statuses: ["Gebucht"] }))).toBe(
+      600
+    )
+    expect(
+      sum(
+        buildTransactionScope({
+          userId,
+          statuses: ["Gebucht", "Nicht gebucht"],
+        })
+      )
+    ).toBe(10_599)
+  })
+
+  it("keeps the optional account and inclusive date bounds", () => {
+    expect(
+      sum(
+        buildTransactionScope({
+          userId,
+          accountId,
+          statuses: ["Gebucht"],
+          dateBounds: { from: "2026-01-11", to: "2026-01-11" },
         })
       )
     ).toBe(200)

@@ -47,10 +47,13 @@ Keep the virtuality invariant and share every reusable concern:
    the bank calendar no longer imports anything from `lib/planning/`.
 
 3. **Shared balance machinery, separate scopes.** `lib/analytics/balance.ts`
-   owns `latestAnchor`, `isLaterAnchor` and the time-scoped booked predicate.
-   The engine and the forecast import the same implementation. The flow,
-   time-scoped and forecast scopes remain distinct (ADR-0022); the predicate
-   never accepts `TransactionFilters`.
+   owns `latestAnchor` and `isLaterAnchor`; the generic user/account/status/
+   date WHERE scaffold lives in `lib/analytics/scope.ts`
+   (`buildTransactionScope`). `buildTimeScopedWhere` is the booked-only
+   predicate delegating to that scaffold. The engine and the forecast import
+   the same implementation. The flow, time-scoped and forecast scopes remain
+   distinct (ADR-0022); the builders never accept `TransactionFilters`, and
+   each scope supplies its own status predicate.
 
 4. **Generic plumbing, domain predicates local.** `lib/pagination.ts` owns
    count/offset/pageCount and the unrepresentable-OFFSET guard; `lib/greedy.ts`
@@ -68,7 +71,8 @@ Keep the virtuality invariant and share every reusable concern:
    counterparty-by-direction rule; `lib/planning/prefill.ts` maps a
    transaction-like movement onto the plan dialog prefill. The calendar chip
    read moves into `lib/analytics/queries.ts` with its own explicit
-   booked-and-pending predicate — it is not routed through the flow-scope
+   booked-and-pending status list passed to the shared
+   `buildTransactionScope` scaffold — it is not routed through the flow-scope
    `buildWhere`.
 
 7. **Shared UI plumbing.** `components/pager.tsx`,
@@ -79,8 +83,9 @@ Keep the virtuality invariant and share every reusable concern:
 
 - No schema change, no `kind` flag, no materialized occurrences, no persisted
   matches. `planned_transactions` stays virtual (ADR-0035).
-- Do not merge the three analytics scopes; sharing an implementation is the
-  limit.
+- Do not merge the three analytics scopes; sharing the WHERE scaffold
+  (`buildTransactionScope`) is the implementation limit. Status predicates and
+  result projections stay scope-specific.
 - Do not use the flow-scope `buildWhere` for the calendar chip query.
 - Do not merge `PlanRow` with `TransactionRow`, or `CalendarTransaction` with
   `TransactionRow` — the projections differ deliberately.
@@ -110,8 +115,8 @@ Keep the virtuality invariant and share every reusable concern:
 ## References
 
 - `lib/contracts/`, `lib/dates.ts`, `lib/api/query.ts`, `lib/pagination.ts`,
-  `lib/greedy.ts`, `lib/analytics/balance.ts`, `lib/planning/fields.ts`,
-  `lib/transactions.ts`, `lib/planning/prefill.ts`
+  `lib/greedy.ts`, `lib/analytics/balance.ts`, `lib/analytics/scope.ts`,
+  `lib/planning/fields.ts`, `lib/transactions.ts`, `lib/planning/prefill.ts`
 - [ADR-0035](adr-0035-planned-transactions-rrule.md) (virtual plans),
   [ADR-0036](adr-0036-agent-plan-write-tools.md) (plan service boundary),
   [ADR-0022](adr-0022-balance-back-calculation.md) (analytics scopes),
