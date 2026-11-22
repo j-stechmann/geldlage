@@ -166,13 +166,14 @@ export function planInputFromArgs(
 ): Record<string, unknown> {
   const input: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(args)) {
-    const mapped = PLAN_AGENT_FIELD_MAP[key]
-    if (mapped === undefined) {
+    // hasOwn, not `=== undefined`: the map is a plain object, so inherited
+    // keys (constructor, toString, __proto__, …) would otherwise pass.
+    if (!Object.hasOwn(PLAN_AGENT_FIELD_MAP, key)) {
       throw new Error(
         `unknown field: ${key} (allowed fields: ${PLAN_AGENT_KEYS.join(", ")})`
       )
     }
-    input[mapped] = value
+    input[PLAN_AGENT_FIELD_MAP[key]] = value
   }
   return input
 }
