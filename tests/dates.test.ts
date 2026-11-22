@@ -40,6 +40,12 @@ describe("daysInMonth", () => {
     expect(daysInMonth(2025, 4)).toBe(30)
     expect(daysInMonth(2025, 12)).toBe(31)
   })
+
+  it("keeps the real calendar for two-digit years", () => {
+    // Date.UTC would map year 0 to 1900 (non-leap), but year 0 is a leap year
+    expect(daysInMonth(0, 2)).toBe(29)
+    expect(lastDayOfMonthIso("0000-02")).toBe("0000-02-29")
+  })
 })
 
 describe("isoDatePlus", () => {

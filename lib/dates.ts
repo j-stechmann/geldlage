@@ -21,7 +21,11 @@ export const MAX_ISO_DATE = "9999-12-31"
 
 /** Last calendar day of a 1-based month (UTC calendar). */
 export function daysInMonth(year: number, month: number): number {
-  return new Date(Date.UTC(year, month, 0)).getUTCDate()
+  // Date.UTC maps years 0–99 onto 1900–1999, which flips leap-year results
+  // (year 0 is a leap year, 1900 is not). Shift into the same Gregorian
+  // position 400 years later — the 400-year cycle repeats.
+  const y = year >= 0 && year < 100 ? year + 400 : year
+  return new Date(Date.UTC(y, month, 0)).getUTCDate()
 }
 
 /** "YYYY-MM-DD" from UTC calendar parts (year 1900–9999). */
