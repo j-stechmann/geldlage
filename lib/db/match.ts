@@ -3,9 +3,6 @@ import type { Transaction } from "@/lib/db/schema"
 import { dayDiff } from "@/lib/dates"
 import { greedyAssign } from "@/lib/greedy"
 
-// Re-exported for the existing match tests/consumers (ADR-0037).
-export { dayDiff }
-
 export const MATCH_WINDOW_DAYS = 7
 
 const PENDING = "Nicht gebucht"

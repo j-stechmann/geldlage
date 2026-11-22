@@ -17,14 +17,6 @@ import {
   MATCH_DAYS_BEFORE,
 } from "@/lib/planning/limits"
 
-// Re-exported for existing consumers/tests (ADR-0037).
-export {
-  AMOUNT_TOLERANCE_FLOOR_CENTS,
-  AMOUNT_TOLERANCE_PCT,
-  MATCH_DAYS_AFTER,
-  MATCH_DAYS_BEFORE,
-}
-
 export interface MatchableOccurrence {
   /** stable occurrence key: `${planId}::${date}` */
   occurrenceKey: string

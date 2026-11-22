@@ -31,6 +31,18 @@ import {
 // recurrence engine's existing consumers and tests.
 export { isValidIsoDate, isoDatePlus, MAX_ISO_DATE, noonUtc }
 
+/**
+ * rrule's calendar math goes through Date.UTC, which maps years 0–99 onto
+ * 1900–1999. A recurring plan starting there would expand at the wrong year,
+ * so such starts yield no occurrences. The plan API already floors dtstart at
+ * 1900; this keeps the recurrence entry points consistent as defence in depth
+ * (e.g. a client preview of an unsaved, invalid start year). One-off plans do
+ * not touch rrule and are unaffected.
+ */
+function rruleSupportsStart(dtstart: string): boolean {
+  return Number.parseInt(dtstart.slice(0, 4), 10) >= 100
+}
+
 export class RuleValidationError extends Error {
   constructor(message: string) {
     super(message)
@@ -495,6 +507,7 @@ export function expandOccurrenceDates(
   if (isEmptyRule(rruleText)) {
     return dtstart >= w.from && dtstart <= w.to ? [dtstart] : []
   }
+  if (!rruleSupportsStart(dtstart)) return []
   try {
     const parsed = rrulestr(normalizeRuleInput(rruleText as string), {
       forceset: false,
@@ -591,6 +604,7 @@ export function nextOccurrenceDate(
   rruleText: string | null,
   afterIso: string
 ): string | null {
+  if (!isEmptyRule(rruleText) && !rruleSupportsStart(dtstart)) return null
   const from = dtstart > afterIso ? dtstart : afterIso
   const [y, m, d] = from.split("-").map(Number)
   let prevTo: string | null = null

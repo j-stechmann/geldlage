@@ -5,9 +5,15 @@
  * lenient pagination (parseInt permissiveness; an invalid page falls back to
  * 1, while an unrepresentable OFFSET yields an empty page — guarded in
  * lib/pagination.ts), strict digits-only ids, and the calendar window
- * precedence (from → to → order → distance → width).
+ * precedence (from → from-distance → to → order → to-distance → width).
  */
-import { isValidIsoDate, isoDatePlus } from "@/lib/dates"
+import {
+  isoDate,
+  isoDatePlus,
+  isValidIsoDate,
+  MAX_NEIGHBOR_YEAR,
+  MIN_NEIGHBOR_YEAR,
+} from "@/lib/dates"
 
 export function positiveInt(raw: string | null, fallback: number): number {
   const n = Number.parseInt(raw ?? "", 10)
@@ -80,6 +86,30 @@ export function parseOptionalClampedInt(
   return { ok: true, value: Math.min(Math.max(n, opts.min), opts.max) }
 }
 
+/**
+ * Analytics date-filter bounds. `prevMonth`/`nextMonth` need one representable
+ * month of headroom on each side, so the accepted months are 0001-01 …
+ * 9998-12. The analytics route validates dateFrom/dateTo before the engine
+ * runs month arithmetic on them.
+ */
+export const MIN_ANALYTICS_DATE = isoDate(MIN_NEIGHBOR_YEAR, 1, 1)
+export const MAX_ANALYTICS_DATE = isoDate(MAX_NEIGHBOR_YEAR, 12, 31)
+
+/** Absent/empty = unbounded; otherwise a valid ISO date inside the bounds. */
+export function parseAnalyticsDate(
+  raw: string | null
+): ParamResult<string | undefined> {
+  if (raw === null || raw === "") return { ok: true, value: undefined }
+  if (
+    !isValidIsoDate(raw) ||
+    raw < MIN_ANALYTICS_DATE ||
+    raw > MAX_ANALYTICS_DATE
+  ) {
+    return { ok: false }
+  }
+  return { ok: true, value: raw }
+}
+
 export type WindowErrorCode =
   "invalid_window" | "window_too_far" | "window_too_large"
 
@@ -101,13 +131,24 @@ export const MAX_OCCURRENCE_WINDOW_DAYS = 400
  */
 export const MAX_WINDOW_DISTANCE_DAYS = 1826
 
+/** Shared `window_too_far` result so both distance checks stay in lockstep. */
+function windowTooFar(): WindowParse {
+  return {
+    ok: false,
+    error: "window_too_far",
+    message: `window must lie within ${MAX_WINDOW_DISTANCE_DAYS} days of today`,
+  }
+}
+
 /**
  * Shared calendar-window contract. With no options both bounds are required;
  * passing `defaultToDays` defaults `from` to today and `to` to
  * `from + defaultToDays`. Distance cap runs before the width cap: expansion
  * walks rrule from dtstart (no seek), and the width cap's own isoDatePlus
  * arithmetic overflows near year 9999. Validating `from` before deriving the
- * default `to` keeps a malformed `from` a 400, not a 500.
+ * default `to` keeps a malformed `from` a 400, not a 500; distance-checking
+ * the `from` side before the derivation keeps a near-MAX_ISO_DATE `from` a
+ * `window_too_far` rather than an invalid extended-year default.
  */
 export function parseWindow(
   sp: URLSearchParams,
@@ -128,16 +169,12 @@ export function parseWindow(
   const lowerBound = isoDatePlus(today, -MAX_WINDOW_DISTANCE_DAYS)
   const upperBound = isoDatePlus(today, MAX_WINDOW_DISTANCE_DAYS)
 
-  // A default `to` is derived as `from + defaultToDays`. Near MAX_ISO_DATE
-  // that addition overflows into the extended-year form and would be
-  // misreported as a malformed date; the window is necessarily too far, so
-  // report that instead of letting the arithmetic produce an invalid string.
-  if (opts && rawTo === null && from > upperBound) {
-    return {
-      ok: false,
-      error: "window_too_far",
-      message: `window must lie within ${MAX_WINDOW_DISTANCE_DAYS} days of today`,
-    }
+  // Check the from side before deriving the default `to`: the default is
+  // `from + defaultToDays`, which overflows into the extended-year form near
+  // MAX_ISO_DATE. An out-of-range `from` is necessarily too far, so no
+  // arithmetic runs on it.
+  if (from < lowerBound || from > upperBound) {
+    return windowTooFar()
   }
 
   const to = rawTo ?? (opts ? isoDatePlus(from, opts.defaultToDays) : null)
@@ -157,12 +194,8 @@ export function parseWindow(
     }
   }
 
-  if (from < lowerBound || to > upperBound) {
-    return {
-      ok: false,
-      error: "window_too_far",
-      message: `window must lie within ${MAX_WINDOW_DISTANCE_DAYS} days of today`,
-    }
+  if (to > upperBound) {
+    return windowTooFar()
   }
 
   if (isoDatePlus(from, MAX_OCCURRENCE_WINDOW_DAYS) < to) {

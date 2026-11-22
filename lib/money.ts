@@ -5,6 +5,7 @@
  * up in analytics flows through them. All rules were derived from real DKB
  * exports and verified against template.csv edge cases.
  */
+import { daysInMonth } from "@/lib/dates"
 
 export class ParseError extends Error {
   constructor(
@@ -165,8 +166,8 @@ export function parseGermanDateToIso(input: string): string {
   if (month < 1 || month > 12) {
     throw new ParseError(`invalid month in "${s}"`, input)
   }
-  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate()
-  if (day < 1 || day > daysInMonth) {
+  const maxDay = daysInMonth(year, month)
+  if (day < 1 || day > maxDay) {
     throw new ParseError(`invalid day in "${s}"`, input)
   }
   const iso =

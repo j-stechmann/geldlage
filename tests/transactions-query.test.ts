@@ -12,11 +12,8 @@ import {
   categories,
 } from "@/lib/db/schema"
 import { computeDedupe } from "@/lib/db/dedupe"
-import {
-  parseFilters,
-  queryTransactions,
-  type TransactionPage,
-} from "@/lib/analytics/queries"
+import { parseFilters, queryTransactions } from "@/lib/analytics/queries"
+import type { TransactionPage } from "@/lib/contracts/transactions"
 
 const fixtureDir = join(__dirname, "fixtures")
 const csv = readFileSync(join(fixtureDir, "fixture.csv"), "utf8")

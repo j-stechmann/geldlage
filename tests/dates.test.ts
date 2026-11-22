@@ -12,6 +12,7 @@ import {
   monthOffset,
   monthsBetween,
   nextMonth,
+  noonUtc,
   prevMonth,
   todayLocal,
 } from "@/lib/dates"
@@ -55,6 +56,22 @@ describe("isoDatePlus", () => {
     expect(isoDatePlus("2024-02-28", 1)).toBe("2024-02-29")
     expect(isoDatePlus("2025-03-01", -1)).toBe("2025-02-28")
   })
+
+  it("keeps two-digit years in UTC arithmetic", () => {
+    expect(isoDatePlus("0000-01-01", 0)).toBe("0000-01-01")
+    expect(isoDatePlus("0000-02-28", 1)).toBe("0000-02-29") // year 0 is leap
+    expect(isoDatePlus("0099-12-31", 1)).toBe("0100-01-01")
+  })
+
+  it("still overflows past the four-digit range for parseWindow to reject", () => {
+    expect(isValidIsoDate(isoDatePlus(MAX_ISO_DATE, 1))).toBe(false)
+  })
+})
+
+describe("noonUtc", () => {
+  it("keeps two-digit years and anchors at noon UTC", () => {
+    expect(noonUtc("0000-02-29").toISOString()).toBe("0000-02-29T12:00:00.000Z")
+  })
 })
 
 describe("isoShift", () => {
@@ -74,6 +91,7 @@ describe("dayDiff", () => {
     expect(dayDiff("2026-02-03", "2026-02-03")).toBe(0)
     expect(dayDiff("2026-02-01", "2026-02-08")).toBe(7)
     expect(dayDiff("2026-02-08", "2026-02-01")).toBe(7)
+    expect(dayDiff("2026-01-31", "2026-02-01")).toBe(1)
   })
 
   it("returns NaN for malformed input", () => {
@@ -90,6 +108,14 @@ describe("month helpers", () => {
     expect(nextMonth("2025-12")).toBe("2026-01")
     expect(prevMonth("2025-07")).toBe("2025-06")
     expect(nextMonth("2025-06")).toBe("2025-07")
+  })
+
+  it("moves across the representable month-key boundaries", () => {
+    // 0001-01 and 9998-12 are the outermost months whose neighbour is still
+    // representable; the analytics route rejects anything beyond them.
+    expect(prevMonth("0001-01")).toBe("0000-12")
+    expect(nextMonth("9998-12")).toBe("9999-01")
+    expect(prevMonth("0000-06")).toBe("0000-05")
   })
 
   it("lists inclusive month keys between dates", () => {

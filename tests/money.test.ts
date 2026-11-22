@@ -122,6 +122,8 @@ describe("parseGermanDateToIso", () => {
     ["17.01.2026", "2026-01-17"],
     ["01.03.2080", "2080-03-01"],
     ["29.02.24", "2024-02-29"], // leap year
+    ["31.12.9998", "9998-12-31"], // top of the offsettable year range
+    ["01.01.0001", "0001-01-01"], // bottom of the offsettable year range
   ]
   it.each(cases)("parses %j → %j", (input, expected) => {
     expect(parseGermanDateToIso(input)).toBe(expected)

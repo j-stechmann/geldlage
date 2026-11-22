@@ -19,16 +19,35 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 /** Highest storable ISO date (four-digit years only). */
 export const MAX_ISO_DATE = "9999-12-31"
 
-/** Last calendar day of a 1-based month (UTC calendar). */
-export function daysInMonth(year: number, month: number): number {
-  // Date.UTC maps years 0–99 onto 1900–1999, which flips leap-year results
-  // (year 0 is a leap year, 1900 is not). Shift into the same Gregorian
-  // position 400 years later — the 400-year cycle repeats.
-  const y = year >= 0 && year < 100 ? year + 400 : year
-  return new Date(Date.UTC(y, month, 0)).getUTCDate()
+/** Lowest representable "YYYY-MM" month key. */
+export const MIN_MONTH_KEY = "0000-01"
+/** Highest representable "YYYY-MM" month key. */
+export const MAX_MONTH_KEY = "9999-12"
+
+/** Lowest year whose months have a representable predecessor (0001). */
+export const MIN_NEIGHBOR_YEAR = 1
+/** Highest year whose months have a representable successor (9998). */
+export const MAX_NEIGHBOR_YEAR = 9998
+
+/**
+ * UTC Date without Date.UTC's year 0–99 → 1900–1999 remap. The setters keep
+ * Date.UTC's out-of-range day/month normalization and its extended-year
+ * overflow past 9999.
+ */
+function utcDate(year: number, month: number, day: number, hours = 0): Date {
+  const d = new Date(0)
+  d.setUTCHours(hours, 0, 0, 0)
+  d.setUTCFullYear(year, month - 1, day)
+  return d
 }
 
-/** "YYYY-MM-DD" from UTC calendar parts (year 1900–9999). */
+/** Last calendar day of a 1-based month (UTC calendar). */
+export function daysInMonth(year: number, month: number): number {
+  // day 0 normalizes to the last day of the previous month.
+  return utcDate(year, month + 1, 0).getUTCDate()
+}
+
+/** "YYYY-MM-DD" from UTC calendar parts (four-digit years). */
 export function isoDate(year: number, month: number, day: number): string {
   return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`
 }
@@ -44,13 +63,15 @@ export function isValidIsoDate(s: string): boolean {
 /** Noon UTC instant of an ISO date — DST/month-end safe. */
 export function noonUtc(iso: string): Date {
   const [y, m, d] = iso.split("-").map(Number)
-  return new Date(Date.UTC(y, m - 1, d, 12))
+  return utcDate(y, m, d, 12)
 }
 
 /** ISO date exactly `days` days from an ISO date (UTC calendar arithmetic). */
 export function isoDatePlus(iso: string, days: number): string {
   const [y, m, d] = iso.split("-").map(Number)
-  return new Date(Date.UTC(y, m - 1, d + days, 12)).toISOString().slice(0, 10)
+  return utcDate(y, m, d + days, 12)
+    .toISOString()
+    .slice(0, 10)
 }
 
 /**
@@ -95,13 +116,20 @@ export function monthOf(isoDate: string): string {
   return isoDate.slice(0, 7)
 }
 
-/** "YYYY-MM" month key `offset` months from the month containing baseIso. */
+/**
+ * "YYYY-MM" month key `offset` months from the month containing baseIso.
+ * Callers must keep the result representable (MIN_MONTH_KEY … MAX_MONTH_KEY);
+ * the analytics route enforces the one-month headroom prevMonth/nextMonth
+ * need.
+ */
 export function monthOffset(baseIso: string, offset: number): string {
   const base = baseIso.slice(0, 7)
   const [y, m] = base.split("-").map(Number)
   const total = y * 12 + (m - 1) + offset
   const ny = Math.floor(total / 12)
-  const nm = (total % 12) + 1
+  // Positive modulo: a pre-0001 base (out of contract; callers stay at
+  // year >= 0001) would otherwise make the month 0.
+  const nm = (((total % 12) + 12) % 12) + 1
   return `${String(ny).padStart(4, "0")}-${String(nm).padStart(2, "0")}`
 }
 
@@ -121,12 +149,12 @@ export function lastDayOfMonthDay(iso: string): string {
   return String(daysInMonth(y, m)).padStart(2, "0")
 }
 
-/** Previous "YYYY-MM" month key (valid month keys only). */
+/** Previous "YYYY-MM" month key (valid keys only; needs a predecessor). */
 export function prevMonth(month: string): string {
   return monthOffset(month, -1)
 }
 
-/** Next "YYYY-MM" month key (valid month keys only). */
+/** Next "YYYY-MM" month key (valid keys only; needs a successor). */
 export function nextMonth(month: string): string {
   return monthOffset(month, 1)
 }

@@ -5,6 +5,8 @@ import { buildWhere, type TransactionFilters } from "@/lib/analytics/queries"
 import { buildTimeScopedWhere, latestAnchor } from "@/lib/analytics/balance"
 import {
   lastDayOfMonthDay,
+  MAX_MONTH_KEY,
+  MIN_MONTH_KEY,
   monthOf,
   monthsBetween,
   nextMonth,
@@ -114,24 +116,29 @@ export function computeAnalytics(
 
     // partial current month: include in series, exclude from averages
     const currentMonth = monthOf(today)
-    let lastFullMonth = monthOf(maxDate)
+    let lastFullMonth: string | null = monthOf(maxDate)
     if (lastFullMonth >= currentMonth) {
       lastFullMonth = prevMonth(currentMonth)
     } else if (
       f.dateTo !== undefined &&
       f.dateTo.slice(8, 10) !== lastDayOfMonthDay(f.dateTo)
     ) {
-      // mid-month dateTo in a past month: that month is partial, not full
-      lastFullMonth = prevMonth(lastFullMonth)
+      // mid-month dateTo in a past month: that month is partial, not full.
+      // A partial 0000-01 has no representable predecessor month, so no
+      // month is fully inside the range.
+      lastFullMonth =
+        lastFullMonth === MIN_MONTH_KEY ? null : prevMonth(lastFullMonth)
     }
 
     const spanStartMonth = monthOf(minDate)
     const allMonths = monthsBetween(spanStartMonth, monthOf(maxDate))
 
     // mid-month dateFrom: that month is partial, not full (mirrors dateTo)
-    let firstFullMonth = spanStartMonth
+    let firstFullMonth: string | null = spanStartMonth
     if (f.dateFrom !== undefined && f.dateFrom.slice(8, 10) !== "01") {
-      firstFullMonth = nextMonth(firstFullMonth)
+      // Symmetrically, a partial 9999-12 has no representable successor.
+      firstFullMonth =
+        firstFullMonth === MAX_MONTH_KEY ? null : nextMonth(firstFullMonth)
     }
 
     const byMonth = new Map(monthlyRows.map((r) => [r.month, r]))
@@ -148,9 +155,12 @@ export function computeAnalytics(
     }
 
     // averages over full months only (partial end months excluded)
-    const fullMonths = allMonths.filter(
-      (m) => m <= lastFullMonth && m >= firstFullMonth
-    )
+    const last = lastFullMonth
+    const first = firstFullMonth
+    const fullMonths =
+      last === null || first === null
+        ? []
+        : allMonths.filter((m) => m <= last && m >= first)
     monthsCounted = fullMonths.length
     const sumIncome = fullMonths.reduce(
       (acc, m) => acc + (byMonth.get(m)?.income ?? 0),

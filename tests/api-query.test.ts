@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import {
+  parseAnalyticsDate,
   parseOptionalAccountId,
   parseOptionalClampedInt,
   parsePage,
@@ -74,6 +75,37 @@ describe("parsePagination", () => {
   })
 })
 
+describe("parseAnalyticsDate", () => {
+  it("accepts absent/empty and in-range ISO dates", () => {
+    expect(parseAnalyticsDate(null)).toEqual({ ok: true, value: undefined })
+    expect(parseAnalyticsDate("")).toEqual({ ok: true, value: undefined })
+    expect(parseAnalyticsDate("2026-11-17")).toEqual({
+      ok: true,
+      value: "2026-11-17",
+    })
+    expect(parseAnalyticsDate("0001-01-01")).toEqual({
+      ok: true,
+      value: "0001-01-01",
+    })
+    expect(parseAnalyticsDate("9998-12-31")).toEqual({
+      ok: true,
+      value: "9998-12-31",
+    })
+  })
+
+  it("rejects malformed and out-of-range dates", () => {
+    for (const raw of [
+      "nope",
+      "2026-02-29",
+      "2026-13-01",
+      "0000-12-31",
+      "9999-01-01",
+    ]) {
+      expect(parseAnalyticsDate(raw)).toEqual({ ok: false })
+    }
+  })
+})
+
 describe("parseOptionalAccountId", () => {
   it("accepts absent and positive digit strings", () => {
     expect(parseOptionalAccountId(null)).toEqual({ ok: true, value: undefined })
@@ -145,13 +177,27 @@ describe("parseWindow", () => {
     const nearMax = parseWindow(sp("from=9999-01-01&to=9999-12-31"), today)
     expect(nearMax).toMatchObject({ ok: false, error: "window_too_far" })
 
-    // a default `to` derived from a near-MAX_ISO_DATE `from` also overflows;
-    // it must report window_too_far, not invalid_window
+    // the from-side distance check runs before `to` is derived or validated,
+    // so this near-MAX_ISO_DATE `from` reports window_too_far instead of an
+    // invalid_window from the overflowing default `to`
     const nearMaxDefault = parseWindow(sp("from=9999-12-31"), today, defaults)
     expect(nearMaxDefault).toMatchObject({
       ok: false,
       error: "window_too_far",
     })
+
+    // ... and the from-side check wins over a malformed, missing, or
+    // inverted `to`
+    expect(
+      parseWindow(sp("from=2035-01-01&to=nope"), today, defaults)
+    ).toMatchObject({ ok: false, error: "window_too_far" })
+    expect(parseWindow(sp("from=1900-01-01"), today)).toMatchObject({
+      ok: false,
+      error: "window_too_far",
+    })
+    expect(
+      parseWindow(sp("from=2035-01-01&to=2026-01-01"), today)
+    ).toMatchObject({ ok: false, error: "window_too_far" })
   })
 
   it("rejects windows wider than the cap", () => {

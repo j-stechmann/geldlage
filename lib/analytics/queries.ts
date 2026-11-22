@@ -21,11 +21,6 @@ import type {
 import { counterpartyOf } from "@/lib/transactions"
 import { buildTransactionScope } from "@/lib/analytics/scope"
 
-export type {
-  TransactionPage,
-  TransactionRow,
-} from "@/lib/contracts/transactions"
-
 export type SortField =
   "booking_date" | "value_date" | "amount_cents" | "payee" | "status"
 

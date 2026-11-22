@@ -10,7 +10,7 @@ import {
   type PlanOccurrence,
 } from "@/components/planning/api"
 import { isoDatePlus } from "@/lib/dates"
-import { MATCH_DAYS_AFTER, MATCH_DAYS_BEFORE } from "@/lib/planning/matching"
+import { MATCH_DAYS_AFTER, MATCH_DAYS_BEFORE } from "@/lib/planning/limits"
 
 const ROW_A = {
   id: "tx-1",
