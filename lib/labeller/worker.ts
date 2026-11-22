@@ -15,6 +15,7 @@ import {
   completeDrainedBatches,
   markRowsFailed,
 } from "@/lib/labeller/service"
+import { counterpartyOf } from "@/lib/transactions"
 
 type WorkerState = { ticking: boolean }
 
@@ -81,7 +82,7 @@ export function claimLabelRows(batchSize: number, maxAttempts: number) {
 }
 
 function counterpartyFor(row: ClaimedRow): string {
-  return row.type === "Ausgang" ? (row.payee ?? "") : (row.payer ?? "")
+  return counterpartyOf(row) ?? ""
 }
 
 /**
