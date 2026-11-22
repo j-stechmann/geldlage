@@ -7,9 +7,8 @@ import {
   nextDueDate,
   PlanValidationError,
 } from "@/lib/planning/service"
-import type { PlanListFilters } from "@/lib/contracts/planning"
+import type { PlanListFilters, PlanStatus } from "@/lib/contracts/planning"
 import { isPlanStatus } from "@/lib/planning/fields"
-import type { PlanStatus } from "@/lib/db/schema"
 import { todayLocal } from "@/lib/dates"
 import { parsePagination } from "@/lib/api/query"
 import {
