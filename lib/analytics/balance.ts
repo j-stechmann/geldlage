@@ -100,12 +100,9 @@ export function latestAnchor(
     .from(importBatches)
     .where(snapshotWhere(userId, accountId, today))
     .all()
-  // the WHERE clause does not narrow Drizzle's inferred row type, so re-check
-  // nullability for the BalanceAnchor type guard
-  const valid = rows.filter(
-    (r): r is BalanceAnchor =>
-      r.snapshotDate !== null && r.snapshotAmountCents !== null
-  )
+  // snapshotWhere's isNotNull guards make both columns non-null at runtime;
+  // Drizzle cannot infer that from a WHERE clause, hence the narrowing cast.
+  const valid = rows as BalanceAnchor[]
   if (valid.length === 0) return null
   return valid.reduce(
     (latest, r) => (isLaterAnchor(r, latest) ? r : latest),
