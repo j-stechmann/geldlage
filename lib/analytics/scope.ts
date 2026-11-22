@@ -24,8 +24,8 @@ export interface TransactionScopeDateBounds {
 export interface TransactionScope {
   userId: number
   accountId?: number
-  /** exact status allowlist; each scope owns its own value(s) */
-  statuses: readonly string[]
+  /** exact non-empty status allowlist; each scope owns its own value(s) */
+  statuses: readonly [string, ...string[]]
   dateBounds?: TransactionScopeDateBounds
 }
 
@@ -35,6 +35,11 @@ export interface TransactionScope {
  * new filter added to `TransactionFilters` cannot leak here.
  */
 export function buildTransactionScope(scope: TransactionScope): SQL {
+  // Drizzle renders inArray(col, []) as the literal SQL `false`, which would
+  // silently return zero rows. An empty allowlist is a caller bug.
+  if (scope.statuses.length === 0) {
+    throw new Error("buildTransactionScope requires at least one status")
+  }
   const conditions: SQL[] = [
     eq(transactions.userId, scope.userId),
     inArray(transactions.status, scope.statuses),

@@ -135,6 +135,15 @@ describe("buildTransactionScope", () => {
     ).toBe(10_599)
   })
 
+  it("rejects an empty status allowlist instead of matching no rows", () => {
+    expect(() =>
+      buildTransactionScope({
+        userId,
+        statuses: [] as unknown as [string, ...string[]],
+      })
+    ).toThrow("at least one status")
+  })
+
   it("keeps the optional account and inclusive date bounds", () => {
     expect(
       sum(
