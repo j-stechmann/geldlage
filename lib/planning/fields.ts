@@ -39,8 +39,6 @@ export interface NonTextPlanFieldMeta extends PlanFieldBase {
 
 export type PlanFieldMeta = TextPlanFieldMeta | NonTextPlanFieldMeta
 
-export type TextPlanKey = "counterparty" | "purpose" | "notes"
-
 export const PLAN_FIELDS = [
   {
     key: "amountCents",
@@ -109,6 +107,16 @@ export const PLAN_FIELDS = [
     agentOrder: 8,
   },
 ] as const satisfies readonly PlanFieldMeta[]
+
+/**
+ * The text keys derived from PLAN_FIELDS, not re-listed: dropping a text field
+ * from the table must be a compile error at every `planTextLimit` call site,
+ * not a module-load throw.
+ */
+export type TextPlanKey = Extract<
+  (typeof PLAN_FIELDS)[number],
+  { kind: "text" }
+>["key"]
 
 /** REST vocabulary in the validator's message order. */
 export const PLAN_INPUT_KEYS: ReadonlySet<string> = new Set(
