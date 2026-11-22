@@ -144,6 +144,14 @@ describe("parseWindow", () => {
     // distance check must catch this window first
     const nearMax = parseWindow(sp("from=9999-01-01&to=9999-12-31"), today)
     expect(nearMax).toMatchObject({ ok: false, error: "window_too_far" })
+
+    // a default `to` derived from a near-MAX_ISO_DATE `from` also overflows;
+    // it must report window_too_far, not invalid_window
+    const nearMaxDefault = parseWindow(sp("from=9999-12-31"), today, defaults)
+    expect(nearMaxDefault).toMatchObject({
+      ok: false,
+      error: "window_too_far",
+    })
   })
 
   it("rejects windows wider than the cap", () => {

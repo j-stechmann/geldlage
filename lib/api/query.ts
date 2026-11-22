@@ -125,6 +125,21 @@ export function parseWindow(
   }
 
   const rawTo = sp.get("to")
+  const lowerBound = isoDatePlus(today, -MAX_WINDOW_DISTANCE_DAYS)
+  const upperBound = isoDatePlus(today, MAX_WINDOW_DISTANCE_DAYS)
+
+  // A default `to` is derived as `from + defaultToDays`. Near MAX_ISO_DATE
+  // that addition overflows into the extended-year form and would be
+  // misreported as a malformed date; the window is necessarily too far, so
+  // report that instead of letting the arithmetic produce an invalid string.
+  if (opts && rawTo === null && from > upperBound) {
+    return {
+      ok: false,
+      error: "window_too_far",
+      message: `window must lie within ${MAX_WINDOW_DISTANCE_DAYS} days of today`,
+    }
+  }
+
   const to = rawTo ?? (opts ? isoDatePlus(from, opts.defaultToDays) : null)
   if (to === null || !isValidIsoDate(to)) {
     return {
@@ -142,8 +157,6 @@ export function parseWindow(
     }
   }
 
-  const lowerBound = isoDatePlus(today, -MAX_WINDOW_DISTANCE_DAYS)
-  const upperBound = isoDatePlus(today, MAX_WINDOW_DISTANCE_DAYS)
   if (from < lowerBound || to > upperBound) {
     return {
       ok: false,
