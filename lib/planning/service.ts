@@ -191,10 +191,9 @@ export function validatePlanInput(
         out.categoryId = normalizeOptionalId(input.categoryId, spec.errorCode)
         break
       default: {
-        // Exhaustiveness: a new non-text PLAN_FIELDS key fails tsc here until
-        // a validation branch is added.
-        const unhandled: never = spec
-        throw new Error(`unhandled plan field: ${String(unhandled)}`)
+        // Exhaustiveness only — nothing runs here. A new non-text PLAN_FIELDS
+        // key makes `spec` non-never and fails tsc until a branch is added.
+        spec satisfies never
       }
     }
   }
