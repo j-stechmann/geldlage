@@ -20,6 +20,7 @@ import type {
 } from "@/lib/contracts/transactions"
 import { counterpartyOf } from "@/lib/transactions"
 import { buildTransactionScope } from "@/lib/analytics/scope"
+import { parseDateRange, type DateRangeErrorCode } from "@/lib/api/query"
 
 export type SortField =
   "booking_date" | "value_date" | "amount_cents" | "payee" | "status"
@@ -38,10 +39,19 @@ export interface TransactionFilters {
   dir?: "asc" | "desc"
 }
 
-export function parseFilters(sp: URLSearchParams): TransactionFilters {
+/**
+ * Parse the shared filter params. Routes pass an already-validated `dates`
+ * pair from `parseDateRange` so the date params are parsed once and cannot
+ * silently diverge from the validated value. Direct callers (engine tests,
+ * query helpers) may omit it and get the legacy lenient raw read.
+ */
+export function parseFilters(
+  sp: URLSearchParams,
+  dates?: Pick<TransactionFilters, "dateFrom" | "dateTo">
+): TransactionFilters {
   const q = sp.get("q")?.trim() || undefined
-  const dateFrom = sp.get("dateFrom") || undefined
-  const dateTo = sp.get("dateTo") || undefined
+  const dateFrom = dates ? dates.dateFrom : sp.get("dateFrom") || undefined
+  const dateTo = dates ? dates.dateTo : sp.get("dateTo") || undefined
   const typeRaw = sp.get("type")
   const type =
     typeRaw === "Ausgang" || typeRaw === "Eingang" ? typeRaw : undefined
@@ -84,6 +94,21 @@ export function parseFilters(sp: URLSearchParams): TransactionFilters {
     sort,
     dir,
   }
+}
+
+export type RouteFiltersParse =
+  | { ok: true; filters: TransactionFilters }
+  | { ok: false; error: DateRangeErrorCode; message: string }
+
+/**
+ * Route-level filter parsing. Date validation is not optional here: both list
+ * routes call this, so a new route cannot accidentally use the raw parser and
+ * skip the shared date contract.
+ */
+export function parseRouteFilters(sp: URLSearchParams): RouteFiltersParse {
+  const dates = parseDateRange(sp)
+  if (!dates.ok) return dates
+  return { ok: true, filters: parseFilters(sp, dates) }
 }
 
 /**

@@ -8,11 +8,12 @@
  * precedence (from → from-distance → to → order → to-distance → width).
  */
 import {
-  isoDate,
+  DATE_RANGE_TOO_LARGE_MESSAGE,
   isoDatePlus,
   isValidIsoDate,
-  MAX_NEIGHBOR_YEAR,
-  MIN_NEIGHBOR_YEAR,
+  MAX_ISO_DATE,
+  MIN_ISO_DATE,
+  monthSpanExceedsCap,
 } from "@/lib/dates"
 
 export function positiveInt(raw: string | null, fallback: number): number {
@@ -87,27 +88,67 @@ export function parseOptionalClampedInt(
 }
 
 /**
- * Analytics date-filter bounds. `prevMonth`/`nextMonth` need one representable
- * month of headroom on each side, so the accepted months are 0001-01 …
- * 9998-12. The analytics route validates dateFrom/dateTo before the engine
- * runs month arithmetic on them.
+ * Absent/empty = unbounded; otherwise a real ISO date in the four-digit range.
+ * `isValidIsoDate` already enforces `^\d{4}-\d{2}-\d{2}$` plus a real month
+ * and day, so it is also the representable-range check (0000-01-01 …
+ * 9999-12-31) — no separate comparison can fire.
  */
-export const MIN_ANALYTICS_DATE = isoDate(MIN_NEIGHBOR_YEAR, 1, 1)
-export const MAX_ANALYTICS_DATE = isoDate(MAX_NEIGHBOR_YEAR, 12, 31)
-
-/** Absent/empty = unbounded; otherwise a valid ISO date inside the bounds. */
 export function parseAnalyticsDate(
   raw: string | null
 ): ParamResult<string | undefined> {
   if (raw === null || raw === "") return { ok: true, value: undefined }
-  if (
-    !isValidIsoDate(raw) ||
-    raw < MIN_ANALYTICS_DATE ||
-    raw > MAX_ANALYTICS_DATE
-  ) {
-    return { ok: false }
-  }
+  if (!isValidIsoDate(raw)) return { ok: false }
   return { ok: true, value: raw }
+}
+
+export type DateRangeErrorCode = "invalid_date" | "range_too_large"
+
+export type DateRangeParse =
+  | { ok: true; dateFrom?: string; dateTo?: string }
+  | { ok: false; error: DateRangeErrorCode; message: string }
+
+/**
+ * Shared date-filter contract for the list routes. `/api/analytics` and
+ * `/api/transactions` parse the same FilterBar params, so they must accept and
+ * reject exactly the same queries.
+ *
+ * Only an explicitly requested two-sided range is capped: that is the one span
+ * a caller can inflate arbitrarily. A one-sided or absent bound is
+ * data-derived, so the engine bounds its zero-fill gracefully instead of
+ * rejecting the request (see `computeAnalytics`); pre-checking against today
+ * would over-reject stale data.
+ *
+ * `dateFrom > dateTo` is deliberately accepted: the month count is <= 0, no
+ * rows match, and both routes return an empty filtered list — the pre-existing
+ * behavior. (The analytics balance KPI is deliberately unfiltered, so it still
+ * resolves as of `dateTo`; see docs/analytics.md.)
+ */
+export function parseDateRange(sp: URLSearchParams): DateRangeParse {
+  const from = parseAnalyticsDate(sp.get("dateFrom"))
+  const to = parseAnalyticsDate(sp.get("dateTo"))
+  if (!from.ok || !to.ok) {
+    return {
+      ok: false,
+      error: "invalid_date",
+      message: `dateFrom/dateTo must be ISO dates between ${MIN_ISO_DATE} and ${MAX_ISO_DATE}`,
+    }
+  }
+
+  const dateFrom = from.value
+  const dateTo = to.value
+  if (
+    dateFrom !== undefined &&
+    dateTo !== undefined &&
+    monthSpanExceedsCap(dateFrom, dateTo)
+  ) {
+    return {
+      ok: false,
+      error: "range_too_large",
+      message: DATE_RANGE_TOO_LARGE_MESSAGE,
+    }
+  }
+
+  return { ok: true, dateFrom, dateTo }
 }
 
 export type WindowErrorCode =

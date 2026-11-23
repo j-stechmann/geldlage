@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import {
-  parseFilters,
+  parseRouteFilters,
   queryTransactionById,
   queryTransactions,
 } from "@/lib/analytics/queries"
@@ -22,7 +22,17 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(queryTransactionById(id, session.uid))
   }
 
-  const filters = parseFilters(sp)
+  // shared with /api/analytics: identical date params must produce identical
+  // accept/reject behavior in both panels
+  const parsed = parseRouteFilters(sp)
+  if (!parsed.ok) {
+    return NextResponse.json(
+      { error: parsed.error, message: parsed.message },
+      { status: 400 }
+    )
+  }
+  const filters = parsed.filters
+
   const { page, pageSize } = parsePagination(sp, {
     defaultPageSize: 25,
     maxPageSize: 100,

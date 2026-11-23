@@ -16,18 +16,33 @@
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 
+/** Lowest representable ISO date (four-digit years only). */
+export const MIN_ISO_DATE = "0000-01-01"
 /** Highest storable ISO date (four-digit years only). */
 export const MAX_ISO_DATE = "9999-12-31"
 
-/** Lowest representable "YYYY-MM" month key. */
-export const MIN_MONTH_KEY = "0000-01"
+/**
+ * The representable month-key range, derived from the ISO bounds so the
+ * routes' validation and the engine's boundary guards cannot drift apart.
+ * Lowest representable "YYYY-MM" month key.
+ */
+export const MIN_MONTH_KEY = MIN_ISO_DATE.slice(0, 7)
 /** Highest representable "YYYY-MM" month key. */
-export const MAX_MONTH_KEY = "9999-12"
+export const MAX_MONTH_KEY = MAX_ISO_DATE.slice(0, 7)
 
-/** Lowest year whose months have a representable predecessor (0001). */
-export const MIN_NEIGHBOR_YEAR = 1
-/** Highest year whose months have a representable successor (9998). */
-export const MAX_NEIGHBOR_YEAR = 9998
+const MIN_MONTH_YEAR = Number(MIN_MONTH_KEY.slice(0, 4))
+const MAX_MONTH_YEAR = Number(MAX_MONTH_KEY.slice(0, 4))
+
+/**
+ * Cap on the date-range month series. The analytics engine materializes one
+ * bucket per month between the effective date bounds; without a cap a single
+ * request can expand the whole representable calendar (~120k months). 1200
+ * months (100 years) comfortably exceeds real bank history while keeping the
+ * response small and the expansion cheap.
+ */
+export const MAX_DATE_RANGE_MONTHS = 1200
+
+export const DATE_RANGE_TOO_LARGE_MESSAGE = `date range must not exceed ${MAX_DATE_RANGE_MONTHS} months`
 
 /**
  * UTC Date without Date.UTC's year 0–99 → 1900–1999 remap. The setters keep
@@ -116,19 +131,29 @@ export function monthOf(isoDate: string): string {
   return isoDate.slice(0, 7)
 }
 
+/** True for a real "YYYY-MM" month key (four-digit year, month 01…12). */
+export function isValidMonthKey(monthKey: string): boolean {
+  return isValidIsoDate(`${monthKey}-01`)
+}
+
 /**
  * "YYYY-MM" month key `offset` months from the month containing baseIso.
- * Callers must keep the result representable (MIN_MONTH_KEY … MAX_MONTH_KEY);
- * the analytics route enforces the one-month headroom prevMonth/nextMonth
- * need.
+ * Throws RangeError when the result would leave the representable
+ * MIN_MONTH_KEY … MAX_MONTH_KEY range: a malformed key must never leak into a
+ * response or SQL. (prevMonth("0000-01") and nextMonth("9999-12") are
+ * therefore errors, not silent corruptions.)
  */
 export function monthOffset(baseIso: string, offset: number): string {
   const base = baseIso.slice(0, 7)
   const [y, m] = base.split("-").map(Number)
   const total = y * 12 + (m - 1) + offset
   const ny = Math.floor(total / 12)
-  // Positive modulo: a pre-0001 base (out of contract; callers stay at
-  // year >= 0001) would otherwise make the month 0.
+  if (ny < MIN_MONTH_YEAR || ny > MAX_MONTH_YEAR) {
+    throw new RangeError(
+      `month offset from "${baseIso}" by ${offset} leaves ${MIN_MONTH_KEY}…${MAX_MONTH_KEY}`
+    )
+  }
+  // Positive modulo: keeps the month in 1…12 for every in-range year.
   const nm = (((total % 12) + 12) % 12) + 1
   return `${String(ny).padStart(4, "0")}-${String(nm).padStart(2, "0")}`
 }
@@ -157,6 +182,22 @@ export function prevMonth(month: string): string {
 /** Next "YYYY-MM" month key (valid keys only; needs a successor). */
 export function nextMonth(month: string): string {
   return monthOffset(month, 1)
+}
+
+/**
+ * Inclusive month count between two ISO dates/months. <= 0 when `fromIso`
+ * is after `toIso` — the non-allocating counterpart of `monthsBetween`, for
+ * span caps that must not materialize the range first.
+ */
+export function monthCountBetween(fromIso: string, toIso: string): number {
+  const [fy, fm] = fromIso.split("-").map(Number)
+  const [ty, tm] = toIso.split("-").map(Number)
+  return (ty - fy) * 12 + (tm - fm) + 1
+}
+
+/** True when the inclusive month span between the bounds exceeds the cap. */
+export function monthSpanExceedsCap(fromIso: string, toIso: string): boolean {
+  return monthCountBetween(fromIso, toIso) > MAX_DATE_RANGE_MONTHS
 }
 
 /** List of "YYYY-MM" keys between two ISO dates/months, inclusive. */

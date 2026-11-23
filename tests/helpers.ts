@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server"
 import { createTestDb, setTestDb, type Db } from "@/lib/db"
-import { users } from "@/lib/db/schema"
+import { accounts, transactions, users } from "@/lib/db/schema"
 import { createSessionToken, SESSION_COOKIE } from "@/lib/auth/session"
 
 export const TEST_ISSUER = "https://issuer.example.com"
@@ -41,6 +41,41 @@ export function setupTestDb(): { db: Db; userId: number } {
   setTestDb(db)
   const userId = seedUser(db)
   return { db, userId }
+}
+
+/**
+ * Insert a booked transaction. Creates its own account (unique per tx id)
+ * unless `accountId` is supplied; returns the account id used. Shared by the
+ * date-contract, analytics and month-bound tests so their fixtures cannot
+ * drift apart.
+ */
+export function seedBookedTransaction(
+  db: Db,
+  userId: number,
+  id: string,
+  bookingDate: string,
+  opts: { accountId?: number; amountCents?: number } = {}
+): number {
+  const accountId =
+    opts.accountId ??
+    db
+      .insert(accounts)
+      .values({ userId, iban: `DE-${id}`, name: "Girokonto" })
+      .returning()
+      .get().id
+  db.insert(transactions)
+    .values({
+      id,
+      userId,
+      accountId,
+      bookingDate,
+      status: "Gebucht",
+      type: "Eingang",
+      amountCents: opts.amountCents ?? 100,
+      sourceHash: `h-${id}`,
+    })
+    .run()
+  return accountId
 }
 
 /**

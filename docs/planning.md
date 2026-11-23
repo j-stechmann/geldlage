@@ -155,9 +155,10 @@ is left untouched; the forecast endpoint is deliberately separate.
   `(snapshot, today]`; no snapshot → Σ booked ≤ today, flagged
   `withoutSnapshot`. Account filter respected like the balance timeline.
   Same-snapshotDate batches (two accounts imported on one day) tie-break
-  deterministically — freshest import first (`createdAt`, then `id`,
-  `isLaterAnchor` — the shared `lib/analytics/balance.ts` implementation),
-  the identical rule the balance KPI applies; both scopes
+  deterministically — freshest import first (`snapshot_date`, then
+  `created_at`, then `id`, all descending in `latestAnchor`'s shared SQL in
+  `lib/analytics/balance.ts`), the identical rule the balance KPI applies;
+  both scopes
   also ignore snapshots dated **after** today (a future-dated Saldo line
   never anchors one scope while the other rejects it), so the KPI and the
   forecast can never pick different snapshots for the same user.

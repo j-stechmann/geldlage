@@ -47,8 +47,9 @@ Keep the virtuality invariant and share every reusable concern:
    the bank calendar no longer imports anything from `lib/planning/`.
 
 3. **Shared balance machinery, separate scopes.** `lib/analytics/balance.ts`
-   owns `latestAnchor` and `isLaterAnchor`; the generic user/account/status/
-   date WHERE scaffold lives in `lib/analytics/scope.ts`
+   owns `latestAnchor` (the deterministic snapshot tie-break is its
+   `snapshot_date, created_at, id` descending SQL order); the generic
+   user/account/status/date WHERE scaffold lives in `lib/analytics/scope.ts`
    (`buildTransactionScope`). `buildTimeScopedWhere` is the booked-only
    predicate delegating to that scaffold. The engine and the forecast import
    the same implementation. The flow, time-scoped and forecast scopes remain

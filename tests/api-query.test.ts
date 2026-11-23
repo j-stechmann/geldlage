@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest"
 import {
+  INVALID_DATE_QUERIES,
+  OVER_CAP_TWO_SIDED_QUERIES,
+} from "./date-filter-cases"
+import {
   parseAnalyticsDate,
+  parseDateRange,
   parseOptionalAccountId,
   parseOptionalClampedInt,
   parsePage,
@@ -83,25 +88,98 @@ describe("parseAnalyticsDate", () => {
       ok: true,
       value: "2026-11-17",
     })
-    expect(parseAnalyticsDate("0001-01-01")).toEqual({
+    expect(parseAnalyticsDate("0000-01-01")).toEqual({
       ok: true,
-      value: "0001-01-01",
+      value: "0000-01-01",
     })
-    expect(parseAnalyticsDate("9998-12-31")).toEqual({
+    expect(parseAnalyticsDate("9999-12-31")).toEqual({
       ok: true,
-      value: "9998-12-31",
+      value: "9999-12-31",
     })
   })
 
-  it("rejects malformed and out-of-range dates", () => {
+  it("rejects malformed and unrepresentable dates", () => {
     for (const raw of [
       "nope",
       "2026-02-29",
       "2026-13-01",
-      "0000-12-31",
-      "9999-01-01",
+      "0000-00-10",
+      "9999-13-01",
+      "10000-01-01",
     ]) {
       expect(parseAnalyticsDate(raw)).toEqual({ ok: false })
+    }
+  })
+})
+
+describe("parseDateRange", () => {
+  it("accepts absent, empty, and in-range date filters", () => {
+    expect(parseDateRange(sp(""))).toEqual({ ok: true })
+    expect(parseDateRange(sp("dateFrom=&dateTo="))).toEqual({
+      ok: true,
+    })
+    expect(parseDateRange(sp("dateFrom=2026-01-01&dateTo=2026-12-31"))).toEqual(
+      {
+        ok: true,
+        dateFrom: "2026-01-01",
+        dateTo: "2026-12-31",
+      }
+    )
+    expect(
+      parseDateRange(sp("dateFrom=0000-01-01&dateTo=0000-12-31"))
+    ).toMatchObject({ ok: true })
+    expect(
+      parseDateRange(sp("dateFrom=9999-01-01&dateTo=9999-12-31"))
+    ).toMatchObject({ ok: true })
+  })
+
+  it("accepts an inverted range (empty result in both routes)", () => {
+    expect(parseDateRange(sp("dateFrom=2026-12-31&dateTo=2026-01-01"))).toEqual(
+      {
+        ok: true,
+        dateFrom: "2026-12-31",
+        dateTo: "2026-01-01",
+      }
+    )
+  })
+
+  it("accepts exactly the month cap and rejects one month more", () => {
+    // (2025 - 1926) * 12 + 12 = 1200 inclusive months
+    expect(
+      parseDateRange(sp("dateFrom=1926-01-01&dateTo=2025-12-31"))
+    ).toMatchObject({ ok: true, dateFrom: "1926-01-01" })
+    expect(
+      parseDateRange(sp("dateFrom=1925-12-01&dateTo=2025-12-31"))
+    ).toMatchObject({ ok: false, error: "range_too_large" })
+  })
+
+  it("rejects full-calendar explicit ranges", () => {
+    for (const query of OVER_CAP_TWO_SIDED_QUERIES) {
+      expect(parseDateRange(sp(query))).toMatchObject({
+        ok: false,
+        error: "range_too_large",
+      })
+    }
+  })
+
+  it("leaves one-sided ranges uncapped (the data side is unknown)", () => {
+    // the engine degrades to populated months instead of rejecting these
+    for (const query of ["dateFrom=0001-01-01", "dateTo=9999-12-31"]) {
+      expect(parseDateRange(sp(query))).toMatchObject({ ok: true })
+    }
+    expect(parseDateRange(sp("dateFrom=2026-01-01"))).toEqual({
+      ok: true,
+      dateFrom: "2026-01-01",
+      dateTo: undefined,
+    })
+  })
+
+  it("rejects malformed or unrepresentable dates", () => {
+    for (const query of INVALID_DATE_QUERIES) {
+      expect(parseDateRange(sp(query))).toMatchObject({
+        ok: false,
+        error: "invalid_date",
+      })
     }
   })
 })

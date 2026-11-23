@@ -33,13 +33,32 @@ state into query params ([frontend.md](frontend.md)).
 the local-calendar date — deliberately **not** `new Date().toISOString()`,
 which would shift month boundaries for non-UTC timezones.
 
+Both list endpoints (`/api/analytics` and `/api/transactions`) share one date
+contract (`parseDateRange` in [lib/api/query.ts](../lib/api/query.ts)):
+`dateFrom`/`dateTo` must be real ISO dates inside the single representable
+range `0000-01-01` … `9999-12-31` (derived from `MIN_ISO_DATE`/`MAX_ISO_DATE`,
+which also derive the engine's month-key bounds). An **explicit** two-sided
+range wider than `MAX_DATE_RANGE_MONTHS` (1200 months) is rejected with
+`400 range_too_large` on both routes. One-sided (or absent) bounds are
+data-derived and are never request-capped — the engine degrades gracefully
+instead (see below); measuring them against today would reject perfectly
+valid stale data. An inverted range (`dateFrom > dateTo`) is accepted and
+yields an empty filtered list, matching the pre-existing behavior — the
+balance KPI is deliberately unfiltered and still resolves as of `dateTo`.
+
 ## Monthly cash flow
 
 One grouped SQL query: `month = substr(booking_date, 1, 7)` (the ISO TEXT
 format makes this trivial), `income = SUM(CASE WHEN amount_cents > 0 …)`,
 `expenses = SUM(-amount_cents WHERE amount_cents < 0)`. JavaScript zero-fills
-months between the first and last booking month so the chart has no gaps;
-`net = income − expenses` per month.
+months between the effective bounds (the requested dates, falling back to the
+first/last booking month) so the chart has no gaps; `net = income − expenses`
+per month. The zero-fill is capped at `MAX_DATE_RANGE_MONTHS` (1200 months).
+Explicit two-sided ranges above the cap are rejected by `parseDateRange` with
+`400 range_too_large`; a data-derived span above the cap (a one-sided or
+unfiltered request, possibly with an outlier booking date) is not rejected —
+the engine emits only the months that actually have data instead of
+zero-filling across centuries.
 
 ## Averages and savings rate
 

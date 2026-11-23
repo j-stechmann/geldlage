@@ -25,7 +25,7 @@ export function Pager({
 }: {
   page: number
   pageCount: number
-  onPageChange: (next: number) => void
+  onPageChange: React.Dispatch<React.SetStateAction<number>>
   summary: React.ReactNode
   indicator: React.ReactNode
   prevDisabled?: boolean
@@ -40,7 +40,7 @@ export function Pager({
           variant="outline"
           size="sm"
           disabled={prevDisabled || page <= 1}
-          onClick={() => onPageChange(Math.max(1, page - 1))}
+          onClick={() => onPageChange((p) => Math.max(1, p - 1))}
         >
           <ChevronLeft className="size-4" /> Zurück
         </Button>
@@ -51,7 +51,7 @@ export function Pager({
           variant="outline"
           size="sm"
           disabled={nextDisabled || page >= pageCount}
-          onClick={() => onPageChange(page + 1)}
+          onClick={() => onPageChange((p) => Math.min(pageCount, p + 1))}
         >
           Weiter <ChevronRight className="size-4" />
         </Button>

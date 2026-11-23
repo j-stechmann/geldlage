@@ -6,7 +6,7 @@
  * the *implementation* both scopes share; the scopes themselves stay
  * separate (ADR-0022): this predicate never accepts `TransactionFilters`.
  */
-import { and, eq, isNotNull, lte } from "drizzle-orm"
+import { and, desc, eq, isNotNull, lte } from "drizzle-orm"
 import type { SQL } from "drizzle-orm"
 import { getDb } from "@/lib/db"
 import { importBatches } from "@/lib/db/schema"
@@ -22,17 +22,6 @@ export interface BalanceAnchor {
   createdAt: string
   /** deterministic last tie-break part (createdAt is not unique) */
   id: string
-}
-
-/** True when r should replace latest — snapshotDate then createdAt then id. */
-export function isLaterAnchor(
-  r: BalanceAnchor,
-  latest: BalanceAnchor
-): boolean {
-  if (r.snapshotDate !== latest.snapshotDate)
-    return r.snapshotDate > latest.snapshotDate
-  if (r.createdAt !== latest.createdAt) return r.createdAt > latest.createdAt
-  return r.id > latest.id
 }
 
 export type TimeScopedDateBounds = TransactionScopeDateBounds
@@ -80,9 +69,10 @@ function snapshotWhere(
  * absolute balance point). Current balance = snapshot + Σ(booked amounts
  * with booking_date > snapshot_date) — robust to missing older history.
  * Batches tied on snapshotDate resolve deterministically, freshest import
- * first (see isLaterAnchor); snapshots dated AFTER today are ignored — both
- * the balance KPI and computeForecast apply this identical rule, so a
- * future-dated Saldo line never anchors one scope alone.
+ * first: SQL orders by snapshot_date, created_at, id — all descending.
+ * Snapshots dated AFTER today are ignored — both the balance KPI and
+ * computeForecast apply this identical rule, so a future-dated Saldo line
+ * never anchors one scope alone.
  */
 export function latestAnchor(
   userId: number,
@@ -90,7 +80,7 @@ export function latestAnchor(
   today: string
 ): BalanceAnchor | null {
   const db = getDb()
-  const rows = db
+  const row = db
     .select({
       id: importBatches.id,
       createdAt: importBatches.createdAt,
@@ -99,13 +89,16 @@ export function latestAnchor(
     })
     .from(importBatches)
     .where(snapshotWhere(userId, accountId, today))
-    .all()
-  // snapshotWhere's isNotNull guards make both columns non-null at runtime;
-  // Drizzle cannot infer that from a WHERE clause, hence the narrowing cast.
-  const valid = rows as BalanceAnchor[]
-  if (valid.length === 0) return null
-  return valid.reduce(
-    (latest, r) => (isLaterAnchor(r, latest) ? r : latest),
-    valid[0]
-  )
+    .orderBy(
+      desc(importBatches.snapshotDate),
+      desc(importBatches.createdAt),
+      desc(importBatches.id)
+    )
+    .limit(1)
+    .get()
+  // snapshotWhere's isNotNull guards make both snapshot columns non-null at
+  // runtime; Drizzle cannot infer that from a WHERE clause, hence the cast.
+  // SQLite's BINARY collation matches the old JS `>` comparator for these
+  // ASCII ISO date/timestamp/UUID values.
+  return (row as BalanceAnchor | undefined) ?? null
 }

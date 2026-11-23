@@ -9,7 +9,12 @@ import {
   lastDayOfMonthDay,
   lastDayOfMonthIso,
   MAX_ISO_DATE,
+  MAX_MONTH_KEY,
+  MIN_ISO_DATE,
+  MIN_MONTH_KEY,
+  monthCountBetween,
   monthOffset,
+  monthSpanExceedsCap,
   monthsBetween,
   nextMonth,
   noonUtc,
@@ -111,11 +116,15 @@ describe("month helpers", () => {
   })
 
   it("moves across the representable month-key boundaries", () => {
-    // 0001-01 and 9998-12 are the outermost months whose neighbour is still
-    // representable; the analytics route rejects anything beyond them.
+    // The representable keys are 0000-01 … 9999-12; offsets that would leave
+    // that range must fail loudly instead of emitting a corrupt key.
+    expect(MIN_MONTH_KEY).toBe("0000-01")
+    expect(MAX_MONTH_KEY).toBe("9999-12")
     expect(prevMonth("0001-01")).toBe("0000-12")
     expect(nextMonth("9998-12")).toBe("9999-01")
     expect(prevMonth("0000-06")).toBe("0000-05")
+    expect(() => prevMonth("0000-01")).toThrow(RangeError)
+    expect(() => nextMonth("9999-12")).toThrow(RangeError)
   })
 
   it("lists inclusive month keys between dates", () => {
@@ -125,6 +134,20 @@ describe("month helpers", () => {
       "2026-01",
       "2026-02",
     ])
+  })
+
+  it("counts inclusive months without materializing them", () => {
+    expect(monthCountBetween("2025-11-20", "2026-02-02")).toBe(4)
+    expect(monthCountBetween("2026-01-15", "2026-01-20")).toBe(1)
+    expect(monthCountBetween("2025-02", "2025-02")).toBe(1)
+    expect(monthCountBetween("2026-02", "2026-01")).toBe(0)
+    expect(monthCountBetween("2027-01", "2026-01")).toBe(-11)
+  })
+
+  it("caps the inclusive month span at 1200 months", () => {
+    expect(monthSpanExceedsCap("1926-01-01", "2025-12-31")).toBe(false)
+    expect(monthSpanExceedsCap("1925-12-01", "2025-12-31")).toBe(true)
+    expect(monthSpanExceedsCap("0000-01-01", "9999-12-31")).toBe(true)
   })
 
   it("returns the last day in both forms", () => {
@@ -150,8 +173,11 @@ describe("local calendar helpers", () => {
   })
 })
 
-describe("MAX_ISO_DATE", () => {
-  it("is the top of the storable four-digit range", () => {
+describe("representable ISO range", () => {
+  it("is the four-digit ISO range and derives the month keys", () => {
+    expect(MIN_ISO_DATE).toBe("0000-01-01")
     expect(MAX_ISO_DATE).toBe("9999-12-31")
+    expect(MIN_MONTH_KEY).toBe("0000-01")
+    expect(MAX_MONTH_KEY).toBe("9999-12")
   })
 })
