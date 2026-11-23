@@ -274,7 +274,7 @@ export function createSchemaSqlite(db: Db) {
       category_id INTEGER REFERENCES categories(id),
       dtstart TEXT NOT NULL,
       rrule TEXT,
-      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'finished')),
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN (${schema.PLAN_STATUS_SQL})),
       notes TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -717,7 +717,7 @@ export function migrateSchema(db: Db) {
       category_id INTEGER REFERENCES categories(id),
       dtstart TEXT NOT NULL,
       rrule TEXT,
-      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'finished')),
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN (${schema.PLAN_STATUS_SQL})),
       notes TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL

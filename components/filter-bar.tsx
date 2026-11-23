@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { EMPTY_FILTERS, type TableFilters } from "@/lib/filters"
+import { isValidIsoDate, MAX_ISO_DATE } from "@/lib/dates"
 import { resolveCategoryColor } from "@/lib/category-colors"
 import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
@@ -112,9 +113,15 @@ export function FilterBar({
         <Input
           type="date"
           value={filters.dateFrom ?? ""}
-          onChange={(e) =>
-            onChange({ ...filters, dateFrom: e.target.value || null })
-          }
+          max={MAX_ISO_DATE}
+          onChange={(e) => {
+            const value = e.target.value
+            // a date input can return a year outside the four-digit ISO
+            // range (Chromium accepts "10000-01-01"); the list routes answer
+            // that with 400 invalid_date, so never store it
+            if (value !== "" && !isValidIsoDate(value)) return
+            onChange({ ...filters, dateFrom: value || null })
+          }}
           className="w-36"
           aria-label="Von"
         />
@@ -122,9 +129,12 @@ export function FilterBar({
         <Input
           type="date"
           value={filters.dateTo ?? ""}
-          onChange={(e) =>
-            onChange({ ...filters, dateTo: e.target.value || null })
-          }
+          max={MAX_ISO_DATE}
+          onChange={(e) => {
+            const value = e.target.value
+            if (value !== "" && !isValidIsoDate(value)) return
+            onChange({ ...filters, dateTo: value || null })
+          }}
           className="w-36"
           aria-label="Bis"
         />

@@ -70,3 +70,32 @@ describe("FilterBar reset", () => {
     expect(onChange).not.toHaveBeenCalledWith({ ...EMPTY_FILTERS, q: "miete2" })
   })
 })
+
+describe("FilterBar date inputs", () => {
+  it("applies a valid ISO date", () => {
+    const onChange = vi.fn()
+    renderWithQuery(<Harness onChange={onChange} />)
+
+    fireEvent.change(screen.getByLabelText("Von"), {
+      target: { value: "2026-01-01" },
+    })
+    expect(onChange).toHaveBeenLastCalledWith({
+      ...EMPTY_FILTERS,
+      dateFrom: "2026-01-01",
+    })
+  })
+
+  it("never stores a date outside the four-digit ISO range", () => {
+    const onChange = vi.fn()
+    renderWithQuery(<Harness onChange={onChange} />)
+
+    // Chromium's date input accepts a year > 9999; the list routes answer it
+    // with 400 invalid_date, so the handler must not put it into filter state
+    fireEvent.change(screen.getByLabelText("Von"), {
+      target: { value: "10000-01-01" },
+    })
+    for (const [next] of onChange.mock.calls) {
+      expect(next.dateFrom).not.toBe("10000-01-01")
+    }
+  })
+})

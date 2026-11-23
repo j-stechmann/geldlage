@@ -63,6 +63,20 @@ describe("shared date-filter contract", () => {
     }
   })
 
+  it("rejects a malformed accountId identically (digits-only)", async () => {
+    // the same digits-only contract the planning/calendar routes enforce;
+    // parseInt coercion would silently read a different account
+    for (const query of ["accountId=12abc", "accountId=12.9", "accountId=0"]) {
+      const [analytics, transactions] = await requestBoth(query)
+      expect(analytics.status).toBe(400)
+      expect(await analytics.json()).toMatchObject({ error: "invalid_account" })
+      expect(transactions.status).toBe(400)
+      expect(await transactions.json()).toMatchObject({
+        error: "invalid_account",
+      })
+    }
+  })
+
   it("accepts the same in-range, boundary and inverted ranges", async () => {
     for (const query of [
       "",

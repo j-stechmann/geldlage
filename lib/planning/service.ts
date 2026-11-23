@@ -33,7 +33,9 @@ import {
   isValidIsoDate,
   isoDatePlus,
   lastDayOfMonthIso,
+  MAX_ISO_DATE,
   MAX_MONTH_KEY,
+  MIN_ISO_DATE,
   monthCountBetween,
   monthOffset,
   todayLocal,
@@ -47,6 +49,7 @@ import {
   MATCH_DAYS_AFTER,
   MATCH_DAYS_BEFORE,
   MAX_FORECAST_MONTHS,
+  MIN_DTSTART_YEAR,
 } from "@/lib/planning/limits"
 import {
   isPlanStatus,
@@ -55,18 +58,6 @@ import {
 } from "@/lib/planning/fields"
 import { paginate } from "@/lib/pagination"
 import { buildTimeScopedWhere, latestAnchor } from "@/lib/analytics/balance"
-
-/**
- * dtstart floor (year): occurrence expansion walks forward from dtstart on
- * every read (plan list, occurrences, forecast) and rrule has no internal
- * iteration cap — per-read cost is linear in the walk distance
- * (window end − dtstart) and grows forever with plan age, so a 1900-floor
- * DAILY plan already iterates ~126 years (~70 ms measured) on every read
- * window that touches today. The floor bounds the worst case at
- * one century-and-a-quarter back; anything earlier has no representable
- * purpose (bank data never reaches that far).
- */
-const MIN_DTSTART_YEAR = 1900
 
 export class PlanValidationError extends Error {
   constructor(
@@ -632,8 +623,14 @@ function enrichWithMatches(
   w: { from: string; to: string }
 ) {
   const db = getDb()
-  const txFrom = isoDatePlus(w.from, -MATCH_DAYS_BEFORE)
-  const txTo = isoDatePlus(w.to, MATCH_DAYS_AFTER)
+  // The padded bounds must stay four-digit ISO dates: `w` can reach the
+  // storable edge (the forecast clamps its horizon at 9999-12), where
+  // isoDatePlus overflows into the extended-year form ("+010000-…") that
+  // sorts below every real date and would match no candidates at all.
+  const paddedFrom = isoDatePlus(w.from, -MATCH_DAYS_BEFORE)
+  const paddedTo = isoDatePlus(w.to, MATCH_DAYS_AFTER)
+  const txFrom = isValidIsoDate(paddedFrom) ? paddedFrom : MIN_ISO_DATE
+  const txTo = isValidIsoDate(paddedTo) ? paddedTo : MAX_ISO_DATE
   const rows: MatchCandidate[] = db
     .select({
       id: transactions.id,

@@ -10,7 +10,10 @@ import {
 import { sql } from "drizzle-orm"
 import { randomUUID } from "node:crypto"
 import { DEFAULT_THREAD_TITLE } from "@/lib/agent/constants"
-import type { PlanStatus } from "@/lib/contracts/planning"
+import { PLAN_STATUSES, type PlanStatus } from "@/lib/contracts/planning"
+
+/** SQL literal list for the status CHECK, derived from the vocabulary. */
+export const PLAN_STATUS_SQL = PLAN_STATUSES.map((s) => `'${s}'`).join(", ")
 
 export const users = sqliteTable(
   "users",
@@ -338,7 +341,7 @@ export const plannedTransactions = sqliteTable(
     check("planned_transactions_amount_not_zero", sql`${t.amountCents} <> 0`),
     check(
       "planned_transactions_status_check",
-      sql`${t.status} IN ('active', 'paused', 'finished')`
+      sql`${t.status} IN (${sql.raw(PLAN_STATUS_SQL)})`
     ),
   ]
 )

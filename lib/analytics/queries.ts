@@ -20,7 +20,11 @@ import type {
 } from "@/lib/contracts/transactions"
 import { counterpartyOf } from "@/lib/transactions"
 import { buildTransactionScope } from "@/lib/analytics/scope"
-import { parseAnalyticsDate, parseDateRange } from "@/lib/api/query"
+import {
+  parseAnalyticsDate,
+  parseDateRange,
+  parseOptionalAccountId,
+} from "@/lib/api/query"
 
 export type SortField =
   "booking_date" | "value_date" | "amount_cents" | "payee" | "status"
@@ -46,33 +50,33 @@ function optionalIsoDate(raw: string | null): string | undefined {
 }
 
 /**
- * Parse the shared filter params. Routes pass an already-validated `dates`
- * pair from `parseDateRange` so the date params are parsed once and cannot
- * silently diverge from the validated value. Direct callers (engine tests,
- * query helpers) omit it and get the identical validation: a malformed date
- * is ignored like every other invalid filter value, never passed on to SQL or
- * the engine's month arithmetic.
+ * A digits-only positive id, or undefined. `parseInt` alone would coerce
+ * "12abc" → 12 and silently read a different row than the client asked for;
+ * the planning/calendar routes reject that input for the same reason.
  */
-export function parseFilters(
-  sp: URLSearchParams,
-  dates?: Pick<TransactionFilters, "dateFrom" | "dateTo">
-): TransactionFilters {
+function optionalId(raw: string | null): number | undefined {
+  const parsed = parseOptionalAccountId(raw)
+  return parsed.ok ? parsed.value : undefined
+}
+
+/**
+ * Parse the shared filter params. Dates are validated with the route
+ * contract's predicate here too, so a direct caller (engine tests, query
+ * helpers) can never pass a malformed date on to SQL or the engine's month
+ * arithmetic; `parseRouteFilters` adds the 400 on top for the routes.
+ */
+export function parseFilters(sp: URLSearchParams): TransactionFilters {
   const q = sp.get("q")?.trim() || undefined
-  const dateFrom = dates ? dates.dateFrom : optionalIsoDate(sp.get("dateFrom"))
-  const dateTo = dates ? dates.dateTo : optionalIsoDate(sp.get("dateTo"))
+  const dateFrom = optionalIsoDate(sp.get("dateFrom"))
+  const dateTo = optionalIsoDate(sp.get("dateTo"))
   const typeRaw = sp.get("type")
   const type =
     typeRaw === "Ausgang" || typeRaw === "Eingang" ? typeRaw : undefined
   const categoryIds = sp
     .getAll("categoryId")
-    .map((v) => Number.parseInt(v, 10))
-    .filter((v) => Number.isInteger(v) && v > 0)
-  const accountIdRaw = sp.get("accountId")
-  const accountIdParsed = Number.parseInt(accountIdRaw ?? "", 10)
-  const accountId =
-    accountIdRaw && Number.isInteger(accountIdParsed) && accountIdParsed > 0
-      ? accountIdParsed
-      : undefined
+    .map(optionalId)
+    .filter((v): v is number => v !== undefined)
+  const accountId = optionalId(sp.get("accountId"))
   const labelStatusRaw = sp.get("labelStatus")
   const labelStatus =
     labelStatusRaw === "pending" ||
@@ -106,17 +110,26 @@ export function parseFilters(
 
 export type RouteFiltersParse =
   | { ok: true; filters: TransactionFilters }
-  | { ok: false; error: "invalid_date"; message: string }
+  | { ok: false; error: "invalid_date" | "invalid_account"; message: string }
 
 /**
- * Route-level filter parsing. Date validation is not optional here: both list
+ * Route-level filter parsing. Validation is not optional here: both list
  * routes call this, so a new route cannot accidentally use the raw parser and
- * skip the shared date contract.
+ * skip the shared contract. Account ids get the same digits-only 400 as the
+ * planning/calendar routes; a malformed date still answers `invalid_date`.
  */
 export function parseRouteFilters(sp: URLSearchParams): RouteFiltersParse {
   const dates = parseDateRange(sp)
   if (!dates.ok) return dates
-  return { ok: true, filters: parseFilters(sp, dates) }
+  const account = parseOptionalAccountId(sp.get("accountId"))
+  if (!account.ok) {
+    return {
+      ok: false,
+      error: "invalid_account",
+      message: "accountId must be a positive integer",
+    }
+  }
+  return { ok: true, filters: parseFilters(sp) }
 }
 
 /**

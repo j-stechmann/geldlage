@@ -209,6 +209,18 @@ describe("expandOccurrenceDates", () => {
     ).toEqual(["0100-06-15", "0100-06-16"])
   })
 
+  it("treats a corrupt dtstart as no occurrence instead of throwing", () => {
+    // legacy/direct-DB rows have no dtstart format CHECK; the read routes map
+    // nextOccurrenceDate over every plan, so a bad value must degrade, not 500
+    const w = { from: "2026-01-01", to: "2026-12-31" }
+    expect(expandOccurrenceDates("not-a-date", null, w)).toEqual([])
+    expect(expandOccurrenceDates("not-a-date", "FREQ=DAILY", w)).toEqual([])
+    expect(nextOccurrenceDate("not-a-date", null, "2026-11-23")).toBeNull()
+    expect(
+      nextOccurrenceDate("not-a-date", "FREQ=DAILY", "2026-11-23")
+    ).toBeNull()
+  })
+
   it("monthly rules expand across the window", () => {
     const dates = expandOccurrenceDates(
       "2026-01-01",

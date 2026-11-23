@@ -43,11 +43,12 @@ const MIN_MONTH_YEAR = Number(MIN_MONTH_KEY.slice(0, 4))
 const MAX_MONTH_YEAR = Number(MAX_MONTH_KEY.slice(0, 4))
 
 /**
- * Cap on the date-range month series. The analytics engine materializes one
- * bucket per month between the effective date bounds; without a cap a single
- * request can expand the whole representable calendar (~120k months). 1200
+ * Cap on the analytics month series: the engine zero-fills one bucket per
+ * month between the effective bounds, and without a cap a single request can
+ * expand the whole representable calendar (~120k synthetic months). 1200
  * months (100 years) comfortably exceeds real bank history while keeping the
- * response small and the expansion cheap.
+ * zero-fill cheap; months that actually hold data are always emitted, even
+ * for a wider span (see `computeAnalytics`).
  */
 export const MAX_DATE_RANGE_MONTHS = 1200
 

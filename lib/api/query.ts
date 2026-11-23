@@ -169,6 +169,16 @@ function windowTooFar(): WindowParse {
 }
 
 /**
+ * Clamp a date-arithmetic result that left the four-digit ISO range. ISO
+ * string comparison puts the extended-year form ("+010000-…", "-000001-…")
+ * below every real date, so an unclamped bound would reject every window.
+ */
+function clampIsoBound(iso: string): string {
+  if (isValidIsoDate(iso)) return iso
+  return iso.startsWith("-") ? MIN_ISO_DATE : MAX_ISO_DATE
+}
+
+/**
  * Shared calendar-window contract. With no options both bounds are required;
  * passing `defaultToDays` defaults `from` to today and `to` to
  * `from + defaultToDays`. Distance cap runs before the width cap: expansion
@@ -177,12 +187,25 @@ function windowTooFar(): WindowParse {
  * default `to` keeps a malformed `from` a 400, not a 500; distance-checking
  * the `from` side before the derivation keeps a near-MAX_ISO_DATE `from` a
  * `window_too_far` rather than an invalid extended-year default.
+ *
+ * `today` is part of the caller's contract (routes pass `todayLocal()`), but
+ * the bound arithmetic is clamped so a near-ceiling today still yields
+ * comparable bounds instead of extended-year strings, and a malformed today
+ * answers `invalid_window` instead of throwing.
  */
 export function parseWindow(
   sp: URLSearchParams,
   today: string,
   opts?: { defaultToDays: number }
 ): WindowParse {
+  if (!isValidIsoDate(today)) {
+    return {
+      ok: false,
+      error: "invalid_window",
+      message: "today must be an ISO date",
+    }
+  }
+
   const rawFrom = sp.get("from")
   const from = rawFrom ?? (opts ? today : null)
   if (from === null || !isValidIsoDate(from)) {
@@ -194,8 +217,10 @@ export function parseWindow(
   }
 
   const rawTo = sp.get("to")
-  const lowerBound = isoDatePlus(today, -MAX_WINDOW_DISTANCE_DAYS)
-  const upperBound = isoDatePlus(today, MAX_WINDOW_DISTANCE_DAYS)
+  const lowerBound = clampIsoBound(
+    isoDatePlus(today, -MAX_WINDOW_DISTANCE_DAYS)
+  )
+  const upperBound = clampIsoBound(isoDatePlus(today, MAX_WINDOW_DISTANCE_DAYS))
 
   // Check the from side before deriving the default `to`: the default is
   // `from + defaultToDays`, which overflows into the extended-year form near
@@ -205,7 +230,9 @@ export function parseWindow(
     return windowTooFar()
   }
 
-  const to = rawTo ?? (opts ? isoDatePlus(from, opts.defaultToDays) : null)
+  const to =
+    rawTo ??
+    (opts ? clampIsoBound(isoDatePlus(from, opts.defaultToDays)) : null)
   if (to === null || !isValidIsoDate(to)) {
     return {
       ok: false,
@@ -226,7 +253,11 @@ export function parseWindow(
     return windowTooFar()
   }
 
-  if (isoDatePlus(from, MAX_OCCURRENCE_WINDOW_DAYS) < to) {
+  // A from near MAX_ISO_DATE overflows this bound; the representable tail is
+  // necessarily shorter than the width cap, so an unrepresentable bound means
+  // "inside the cap".
+  const widthEnd = isoDatePlus(from, MAX_OCCURRENCE_WINDOW_DAYS)
+  if (isValidIsoDate(widthEnd) && widthEnd < to) {
     return {
       ok: false,
       error: "window_too_large",

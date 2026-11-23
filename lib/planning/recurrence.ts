@@ -18,7 +18,13 @@
  * keep rrule's intersection semantics. See `dayOfMonthClamp`.
  */
 import { RRule, rrulestr } from "rrule"
-import { daysInMonth, isoDate, MAX_ISO_DATE, noonUtc } from "@/lib/dates"
+import {
+  daysInMonth,
+  isoDate,
+  isValidIsoDate,
+  MAX_ISO_DATE,
+  noonUtc,
+} from "@/lib/dates"
 
 /**
  * rrule's calendar math goes through Date.UTC, which maps years 0–99 onto
@@ -493,6 +499,9 @@ export function expandOccurrenceDates(
   cap = 2000
 ): string[] {
   if (cap <= 0) return []
+  // Defensive against corrupt/legacy rows (the column has no format CHECK):
+  // a non-date must never leak into a response or the rrule calendar math.
+  if (!isValidIsoDate(dtstart)) return []
   if (isEmptyRule(rruleText)) {
     return dtstart >= w.from && dtstart <= w.to ? [dtstart] : []
   }
@@ -595,6 +604,10 @@ export function nextOccurrenceDate(
 ): string | null {
   if (!isEmptyRule(rruleText) && !rruleSupportsStart(dtstart)) return null
   const from = dtstart > afterIso ? dtstart : afterIso
+  // The ladder derives calendar parts from `from` before any try/catch; a
+  // corrupt dtstart (legacy/direct-DB row) or a non-date `afterIso` must
+  // answer "no occurrence", not throw Invalid time value up the read route.
+  if (!isValidIsoDate(from)) return null
   const [y, m, d] = from.split("-").map(Number)
   let prevTo: string | null = null
   for (const horizonDays of NEXT_HORIZON_LADDER) {

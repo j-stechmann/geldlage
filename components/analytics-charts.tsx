@@ -31,7 +31,7 @@ import {
   type XAxisTickContentProps,
 } from "recharts"
 import type { AnalyticsResponse } from "@/components/analytics-kpis"
-import type { ForecastResult } from "@/components/planning/api"
+import type { ForecastResult } from "@/lib/contracts/planning"
 import { resolveCategoryColor } from "@/lib/category-colors"
 
 const cashflowConfig = {

@@ -72,6 +72,12 @@ Indexes: `planned_transactions_user_status_idx` `(user_id, status)` and
   defaults `dtstart` to _now_ and would silently empty pre-today windows.
   Dates anchor at **noon UTC** (`Date.UTC(y, m-1, d, 12)`) so DST never
   shifts a day and month ends behave; ISO strings are read from UTC parts.
+  A non-date `dtstart` (legacy/direct-DB row; the column has no format CHECK)
+  yields no occurrences, and recurring starts before year 0100 are skipped
+  too: rrule's `Date.UTC` math remaps years 0–99 onto 1900–1999, so expanding
+  there would silently return the wrong century. The API floors `dtstart` at
+  1900 ([lib/planning/limits.ts](../lib/planning/limits.ts)); these guards
+  only cover corrupt rows and the unsaved dialog preview.
 - **Short months clamp to month end**: a positive monthly/yearly
   `BYMONTHDAY` anchor that a month cannot hold (29–31) fires on that
   month's **last day** instead of skipping the month — `BYMONTHDAY=31` gives

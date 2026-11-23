@@ -277,6 +277,23 @@ describe("parseWindow", () => {
     ).toMatchObject({ ok: false, error: "window_too_far" })
   })
 
+  it("is total for a malformed today and clamps a near-ceiling today", () => {
+    expect(
+      parseWindow(sp("from=2026-01-01&to=2026-01-31"), "not-a-date")
+    ).toMatchObject({ ok: false, error: "invalid_window" })
+
+    // today + the distance cap leaves the four-digit range; the bound must be
+    // clamped, not an extended-year string that sorts below every real date
+    expect(
+      parseWindow(sp("from=9999-12-20&to=9999-12-31"), "9999-12-20")
+    ).toEqual({ ok: true, from: "9999-12-20", to: "9999-12-31" })
+    expect(parseWindow(sp("from=9999-12-20"), "9999-12-20", defaults)).toEqual({
+      ok: true,
+      from: "9999-12-20",
+      to: "9999-12-31",
+    })
+  })
+
   it("rejects windows wider than the cap", () => {
     const wide = parseWindow(sp("from=2026-01-01&to=2027-06-01"), today)
     expect(wide).toMatchObject({ ok: false, error: "window_too_large" })

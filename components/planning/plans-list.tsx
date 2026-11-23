@@ -59,10 +59,12 @@ import {
   invalidatePlans,
   setPlanStatus,
   usePlansPage,
-  type PlanListFilters,
-  type PlanRow,
-  type PlanStatusFilter,
 } from "@/components/planning/api"
+import type {
+  PlanListFilters,
+  PlanRow,
+  PlanStatusFilter,
+} from "@/lib/contracts/planning"
 import { euro } from "@/lib/money"
 import { CategoryBadge } from "@/components/category-badge"
 

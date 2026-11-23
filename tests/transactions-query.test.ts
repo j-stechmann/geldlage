@@ -205,3 +205,18 @@ describe("queryTransactions extended fields", () => {
     expect(search("_").rows[0]?.payee).toBe("IBAN_DE02")
   })
 })
+
+describe("parseFilters ids", () => {
+  it("is digits-only, never parseInt-coerced", () => {
+    // parseInt alone would read "12abc" as account 12 / "3abc" as category 3;
+    // the planning/calendar routes reject that input for the same reason
+    expect(
+      parseFilters(new URLSearchParams("accountId=12abc&categoryId=3abc"))
+    ).toMatchObject({ accountId: undefined, categoryIds: [] })
+    expect(
+      parseFilters(
+        new URLSearchParams("accountId=12&categoryId=3&categoryId=4")
+      )
+    ).toMatchObject({ accountId: 12, categoryIds: [3, 4] })
+  })
+})

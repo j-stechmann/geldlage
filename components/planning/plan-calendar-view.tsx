@@ -4,11 +4,8 @@ import * as React from "react"
 import { Plus } from "lucide-react"
 import { PlanCalendar } from "@/components/planning/plan-calendar"
 import { PlanDialog } from "@/components/planning/plan-dialog"
-import {
-  usePlans,
-  type PlanOccurrence,
-  type PlanRow,
-} from "@/components/planning/api"
+import { usePlans } from "@/components/planning/api"
+import type { PlanOccurrence, PlanRow } from "@/lib/contracts/planning"
 import { ErrorState } from "@/components/error-state"
 import { Button } from "@/components/ui/button"
 

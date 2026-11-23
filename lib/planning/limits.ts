@@ -11,6 +11,19 @@
 export const MAX_COUNTERPARTY = 128
 export const MAX_TEXT = 500
 
+/**
+ * dtstart floor (year): occurrence expansion walks forward from dtstart on
+ * every read (plan list, occurrences, forecast) and rrule has no internal
+ * iteration cap — per-read cost is linear in the walk distance
+ * (window end − dtstart) and grows forever with plan age, so a 1900-floor
+ * DAILY plan already iterates ~126 years (~70 ms measured) on every read
+ * window that touches today. The floor bounds the worst case at one
+ * century-and-a-quarter back; anything earlier has no representable purpose
+ * (bank data never reaches that far). Shared with the dialog (the client
+ * preview must enforce the same floor) and the service validator.
+ */
+export const MIN_DTSTART_YEAR = 1900
+
 /** forecast horizon cap (months) */
 export const MAX_FORECAST_MONTHS = 60
 

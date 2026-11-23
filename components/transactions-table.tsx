@@ -43,7 +43,7 @@ import {
 } from "@/components/transaction-row"
 import { planPrefillFromTx } from "@/lib/planning/prefill"
 import { PlanDialog } from "@/components/planning/plan-dialog"
-import type { PlanRow } from "@/components/planning/api"
+import type { PlanRow } from "@/lib/contracts/planning"
 import { AssignLabelDialog } from "@/components/assign-label-dialog"
 import { useRowActivation } from "@/hooks/use-row-activation"
 import type { TransactionPage } from "@/lib/contracts/transactions"

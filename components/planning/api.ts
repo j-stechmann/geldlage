@@ -5,31 +5,17 @@ import { apiFetch } from "@/lib/api-fetch"
 import { isValidIsoDate, isoDatePlus } from "@/lib/dates"
 import { MATCH_DAYS_BEFORE, MATCH_DAYS_AFTER } from "@/lib/planning/limits"
 
-// ── DTOs (single source: lib/contracts/planning.ts, ADR-0037) ────────────
+// ── DTOs: consumers import them straight from lib/contracts/* (ADR-0037);
+// this module only needs the shapes its hooks return/produce ──────────────
 
 import type {
   ForecastResult,
   PlanListFilters,
   PlanListPage,
-  PlanListRow,
   PlanOccurrence,
-  PlanPrefill,
   PlanRow,
-  PlanStatusFilter,
 } from "@/lib/contracts/planning"
 import type { CalendarTransaction } from "@/lib/contracts/transactions"
-
-export type {
-  CalendarTransaction,
-  ForecastResult,
-  PlanListFilters,
-  PlanListPage,
-  PlanListRow,
-  PlanOccurrence,
-  PlanPrefill,
-  PlanRow,
-  PlanStatusFilter,
-}
 
 // ── query keys (house convention: two-phase, serializable params) ─────────
 

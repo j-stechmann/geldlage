@@ -137,6 +137,19 @@ describe("analytics month-span cap", () => {
     ])
   })
 
+  it("handles a caller-supplied today in 0000-01 without a predecessor month", () => {
+    // the current month is excluded from averages; at the bottom of the
+    // representable range there is no earlier month to fall back to
+    const r = computeAnalytics(filters(""), userId, "0000-01-15")
+    expect(r.monthlyCashflow.map((p) => p.month)).toEqual([
+      "0000-01",
+      "0001-01",
+      "9998-12",
+      "9999-12",
+    ])
+    expect(r.kpis.monthsCounted).toBe(0)
+  })
+
   it("drops malformed direct-caller dates instead of throwing in month math", () => {
     // parseFilters is the direct-caller entry point (engine tests, query
     // helpers); its date validation must match the route's, so a malformed

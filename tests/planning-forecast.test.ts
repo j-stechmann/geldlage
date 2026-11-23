@@ -618,6 +618,22 @@ describe("computeForecast", () => {
     expect(forecast.monthlyPlanned).toEqual([])
   })
 
+  it("matches a near-ceiling booking when the padded window overflows 9999", () => {
+    // The horizon clamp above puts `to` at 9999-12-31; padding it by
+    // MATCH_DAYS_AFTER must not produce the extended-year form, which sorts
+    // below every real date and would silently match nothing (double-counting
+    // the booking as both real-future and still-planned money).
+    seedPlan({ amountCents: -1000, dtstart: "9999-11-20" })
+    seedTx("9999-11-21", -1000)
+
+    const forecast = computeForecast(userId, {
+      months: 2,
+      today: "9999-11-15",
+    })
+    expect(forecast.monthlyPlanned).toEqual([])
+    expect(forecast.projectedBalance.at(-1)?.balanceCents).toBe(-1000)
+  })
+
   // Horizon edge (regression): a match whose booking posts AFTER horizonEnd
   // is outside the projection's real data entirely (starting balance stops
   // at today, realFuture at horizonEnd) — the planned occurrence must stay

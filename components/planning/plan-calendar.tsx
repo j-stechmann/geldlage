@@ -19,10 +19,9 @@ import {
   useCalendarTransactions,
   usePlanOccurrences,
   transactionDeepLink,
-  type CalendarTransaction,
-  type PlanOccurrence,
-  type PlanPrefill,
 } from "@/components/planning/api"
+import type { PlanOccurrence, PlanPrefill } from "@/lib/contracts/planning"
+import type { CalendarTransaction } from "@/lib/contracts/transactions"
 import { ErrorState } from "@/components/error-state"
 import { isoDateLocal, todayLocal } from "@/lib/dates"
 import { planPrefill } from "@/lib/planning/prefill"
@@ -38,7 +37,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { PlanDialog } from "@/components/planning/plan-dialog"
-import { useMatchedPlanForTx, type PlanRow } from "@/components/planning/api"
+import { useMatchedPlanForTx } from "@/components/planning/api"
+import type { PlanRow } from "@/lib/contracts/planning"
 
 function localMidnight(iso: string): Date {
   const [y, m, d] = iso.split("-").map(Number)

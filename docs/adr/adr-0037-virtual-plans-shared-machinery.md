@@ -40,7 +40,9 @@ Keep the virtuality invariant and share every reusable concern:
 2. **Shared date and query-parameter helpers.** `lib/dates.ts` owns ISO/local
    date arithmetic, keeping the original invalid-input contracts
    (`isoDatePlus` throws, `isoShift` returns `""`, `dayDiff` returns `NaN`);
-   the month-series helpers additionally reject keys outside `YYYY-MM`.
+   the month-series helpers additionally reject values that are neither a real
+   `YYYY-MM` key nor a real `YYYY-MM-DD` date (the forecast and engine pass
+   full dates).
    `lib/api/query.ts` owns the digits-only account/month parsing, the lenient
    page-number parsing and the calendar window caps and precedence shared by
    both calendar reads. The OFFSET-overflow guard lives in

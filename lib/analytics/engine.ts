@@ -128,7 +128,11 @@ export function computeAnalytics(
       const currentMonth = monthOf(today)
       let lastFullMonth: string | null = spanEndMonth
       if (lastFullMonth >= currentMonth) {
-        lastFullMonth = prevMonth(currentMonth)
+        // the current month itself is partial; a caller-supplied today in
+        // 0000-01 has no representable predecessor month (guard mirrored
+        // below for a partial 9999-12 dateFrom)
+        lastFullMonth =
+          currentMonth === MIN_MONTH_KEY ? null : prevMonth(currentMonth)
       } else if (
         f.dateTo !== undefined &&
         f.dateTo.slice(8, 10) !== lastDayOfMonthDay(f.dateTo)
@@ -140,11 +144,11 @@ export function computeAnalytics(
           lastFullMonth === MIN_MONTH_KEY ? null : prevMonth(lastFullMonth)
       }
 
-      // A data-derived span can be arbitrarily wide (an outlier booking
+      // Either bound can make the span arbitrarily wide: an explicit range
+      // the FilterBar allows, or a data-derived one (an outlier booking
       // date). Rather than reject the request, degrade to the months that
       // actually have data instead of materializing a synthetic zero-fill
-      // across centuries. Explicit two-sided ranges are capped by
-      // parseDateRange. The degraded series is also the average denominator:
+      // across centuries. The degraded series is also the average denominator:
       // monthsCounted and avg* below count the populated full months the
       // chart shows, never the synthetic span that was not materialized.
       const allMonths = monthSpanExceedsCap(spanStartMonth, spanEndMonth)

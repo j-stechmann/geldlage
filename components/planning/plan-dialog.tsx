@@ -36,9 +36,8 @@ import {
   invalidatePlans,
   ApiError,
   type PlanFormValues,
-  type PlanPrefill,
-  type PlanRow,
 } from "@/components/planning/api"
+import type { PlanPrefill, PlanRow } from "@/lib/contracts/planning"
 import {
   expandOccurrenceDates,
   nextOccurrenceDate,
@@ -52,6 +51,7 @@ import {
   noonUtc,
 } from "@/lib/dates"
 import { planTextLimit } from "@/lib/planning/fields"
+import { MIN_DTSTART_YEAR } from "@/lib/planning/limits"
 
 // Single source for the free-text caps: the same planTextLimit values feed
 // both the HTML maxLength hint and the inline byte check below.
@@ -997,6 +997,20 @@ export function PlanDialog({
     return null
   }, [form.amountText])
 
+  // The server floors dtstart at MIN_DTSTART_YEAR (a read-cost bound, see
+  // lib/planning/limits.ts). Enforce it inline: otherwise a year 1–99 start
+  // makes nextOccurrenceDate answer "no occurrence" and the preview blames
+  // the rule for a start the API rejects anyway.
+  const dtstartError = React.useMemo<string | null>(() => {
+    const value = form.dtstart
+    if (value === "") return null
+    if (!isValidIsoDate(value)) return "Startdatum ist kein gültiges Datum"
+    if (Number.parseInt(value.slice(0, 4), 10) < MIN_DTSTART_YEAR) {
+      return `Startdatum muss ab 01.01.${MIN_DTSTART_YEAR} liegen`
+    }
+    return null
+  }, [form.dtstart])
+
   // ── preview: next ≤3 dates, from the effective rule (same engine as the
   // server: the rrule package) ──
   const preview = React.useMemo(() => {
@@ -1004,7 +1018,7 @@ export function PlanDialog({
       return { dates: [] as string[], error: effective.error }
     }
     const dtstart = form.dtstart
-    if (!isValidIsoDate(dtstart))
+    if (!isValidIsoDate(dtstart) || dtstartError !== null)
       return { dates: [] as string[], error: null as string | null }
     if (effective.rrule === null) return { dates: [dtstart], error: null }
     try {
@@ -1047,7 +1061,7 @@ export function PlanDialog({
     } catch {
       return { dates: [], error: "Wiederholungsregel ist ungültig" }
     }
-  }, [effective, form.dtstart])
+  }, [effective, form.dtstart, dtstartError])
 
   // short-month hint: day-of-month anchors (29–31) clamp to month end in
   // months that cannot hold them — monthly always, yearly when no month is
@@ -1148,6 +1162,7 @@ export function PlanDialog({
   // only the server's 400 (generic "ungültig" toast) pushed back.
   const canSave =
     isValidIsoDate(form.dtstart) &&
+    dtstartError === null &&
     form.amountText.trim() !== "" &&
     amountError === null &&
     preview.error === null &&
@@ -1222,8 +1237,12 @@ export function PlanDialog({
                 type="date"
                 value={form.dtstart}
                 onChange={(e) => set({ dtstart: e.target.value })}
+                aria-invalid={dtstartError !== null || undefined}
                 aria-label="Startdatum"
-              />
+              />,
+              dtstartError ? (
+                <span className="text-destructive">{dtstartError}</span>
+              ) : undefined
             )}
           </div>
 
