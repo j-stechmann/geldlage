@@ -188,7 +188,11 @@ export function usePlanOccurrences(
   })
 }
 
-/** Booked real transactions of the same window — the calendar's "Buchungen". */
+/**
+ * Real transactions of the same window — the calendar's "Buchungen". Both
+ * booked and pending rows are returned (`Gebucht` + `Nicht gebucht`); the
+ * calendar renders pending chips hollow.
+ */
 export function useCalendarTransactions(
   from: string | null,
   to: string | null,

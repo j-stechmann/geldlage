@@ -145,6 +145,7 @@ describe("month helpers", () => {
       expect(() => monthCountBetween(bad, "2026-01")).toThrow(RangeError)
       expect(() => monthsBetween(bad, "2026-01")).toThrow(RangeError)
       expect(() => lastDayOfMonthIso(bad)).toThrow(RangeError)
+      expect(() => lastDayOfMonthDay(bad)).toThrow(RangeError)
     }
     expect(() => monthsBetween("2026-01", "nope")).toThrow(RangeError)
     expect(() => monthOffset("2026-01", Number.NaN)).toThrow(RangeError)

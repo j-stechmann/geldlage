@@ -13,9 +13,10 @@
  * - `dayDiff` returns NaN only for unparseable input (NaN comparisons are
  *   false), with the same normalization caveat;
  * - the month-series helpers (`monthOffset`, `monthCountBetween`,
- *   `monthsBetween`, `lastDayOfMonthIso`) throw a RangeError for a key that
- *   is not a real `YYYY-MM` — a malformed key must never reach a response or
- *   SQL, and an unvalidated loop bound could otherwise never terminate.
+ *   `monthsBetween`, `lastDayOfMonthIso`, `lastDayOfMonthDay`) throw a
+ *   RangeError for a value that is neither a real `YYYY-MM` key nor a real
+ *   `YYYY-MM-DD` date — a malformed key must never reach a response or SQL,
+ *   and an unvalidated loop bound could otherwise never terminate.
  *
  * Calendar dates are plain `YYYY-MM-DD` strings. UTC arithmetic anchors at
  * noon so DST never shifts a day; local-calendar helpers are separate and
@@ -192,9 +193,13 @@ export function lastDayOfMonthIso(monthKey: string): string {
   return isoDate(y, m, daysInMonth(y, m))
 }
 
-/** Zero-padded day-of-month of the last calendar day of iso's month. */
+/**
+ * Zero-padded day-of-month of the last calendar day of iso's month. Validates
+ * like `lastDayOfMonthIso`: a malformed value throws instead of deriving a
+ * day from `NaN` parts.
+ */
 export function lastDayOfMonthDay(iso: string): string {
-  const [y, m] = iso.split("-").map(Number)
+  const [y, m] = monthParts(iso)
   return String(daysInMonth(y, m)).padStart(2, "0")
 }
 

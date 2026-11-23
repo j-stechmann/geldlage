@@ -28,9 +28,10 @@ async function requestBoth(query: string) {
 
 /**
  * Both list routes parse the same FilterBar params, so malformed dates must be
- * rejected identically. The month-span cap is deliberately analytics-only: it
- * guards the month-series materialization and must not reject the cheap
- * transactions list.
+ * rejected identically, and neither route rejects a syntactically valid range.
+ * The analytics-only month-series cap bounds materialization, not acceptance:
+ * a wide span degrades to the populated months on `/api/analytics` and is
+ * simply cheap on `/api/transactions`.
  */
 describe("shared date-filter contract", () => {
   it("rejects malformed dates identically", async () => {
@@ -42,14 +43,21 @@ describe("shared date-filter contract", () => {
     }
   })
 
-  it("caps the analytics span without rejecting the transactions list", async () => {
+  it("degrades over-wide analytics spans but never rejects the range", async () => {
     seedBookedTransaction(db, userId, "tx-wide", "1950-06-15")
     for (const query of OVER_CAP_TWO_SIDED_QUERIES) {
       const [analytics, transactions] = await requestBoth(query)
-      expect(analytics.status).toBe(400)
-      expect(await analytics.json()).toMatchObject({ error: "range_too_large" })
-      // the list query never materializes months, so the wide range still
-      // works and returns the row
+      // the analytics engine materializes one bucket per populated month
+      // instead of zero-filling a centuries-wide span (and never 400s: the
+      // FilterBar can produce any range the user picks)
+      expect(analytics.status).toBe(200)
+      expect(
+        (await analytics.json()).monthlyCashflow.map(
+          (p: { month: string }) => p.month
+        )
+      ).toEqual(["1950-06"])
+      // the list query never materializes months, so the wide range returns
+      // the row unchanged
       expect(transactions.status).toBe(200)
       expect((await transactions.json()).total).toBe(1)
     }

@@ -2,20 +2,18 @@
  * Shared query-parameter contracts for the list/window routes (ADR-0037).
  *
  * Server-only. The helpers keep the original route semantics except for the
- * documented contract changes: strict date validation (400 invalid_date /
- * range_too_large), an unrepresentable OFFSET answering an empty page that
- * echoes the requested number (guarded in lib/pagination.ts), and the
- * from-side window distance check running before `to` is validated. Otherwise
- * they stay parseInt-lenient for pages, digits-only for ids, and keep the
- * calendar window precedence (from → from-distance → to → order →
- * to-distance → width).
+ * documented contract changes: strict date validation (400 invalid_date), an
+ * unrepresentable OFFSET answering an empty page that echoes the requested
+ * number (guarded in lib/pagination.ts), and the from-side window distance
+ * check running before `to` is validated. Otherwise they stay parseInt-lenient
+ * for pages, digits-only for ids, and keep the calendar window precedence
+ * (from → from-distance → to → order → to-distance → width).
  */
 import {
   isoDatePlus,
   isValidIsoDate,
   MAX_ISO_DATE,
   MIN_ISO_DATE,
-  monthCountBetween,
 } from "@/lib/dates"
 
 export function positiveInt(raw: string | null, fallback: number): number {
@@ -104,43 +102,29 @@ export function parseAnalyticsDate(
   return { ok: true, value: raw }
 }
 
-export type DateRangeErrorCode = "invalid_date" | "range_too_large"
-
 export type DateRangeParse =
   | { ok: true; dateFrom?: string; dateTo?: string }
-  | { ok: false; error: DateRangeErrorCode; message: string }
-
-export interface DateRangeOptions {
-  /**
-   * Reject an explicitly requested two-sided range wider than this many
-   * months. Opt-in: only `/api/analytics` sets it, because that engine
-   * materializes one bucket per month. The transactions list just binds the
-   * dates into SQL, so a wide range there is cheap and stays valid.
-   */
-  maxMonths?: number
-}
+  | { ok: false; error: "invalid_date"; message: string }
 
 /**
  * Shared date-filter contract for the list routes. `/api/analytics` and
  * `/api/transactions` parse the same FilterBar params, so they accept and
  * reject the same *dates*.
  *
- * Only an explicitly requested two-sided range can be capped (opt-in via
- * `maxMonths`): it is the one span a caller can inflate arbitrarily. A
- * one-sided or absent bound is data-derived, so the engine bounds its
- * zero-fill gracefully instead of rejecting the request (see
- * `computeAnalytics`); pre-checking against today would over-reject stale
- * data.
+ * The parser deliberately accepts every in-range range, however wide: how
+ * much work a span costs is the engine's concern, not the request contract's.
+ * `/api/analytics` materializes one bucket per month, but only up to
+ * `MAX_DATE_RANGE_MONTHS` — a wider span degrades to the months that actually
+ * have data (see `computeAnalytics`) rather than rejecting a range the
+ * FilterBar lets a user pick. The transactions list binds the dates into SQL
+ * and is cheap for any width.
  *
  * `dateFrom > dateTo` is deliberately accepted: the month count is <= 0, no
  * rows match, and both routes return an empty filtered list — the pre-existing
  * behavior. (The analytics balance KPI is deliberately unfiltered, so it still
  * resolves as of `dateTo`; see docs/analytics.md.)
  */
-export function parseDateRange(
-  sp: URLSearchParams,
-  { maxMonths }: DateRangeOptions = {}
-): DateRangeParse {
+export function parseDateRange(sp: URLSearchParams): DateRangeParse {
   const from = parseAnalyticsDate(sp.get("dateFrom"))
   const to = parseAnalyticsDate(sp.get("dateTo"))
   if (!from.ok || !to.ok) {
@@ -151,22 +135,7 @@ export function parseDateRange(
     }
   }
 
-  const dateFrom = from.value
-  const dateTo = to.value
-  if (
-    maxMonths !== undefined &&
-    dateFrom !== undefined &&
-    dateTo !== undefined &&
-    monthCountBetween(dateFrom, dateTo) > maxMonths
-  ) {
-    return {
-      ok: false,
-      error: "range_too_large",
-      message: `date range must not exceed ${maxMonths} months`,
-    }
-  }
-
-  return { ok: true, dateFrom, dateTo }
+  return { ok: true, dateFrom: from.value, dateTo: to.value }
 }
 
 export type WindowErrorCode =

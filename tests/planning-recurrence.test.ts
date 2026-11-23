@@ -1,14 +1,13 @@
 import { describe, it, expect } from "vitest"
 import {
   expandOccurrenceDates,
-  isValidIsoDate,
-  isoDatePlus,
   isEmptyRule,
   MAX_RULE_LENGTH,
   nextOccurrenceDate,
   RuleValidationError,
   validateRrule,
 } from "@/lib/planning/recurrence"
+import { isValidIsoDate, isoDatePlus } from "@/lib/dates"
 
 function expectRuleError(input: string, message?: string) {
   expect(() => validateRrule(input)).toThrow(RuleValidationError)

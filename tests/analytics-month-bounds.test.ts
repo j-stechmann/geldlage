@@ -136,4 +136,18 @@ describe("analytics month-span cap", () => {
       "9999-12",
     ])
   })
+
+  it("drops malformed direct-caller dates instead of throwing in month math", () => {
+    // parseFilters is the direct-caller entry point (engine tests, query
+    // helpers); its date validation must match the route's, so a malformed
+    // value never reaches monthOf/monthSpanExceedsCap (RangeError). The call
+    // itself would throw if the invalid filter leaked through.
+    const r = computeAnalytics(filters("dateTo=nope"), userId, TODAY)
+    expect(r.monthlyCashflow.map((p) => p.month)).toEqual([
+      "0000-01",
+      "0001-01",
+      "9998-12",
+      "9999-12",
+    ])
+  })
 })

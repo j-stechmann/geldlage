@@ -20,11 +20,7 @@ import type {
 } from "@/lib/contracts/transactions"
 import { counterpartyOf } from "@/lib/transactions"
 import { buildTransactionScope } from "@/lib/analytics/scope"
-import {
-  parseDateRange,
-  type DateRangeErrorCode,
-  type DateRangeOptions,
-} from "@/lib/api/query"
+import { parseAnalyticsDate, parseDateRange } from "@/lib/api/query"
 
 export type SortField =
   "booking_date" | "value_date" | "amount_cents" | "payee" | "status"
@@ -43,19 +39,27 @@ export interface TransactionFilters {
   dir?: "asc" | "desc"
 }
 
+/** A valid ISO date param, or undefined for absent/malformed input. */
+function optionalIsoDate(raw: string | null): string | undefined {
+  const parsed = parseAnalyticsDate(raw)
+  return parsed.ok ? parsed.value : undefined
+}
+
 /**
  * Parse the shared filter params. Routes pass an already-validated `dates`
  * pair from `parseDateRange` so the date params are parsed once and cannot
  * silently diverge from the validated value. Direct callers (engine tests,
- * query helpers) may omit it and get the legacy lenient raw read.
+ * query helpers) omit it and get the identical validation: a malformed date
+ * is ignored like every other invalid filter value, never passed on to SQL or
+ * the engine's month arithmetic.
  */
 export function parseFilters(
   sp: URLSearchParams,
   dates?: Pick<TransactionFilters, "dateFrom" | "dateTo">
 ): TransactionFilters {
   const q = sp.get("q")?.trim() || undefined
-  const dateFrom = dates ? dates.dateFrom : sp.get("dateFrom") || undefined
-  const dateTo = dates ? dates.dateTo : sp.get("dateTo") || undefined
+  const dateFrom = dates ? dates.dateFrom : optionalIsoDate(sp.get("dateFrom"))
+  const dateTo = dates ? dates.dateTo : optionalIsoDate(sp.get("dateTo"))
   const typeRaw = sp.get("type")
   const type =
     typeRaw === "Ausgang" || typeRaw === "Eingang" ? typeRaw : undefined
@@ -102,19 +106,15 @@ export function parseFilters(
 
 export type RouteFiltersParse =
   | { ok: true; filters: TransactionFilters }
-  | { ok: false; error: DateRangeErrorCode; message: string }
+  | { ok: false; error: "invalid_date"; message: string }
 
 /**
  * Route-level filter parsing. Date validation is not optional here: both list
  * routes call this, so a new route cannot accidentally use the raw parser and
- * skip the shared date contract. `opts` is forwarded to `parseDateRange`; only
- * the analytics route enables the month-span cap (it materializes the series).
+ * skip the shared date contract.
  */
-export function parseRouteFilters(
-  sp: URLSearchParams,
-  opts?: DateRangeOptions
-): RouteFiltersParse {
-  const dates = parseDateRange(sp, opts)
+export function parseRouteFilters(sp: URLSearchParams): RouteFiltersParse {
+  const dates = parseDateRange(sp)
   if (!dates.ok) return dates
   return { ok: true, filters: parseFilters(sp, dates) }
 }

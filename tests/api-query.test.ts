@@ -13,7 +13,6 @@ import {
   parseWindow,
   positiveInt,
 } from "@/lib/api/query"
-import { MAX_DATE_RANGE_MONTHS } from "@/lib/dates"
 
 function sp(query: string): URLSearchParams {
   return new URLSearchParams(query)
@@ -144,37 +143,18 @@ describe("parseDateRange", () => {
     )
   })
 
-  it("leaves the month cap opt-in (the transactions list is uncapped)", () => {
-    // 1513 months: cheap as a SQL bound, so the shared parser accepts it
+  it("accepts any two-sided in-range span, however wide", () => {
+    // The engine bounds materialization (and degrades wide spans); the date
+    // contract itself never rejects a range the FilterBar can produce.
     expect(
       parseDateRange(sp("dateFrom=1900-01-01&dateTo=2026-01-01"))
     ).toMatchObject({ ok: true })
-  })
-
-  it("accepts exactly the month cap and rejects one month more when asked", () => {
-    const capped = { maxMonths: MAX_DATE_RANGE_MONTHS }
-    // (2025 - 1926) * 12 + 12 = 1200 inclusive months
-    expect(
-      parseDateRange(sp("dateFrom=1926-01-01&dateTo=2025-12-31"), capped)
-    ).toMatchObject({ ok: true, dateFrom: "1926-01-01" })
-    expect(
-      parseDateRange(sp("dateFrom=1925-12-01&dateTo=2025-12-31"), capped)
-    ).toMatchObject({ ok: false, error: "range_too_large" })
-  })
-
-  it("rejects full-calendar explicit ranges when the cap is enabled", () => {
     for (const query of OVER_CAP_TWO_SIDED_QUERIES) {
-      expect(
-        parseDateRange(sp(query), { maxMonths: MAX_DATE_RANGE_MONTHS })
-      ).toMatchObject({
-        ok: false,
-        error: "range_too_large",
-      })
+      expect(parseDateRange(sp(query))).toMatchObject({ ok: true })
     }
   })
 
   it("leaves one-sided ranges uncapped (the data side is unknown)", () => {
-    // the engine degrades to populated months instead of rejecting these
     for (const query of ["dateFrom=0001-01-01", "dateTo=9999-12-31"]) {
       expect(parseDateRange(sp(query))).toMatchObject({ ok: true })
     }

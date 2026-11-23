@@ -37,17 +37,12 @@ Both list endpoints (`/api/analytics` and `/api/transactions`) share date
 _validation_ (`parseDateRange` in [lib/api/query.ts](../lib/api/query.ts)):
 `dateFrom`/`dateTo` must be real ISO dates inside the single representable
 range `0000-01-01` … `9999-12-31` (derived from `MIN_ISO_DATE`/`MAX_ISO_DATE`,
-which also derive the engine's month-key bounds). An **explicit** two-sided
-range wider than `MAX_DATE_RANGE_MONTHS` (1200 months) is rejected with
-`400 range_too_large` on `/api/analytics`, whose engine materializes one
-bucket per month; `/api/transactions` keeps such a range, because its list
-query only binds the dates into SQL. The cap is therefore opt-in (`maxMonths`)
-at the analytics route. One-sided (or absent) bounds are data-derived and are
-never request-capped — the engine degrades gracefully instead (see below);
-measuring them against today would reject perfectly valid stale data. An
-inverted range (`dateFrom > dateTo`) is accepted and yields an empty filtered
-list, matching the pre-existing behavior — the balance KPI is deliberately
-unfiltered and still resolves as of `dateTo`.
+which also derive the engine's month-key bounds). A syntactically valid range
+is never rejected for its width — the FilterBar can produce any range a user
+picks, and how much series a span costs is the engine's concern (see below).
+An inverted range (`dateFrom > dateTo`) is accepted and yields an empty
+filtered list, matching the pre-existing behavior — the balance KPI is
+deliberately unfiltered and still resolves as of `dateTo`.
 
 ## Monthly cash flow
 
@@ -56,14 +51,13 @@ format makes this trivial), `income = SUM(CASE WHEN amount_cents > 0 …)`,
 `expenses = SUM(-amount_cents WHERE amount_cents < 0)`. JavaScript zero-fills
 months between the effective bounds (the requested dates, falling back to the
 first/last booking month) so the chart has no gaps; `net = income − expenses`
-per month. The zero-fill is capped at `MAX_DATE_RANGE_MONTHS` (1200 months).
-Explicit two-sided ranges above the cap are rejected by this endpoint with
-`400 range_too_large`; a data-derived span above the cap (a one-sided or
-unfiltered request, possibly with an outlier booking date) is not rejected —
-the engine emits only the months that actually have data instead of
-zero-filling across centuries. When it degrades, the average denominator
-(`monthsCounted`) is the populated full months the chart actually shows, not
-the synthetic span that was never materialized.
+per month. The zero-fill is bounded by `MAX_DATE_RANGE_MONTHS` (1200 months).
+A span above the cap — an explicit wide range, a one-sided request, or an
+unfiltered one, possibly with an outlier booking date — is not rejected: the
+engine emits only the months that actually have data instead of zero-filling
+across centuries. When it degrades, the average denominator (`monthsCounted`)
+is the populated full months the chart actually shows, not the synthetic span
+that was never materialized.
 
 ## Averages and savings rate
 

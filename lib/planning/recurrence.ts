@@ -18,18 +18,7 @@
  * keep rrule's intersection semantics. See `dayOfMonthClamp`.
  */
 import { RRule, rrulestr } from "rrule"
-import {
-  daysInMonth,
-  isoDate,
-  isValidIsoDate,
-  isoDatePlus,
-  MAX_ISO_DATE,
-  noonUtc,
-} from "@/lib/dates"
-
-// Date primitives live in lib/dates.ts (ADR-0037); re-exported here for the
-// recurrence engine's existing consumers and tests.
-export { isValidIsoDate, isoDatePlus, MAX_ISO_DATE, noonUtc }
+import { daysInMonth, isoDate, MAX_ISO_DATE, noonUtc } from "@/lib/dates"
 
 /**
  * rrule's calendar math goes through Date.UTC, which maps years 0–99 onto

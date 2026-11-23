@@ -29,11 +29,16 @@ describe("GET /api/analytics date filters", () => {
     }
   })
 
-  it("rejects explicit ranges wider than the month cap", async () => {
+  it("degrades explicit ranges wider than the month cap to populated months", async () => {
+    // never a 400: the FilterBar lets a user pick any range, so the cap bounds
+    // materialization instead of rejecting the request
+    seedBookedTransaction(db, userId, "tx-mid", "1950-06-15")
     for (const query of OVER_CAP_TWO_SIDED_QUERIES) {
       const res = await getAnalyticsQuery(query)
-      expect(res.status).toBe(400)
-      expect(await res.json()).toMatchObject({ error: "range_too_large" })
+      expect(res.status).toBe(200)
+      expect(await res.json()).toMatchObject({
+        monthlyCashflow: [{ month: "1950-06" }],
+      })
     }
   })
 
@@ -42,12 +47,12 @@ describe("GET /api/analytics date filters", () => {
       "",
       "dateFrom=&dateTo=",
       "dateFrom=2026-01-01&dateTo=2026-12-31",
-      // exactly the 1200-month cap
+      // exactly the 1200-month materialization cap (still zero-filled)
       "dateFrom=1926-01-01&dateTo=2025-12-31",
       // representable extremes, short ranges
       "dateFrom=0000-01-01&dateTo=0000-12-31",
       "dateFrom=9999-01-01&dateTo=9999-12-31",
-      // one-sided ranges are data-derived, never request-capped
+      // one-sided ranges are data-derived
       "dateFrom=0001-01-01",
       "dateTo=9999-12-31",
     ]) {
