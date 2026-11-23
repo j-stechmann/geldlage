@@ -2,12 +2,20 @@
  * Shared date helpers (ADR-0037).
  *
  * Pure and client-safe: no rrule, no drizzle, no server modules. The helpers
- * deliberately keep their original invalid-input contracts — they are load
- * bearing at their call sites:
+ * keep the invalid-input contracts their call sites rely on (they are load
+ * bearing) and fail loudly where a malformed value could otherwise corrupt an
+ * output or hang a loop:
  *
- * - `isoDatePlus` throws on malformed input (routes validate before calling);
- * - `isoShift` returns "" for non-date input (matching filters it out);
- * - `dayDiff` returns NaN for malformed input (NaN comparisons are false).
+ * - `isoDatePlus` throws only for input `Date` cannot parse; a parseable but
+ *   impossible day/month normalizes like `Date` (routes validate first);
+ * - `isoShift` returns "" only for unparseable input (the matcher filters it
+ *   out); impossible-but-parseable dates normalize the same way;
+ * - `dayDiff` returns NaN only for unparseable input (NaN comparisons are
+ *   false), with the same normalization caveat;
+ * - the month-series helpers (`monthOffset`, `monthCountBetween`,
+ *   `monthsBetween`, `lastDayOfMonthIso`) throw a RangeError for a key that
+ *   is not a real `YYYY-MM` — a malformed key must never reach a response or
+ *   SQL, and an unvalidated loop bound could otherwise never terminate.
  *
  * Calendar dates are plain `YYYY-MM-DD` strings. UTC arithmetic anchors at
  * noon so DST never shifts a day; local-calendar helpers are separate and
@@ -41,8 +49,6 @@ const MAX_MONTH_YEAR = Number(MAX_MONTH_KEY.slice(0, 4))
  * response small and the expansion cheap.
  */
 export const MAX_DATE_RANGE_MONTHS = 1200
-
-export const DATE_RANGE_TOO_LARGE_MESSAGE = `date range must not exceed ${MAX_DATE_RANGE_MONTHS} months`
 
 /**
  * UTC Date without Date.UTC's year 0–99 → 1900–1999 remap. The setters keep
@@ -81,7 +87,11 @@ export function noonUtc(iso: string): Date {
   return utcDate(y, m, d, 12)
 }
 
-/** ISO date exactly `days` days from an ISO date (UTC calendar arithmetic). */
+/**
+ * ISO date exactly `days` days from an ISO date (UTC calendar arithmetic).
+ * Out-of-range day/month parts normalize like `Date`; only unparseable input
+ * throws.
+ */
 export function isoDatePlus(iso: string, days: number): string {
   const [y, m, d] = iso.split("-").map(Number)
   return utcDate(y, m, d + days, 12)
@@ -90,7 +100,7 @@ export function isoDatePlus(iso: string, days: number): string {
 }
 
 /**
- * ISO date ± days, "" for non-date input. The planning matcher uses this
+ * ISO date ± days, "" for unparseable input. The planning matcher uses this
  * tolerant form when building candidate windows.
  */
 export function isoShift(iso: string, days: number): string {
@@ -100,7 +110,7 @@ export function isoShift(iso: string, days: number): string {
 }
 
 /**
- * Absolute day difference between two ISO dates. NaN for malformed input —
+ * Absolute day difference between two ISO dates. NaN for unparseable input —
  * callers compare with `<=`, which stays false for NaN.
  */
 export function dayDiff(isoA: string, isoB: string): number {
@@ -137,15 +147,30 @@ export function isValidMonthKey(monthKey: string): boolean {
 }
 
 /**
+ * Numeric parts of a validated month key (a full ISO date is accepted too).
+ * The whole value is validated — a valid 7-char prefix with trailing garbage
+ * must not be read as that month.
+ */
+function monthParts(value: string): [number, number] {
+  if (!isValidMonthKey(value) && !isValidIsoDate(value)) {
+    throw new RangeError(`invalid month key "${value}"`)
+  }
+  const [y, m] = value.slice(0, 7).split("-").map(Number)
+  return [y, m]
+}
+
+/**
  * "YYYY-MM" month key `offset` months from the month containing baseIso.
- * Throws RangeError when the result would leave the representable
- * MIN_MONTH_KEY … MAX_MONTH_KEY range: a malformed key must never leak into a
- * response or SQL. (prevMonth("0000-01") and nextMonth("9999-12") are
- * therefore errors, not silent corruptions.)
+ * Throws RangeError for an invalid month key, a non-integer offset, or a
+ * result outside the representable MIN_MONTH_KEY … MAX_MONTH_KEY range
+ * (prevMonth("0000-01") and nextMonth("9999-12") are therefore errors, not
+ * silent corruptions).
  */
 export function monthOffset(baseIso: string, offset: number): string {
-  const base = baseIso.slice(0, 7)
-  const [y, m] = base.split("-").map(Number)
+  const [y, m] = monthParts(baseIso)
+  if (!Number.isInteger(offset)) {
+    throw new RangeError(`month offset must be an integer: ${offset}`)
+  }
   const total = y * 12 + (m - 1) + offset
   const ny = Math.floor(total / 12)
   if (ny < MIN_MONTH_YEAR || ny > MAX_MONTH_YEAR) {
@@ -160,11 +185,10 @@ export function monthOffset(baseIso: string, offset: number): string {
 
 /**
  * Last day of the month named by a "YYYY-MM" key, as "YYYY-MM-DD".
- * Month keys must be valid `YYYY-MM` (they come from `monthOf` and chained
- * `prevMonth`/`nextMonth` calls).
+ * Throws RangeError for an invalid month key (see `monthParts`).
  */
 export function lastDayOfMonthIso(monthKey: string): string {
-  const [y, m] = monthKey.split("-").map(Number)
+  const [y, m] = monthParts(monthKey)
   return isoDate(y, m, daysInMonth(y, m))
 }
 
@@ -187,24 +211,32 @@ export function nextMonth(month: string): string {
 /**
  * Inclusive month count between two ISO dates/months. <= 0 when `fromIso`
  * is after `toIso` — the non-allocating counterpart of `monthsBetween`, for
- * span caps that must not materialize the range first.
+ * span caps that must not materialize the range first. Throws RangeError for
+ * an invalid month key.
  */
 export function monthCountBetween(fromIso: string, toIso: string): number {
-  const [fy, fm] = fromIso.split("-").map(Number)
-  const [ty, tm] = toIso.split("-").map(Number)
+  const [fy, fm] = monthParts(fromIso)
+  const [ty, tm] = monthParts(toIso)
   return (ty - fy) * 12 + (tm - fm) + 1
 }
 
-/** True when the inclusive month span between the bounds exceeds the cap. */
+/**
+ * True when the inclusive month span between the bounds exceeds the cap.
+ * Both bounds must be valid month keys (RangeError otherwise).
+ */
 export function monthSpanExceedsCap(fromIso: string, toIso: string): boolean {
   return monthCountBetween(fromIso, toIso) > MAX_DATE_RANGE_MONTHS
 }
 
-/** List of "YYYY-MM" keys between two ISO dates/months, inclusive. */
+/**
+ * List of "YYYY-MM" keys between two ISO dates/months, inclusive. Throws
+ * RangeError for an invalid month key — a `NaN` month would otherwise make
+ * the loop bound never advance (an empty key hung forever).
+ */
 export function monthsBetween(fromIso: string, toIso: string): string[] {
   const months: string[] = []
-  let [y, m] = fromIso.split("-").map(Number)
-  const [ty, tm] = toIso.split("-").map(Number)
+  let [y, m] = monthParts(fromIso)
+  const [ty, tm] = monthParts(toIso)
   while (y < ty || (y === ty && m <= tm)) {
     months.push(`${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}`)
     m++

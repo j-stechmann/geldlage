@@ -22,8 +22,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(queryTransactionById(id, session.uid))
   }
 
-  // shared with /api/analytics: identical date params must produce identical
-  // accept/reject behavior in both panels
+  // shares date validation with /api/analytics. Its 1200-month span cap is
+  // deliberately not applied here: this list never materializes a month
+  // series, so a wide range only widens the SQL bound and stays valid.
   const parsed = parseRouteFilters(sp)
   if (!parsed.ok) {
     return NextResponse.json(

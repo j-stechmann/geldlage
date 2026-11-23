@@ -33,6 +33,8 @@ import {
   isValidIsoDate,
   isoDatePlus,
   lastDayOfMonthIso,
+  MAX_MONTH_KEY,
+  monthCountBetween,
   monthOffset,
   todayLocal,
 } from "@/lib/dates"
@@ -708,7 +710,16 @@ export function computeForecast(
       ? options.accountId
       : undefined
   const today = options.today ?? todayLocal()
-  const horizonEnd = lastDayOfMonthIso(monthOffset(today, months - 1))
+  // A caller-supplied `today` near the storable ceiling can push the horizon
+  // past 9999-12, which monthOffset rejects. Clamp there instead of throwing:
+  // the routes always pass todayLocal(), so this only keeps the exported
+  // function total, with the horizon ending on the last representable day.
+  const monthsToCeiling = monthCountBetween(today, MAX_MONTH_KEY)
+  const horizonMonth =
+    months - 1 >= monthsToCeiling
+      ? MAX_MONTH_KEY
+      : monthOffset(today, months - 1)
+  const horizonEnd = lastDayOfMonthIso(horizonMonth)
 
   // ── current balance: snapshot-anchored, shared with analytics/engine.ts ──
   // latestAnchor applies the same snapshotDate <= today filter and the same

@@ -90,6 +90,16 @@ describe("analytics month-span cap", () => {
     ).toEqual(populated)
   })
 
+  it("averages over the populated full months when the series degrades", () => {
+    // the synthetic century-wide span is never materialized, so it must not
+    // dilute the "over N full months" KPI; only the populated months that
+    // are full and not in the future count (0000-01 and 0001-01 here)
+    const r = computeAnalytics(filters(""), userId, TODAY)
+    expect(r.kpis.monthsCounted).toBe(2)
+    expect(r.kpis.avgMonthlyIncomeCents).toBe(100)
+    expect(r.kpis.avgMonthlyExpensesCents).toBe(0)
+  })
+
   it("materializes exactly 1200 months at the cap", () => {
     seedBookedTransaction(db, userId, "tx-mid", "1950-06-15", { accountId })
 

@@ -1,6 +1,7 @@
 /**
- * Planning limits, shared by the server validation, the calendar routes and
- * the plan dialog (ADR-0035/0037).
+ * Planning limits, shared by the server validation, the forecast route and
+ * service, plan matching and the plan dialog (ADR-0035/0037). The calendar
+ * window caps live in `lib/api/query.ts` beside `parseWindow`.
  *
  * The free-text byte limits matter on both sides: HTML maxLength counts JS
  * characters, never UTF-8 bytes, so an input allowing 128 characters would

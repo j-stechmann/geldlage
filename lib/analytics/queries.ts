@@ -20,7 +20,11 @@ import type {
 } from "@/lib/contracts/transactions"
 import { counterpartyOf } from "@/lib/transactions"
 import { buildTransactionScope } from "@/lib/analytics/scope"
-import { parseDateRange, type DateRangeErrorCode } from "@/lib/api/query"
+import {
+  parseDateRange,
+  type DateRangeErrorCode,
+  type DateRangeOptions,
+} from "@/lib/api/query"
 
 export type SortField =
   "booking_date" | "value_date" | "amount_cents" | "payee" | "status"
@@ -103,10 +107,14 @@ export type RouteFiltersParse =
 /**
  * Route-level filter parsing. Date validation is not optional here: both list
  * routes call this, so a new route cannot accidentally use the raw parser and
- * skip the shared date contract.
+ * skip the shared date contract. `opts` is forwarded to `parseDateRange`; only
+ * the analytics route enables the month-span cap (it materializes the series).
  */
-export function parseRouteFilters(sp: URLSearchParams): RouteFiltersParse {
-  const dates = parseDateRange(sp)
+export function parseRouteFilters(
+  sp: URLSearchParams,
+  opts?: DateRangeOptions
+): RouteFiltersParse {
+  const dates = parseDateRange(sp, opts)
   if (!dates.ok) return dates
   return { ok: true, filters: parseFilters(sp, dates) }
 }

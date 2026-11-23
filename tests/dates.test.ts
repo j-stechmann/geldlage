@@ -127,6 +127,30 @@ describe("month helpers", () => {
     expect(() => nextMonth("9999-12")).toThrow(RangeError)
   })
 
+  it("rejects malformed month keys instead of looping or emitting garbage", () => {
+    // an empty key used to parse as year 0 / month NaN, so monthsBetween's
+    // loop condition never advanced — it hung instead of returning.
+    for (const bad of [
+      "",
+      "nope",
+      "0000",
+      "2026-13",
+      "2026-00",
+      // a valid prefix with trailing garbage must not be read as that month
+      "2026-01x",
+      "2026-01 ",
+      "2026-01-01T00:00:00Z",
+    ]) {
+      expect(() => monthOffset(bad, 0)).toThrow(RangeError)
+      expect(() => monthCountBetween(bad, "2026-01")).toThrow(RangeError)
+      expect(() => monthsBetween(bad, "2026-01")).toThrow(RangeError)
+      expect(() => lastDayOfMonthIso(bad)).toThrow(RangeError)
+    }
+    expect(() => monthsBetween("2026-01", "nope")).toThrow(RangeError)
+    expect(() => monthOffset("2026-01", Number.NaN)).toThrow(RangeError)
+    expect(() => monthOffset("2026-01", 1.5)).toThrow(RangeError)
+  })
+
   it("lists inclusive month keys between dates", () => {
     expect(monthsBetween("2025-11-20", "2026-02-02")).toEqual([
       "2025-11",

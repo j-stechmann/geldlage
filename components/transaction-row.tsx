@@ -19,16 +19,12 @@ import type { RowActivation } from "@/hooks/use-row-activation"
 import { useMatchedPlanForTx, type PlanRow } from "@/components/planning/api"
 import type { TransactionRow as TransactionRowDto } from "@/lib/contracts/transactions"
 import { counterpartyOf } from "@/lib/transactions"
-import { planPrefillFromTx } from "@/lib/planning/prefill"
 
 /**
  * Client-side DTO mirroring the /api/transactions row — the shared
  * ADR-0037 contract, aliased to the name the existing consumers/tests use.
  */
 export type TxRow = TransactionRowDto
-
-// Re-exported for the existing consumers/tests (ADR-0037).
-export { counterpartyOf, planPrefillFromTx }
 
 /**
  * DOM id of a row's expanded detail <tr>, shared by the chevron's

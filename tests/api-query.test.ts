@@ -13,6 +13,7 @@ import {
   parseWindow,
   positiveInt,
 } from "@/lib/api/query"
+import { MAX_DATE_RANGE_MONTHS } from "@/lib/dates"
 
 function sp(query: string): URLSearchParams {
   return new URLSearchParams(query)
@@ -143,19 +144,29 @@ describe("parseDateRange", () => {
     )
   })
 
-  it("accepts exactly the month cap and rejects one month more", () => {
+  it("leaves the month cap opt-in (the transactions list is uncapped)", () => {
+    // 1513 months: cheap as a SQL bound, so the shared parser accepts it
+    expect(
+      parseDateRange(sp("dateFrom=1900-01-01&dateTo=2026-01-01"))
+    ).toMatchObject({ ok: true })
+  })
+
+  it("accepts exactly the month cap and rejects one month more when asked", () => {
+    const capped = { maxMonths: MAX_DATE_RANGE_MONTHS }
     // (2025 - 1926) * 12 + 12 = 1200 inclusive months
     expect(
-      parseDateRange(sp("dateFrom=1926-01-01&dateTo=2025-12-31"))
+      parseDateRange(sp("dateFrom=1926-01-01&dateTo=2025-12-31"), capped)
     ).toMatchObject({ ok: true, dateFrom: "1926-01-01" })
     expect(
-      parseDateRange(sp("dateFrom=1925-12-01&dateTo=2025-12-31"))
+      parseDateRange(sp("dateFrom=1925-12-01&dateTo=2025-12-31"), capped)
     ).toMatchObject({ ok: false, error: "range_too_large" })
   })
 
-  it("rejects full-calendar explicit ranges", () => {
+  it("rejects full-calendar explicit ranges when the cap is enabled", () => {
     for (const query of OVER_CAP_TWO_SIDED_QUERIES) {
-      expect(parseDateRange(sp(query))).toMatchObject({
+      expect(
+        parseDateRange(sp(query), { maxMonths: MAX_DATE_RANGE_MONTHS })
+      ).toMatchObject({
         ok: false,
         error: "range_too_large",
       })
@@ -194,6 +205,8 @@ describe("parseOptionalAccountId", () => {
     for (const raw of ["", "0", "-1", "12.9", "12abc", " 12"]) {
       expect(parseOptionalAccountId(raw)).toEqual({ ok: false })
     }
+    // a 400-digit value parses to Infinity, which is not an account id
+    expect(parseOptionalAccountId("9".repeat(400))).toEqual({ ok: false })
   })
 })
 
@@ -207,6 +220,12 @@ describe("parseOptionalClampedInt", () => {
       value: 60,
     })
     expect(parseOptionalClampedInt("12abc", opts)).toEqual({ ok: false })
+    // Infinity (overflowing digits) still clamps to the ceiling, like any
+    // other out-of-range numeric value
+    expect(parseOptionalClampedInt("9".repeat(400), opts)).toEqual({
+      ok: true,
+      value: 60,
+    })
   })
 })
 

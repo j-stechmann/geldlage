@@ -1,10 +1,11 @@
 /**
  * Shared planning contracts (ADR-0037).
  *
- * Types only — this module must stay import-safe for client components: no
- * drizzle, no `lib/db`, no server-only runtime imports. The planning service
- * and `components/planning/api.ts` both import these shapes so the wire
- * contract can no longer drift between server and client.
+ * Types plus the status vocabulary constant — no runtime dependencies beyond
+ * that array. This module must stay import-safe for client components: no
+ * drizzle, no `lib/db`, no server-only imports. The planning service and
+ * `components/planning/api.ts` both import these shapes so the wire contract
+ * can no longer drift between server and client.
  */
 
 export const PLAN_STATUSES = ["active", "paused", "finished"] as const

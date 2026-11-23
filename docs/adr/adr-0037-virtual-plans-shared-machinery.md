@@ -32,14 +32,15 @@ the transaction side already owned:
 Keep the virtuality invariant and share every reusable concern:
 
 1. **Single-source contracts.** `lib/contracts/planning.ts` and
-   `lib/contracts/transactions.ts` (types only, client-safe) are the one
-   declaration of the wire DTOs. `PlanStatus` lives there; the schema imports
-   and re-exports it. Client/server drift becomes a compile error rather than
-   a runtime surprise.
+   `lib/contracts/transactions.ts` (client-safe: types plus the status
+   vocabulary) are the one declaration of the wire DTOs. `PlanStatus` lives
+   there; the schema imports and re-exports it. Client/server drift becomes a
+   compile error rather than a runtime surprise.
 
 2. **Shared date and query-parameter helpers.** `lib/dates.ts` owns ISO/local
    date arithmetic, keeping the original invalid-input contracts
-   (`isoDatePlus` throws, `isoShift` returns `""`, `dayDiff` returns `NaN`).
+   (`isoDatePlus` throws, `isoShift` returns `""`, `dayDiff` returns `NaN`);
+   the month-series helpers additionally reject keys outside `YYYY-MM`.
    `lib/api/query.ts` owns the digits-only account/month parsing, the lenient
    page-number parsing and the calendar window caps and precedence shared by
    both calendar reads. The OFFSET-overflow guard lives in
@@ -110,8 +111,10 @@ Keep the virtuality invariant and share every reusable concern:
 - Negative: a small amount of coupling between planning and the transaction
   read layer; the contracts module must stay import-safe for clients, and the
   shared parameter/date helpers must preserve their original edge semantics.
-- Neutral: the wire API is unchanged; the existing route/UI tests remain the
-  integration guard.
+- Neutral: response shapes and defaults are unchanged and the existing
+  route/UI tests remain the integration guard. The intentional validation,
+  paging and window-precedence changes are listed in the PR and in
+  [api.md](../api.md) / [planning.md](../planning.md).
 
 ## References
 

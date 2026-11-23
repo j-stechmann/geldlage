@@ -27,9 +27,10 @@ async function requestBoth(query: string) {
 }
 
 /**
- * Both list routes parse the same FilterBar params, so they must accept and
- * reject exactly the same dates — otherwise one panel renders while the other
- * shows an error for the same URL.
+ * Both list routes parse the same FilterBar params, so malformed dates must be
+ * rejected identically. The month-span cap is deliberately analytics-only: it
+ * guards the month-series materialization and must not reject the cheap
+ * transactions list.
  */
 describe("shared date-filter contract", () => {
   it("rejects malformed dates identically", async () => {
@@ -41,12 +42,16 @@ describe("shared date-filter contract", () => {
     }
   })
 
-  it("rejects over-cap ranges identically", async () => {
+  it("caps the analytics span without rejecting the transactions list", async () => {
+    seedBookedTransaction(db, userId, "tx-wide", "1950-06-15")
     for (const query of OVER_CAP_TWO_SIDED_QUERIES) {
       const [analytics, transactions] = await requestBoth(query)
       expect(analytics.status).toBe(400)
-      expect(transactions.status).toBe(400)
-      expect(await analytics.json()).toEqual(await transactions.json())
+      expect(await analytics.json()).toMatchObject({ error: "range_too_large" })
+      // the list query never materializes months, so the wide range still
+      // works and returns the row
+      expect(transactions.status).toBe(200)
+      expect((await transactions.json()).total).toBe(1)
     }
   })
 

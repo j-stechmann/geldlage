@@ -1,19 +1,21 @@
 /**
  * Shared query-parameter contracts for the list/window routes (ADR-0037).
  *
- * Server-only. The helpers reproduce the existing route semantics exactly:
- * lenient pagination (parseInt permissiveness; an invalid page falls back to
- * 1, while an unrepresentable OFFSET yields an empty page — guarded in
- * lib/pagination.ts), strict digits-only ids, and the calendar window
- * precedence (from → from-distance → to → order → to-distance → width).
+ * Server-only. The helpers keep the original route semantics except for the
+ * documented contract changes: strict date validation (400 invalid_date /
+ * range_too_large), an unrepresentable OFFSET answering an empty page that
+ * echoes the requested number (guarded in lib/pagination.ts), and the
+ * from-side window distance check running before `to` is validated. Otherwise
+ * they stay parseInt-lenient for pages, digits-only for ids, and keep the
+ * calendar window precedence (from → from-distance → to → order →
+ * to-distance → width).
  */
 import {
-  DATE_RANGE_TOO_LARGE_MESSAGE,
   isoDatePlus,
   isValidIsoDate,
   MAX_ISO_DATE,
   MIN_ISO_DATE,
-  monthSpanExceedsCap,
+  monthCountBetween,
 } from "@/lib/dates"
 
 export function positiveInt(raw: string | null, fallback: number): number {
@@ -22,10 +24,11 @@ export function positiveInt(raw: string | null, fallback: number): number {
 }
 
 /**
- * Positive page number, 1 for missing/malformed/overflowing input. Pages
- * above 2^53 are accepted and echoed: SQLite can bind their integral offsets
- * up to 2^63, and beyond that `paginate` answers an empty page. `parseInt`
- * stays deliberately lenient (`"3abc"` → 3, `"1e18"` → 1).
+ * Positive page number, 1 for missing/non-numeric/non-positive input. Huge
+ * finite pages (above 2^53) are accepted and echoed at JSON-number precision:
+ * SQLite can bind their offsets up to 2^63, and beyond that `paginate`
+ * answers an empty page. `parseInt` stays deliberately lenient (`"3abc"` → 3,
+ * `"1e18"` → 1).
  */
 export function parsePage(raw: string | null): number {
   const n = Number.parseInt(raw ?? "", 10)
@@ -107,23 +110,37 @@ export type DateRangeParse =
   | { ok: true; dateFrom?: string; dateTo?: string }
   | { ok: false; error: DateRangeErrorCode; message: string }
 
+export interface DateRangeOptions {
+  /**
+   * Reject an explicitly requested two-sided range wider than this many
+   * months. Opt-in: only `/api/analytics` sets it, because that engine
+   * materializes one bucket per month. The transactions list just binds the
+   * dates into SQL, so a wide range there is cheap and stays valid.
+   */
+  maxMonths?: number
+}
+
 /**
  * Shared date-filter contract for the list routes. `/api/analytics` and
- * `/api/transactions` parse the same FilterBar params, so they must accept and
- * reject exactly the same queries.
+ * `/api/transactions` parse the same FilterBar params, so they accept and
+ * reject the same *dates*.
  *
- * Only an explicitly requested two-sided range is capped: that is the one span
- * a caller can inflate arbitrarily. A one-sided or absent bound is
- * data-derived, so the engine bounds its zero-fill gracefully instead of
- * rejecting the request (see `computeAnalytics`); pre-checking against today
- * would over-reject stale data.
+ * Only an explicitly requested two-sided range can be capped (opt-in via
+ * `maxMonths`): it is the one span a caller can inflate arbitrarily. A
+ * one-sided or absent bound is data-derived, so the engine bounds its
+ * zero-fill gracefully instead of rejecting the request (see
+ * `computeAnalytics`); pre-checking against today would over-reject stale
+ * data.
  *
  * `dateFrom > dateTo` is deliberately accepted: the month count is <= 0, no
  * rows match, and both routes return an empty filtered list — the pre-existing
  * behavior. (The analytics balance KPI is deliberately unfiltered, so it still
  * resolves as of `dateTo`; see docs/analytics.md.)
  */
-export function parseDateRange(sp: URLSearchParams): DateRangeParse {
+export function parseDateRange(
+  sp: URLSearchParams,
+  { maxMonths }: DateRangeOptions = {}
+): DateRangeParse {
   const from = parseAnalyticsDate(sp.get("dateFrom"))
   const to = parseAnalyticsDate(sp.get("dateTo"))
   if (!from.ok || !to.ok) {
@@ -137,14 +154,15 @@ export function parseDateRange(sp: URLSearchParams): DateRangeParse {
   const dateFrom = from.value
   const dateTo = to.value
   if (
+    maxMonths !== undefined &&
     dateFrom !== undefined &&
     dateTo !== undefined &&
-    monthSpanExceedsCap(dateFrom, dateTo)
+    monthCountBetween(dateFrom, dateTo) > maxMonths
   ) {
     return {
       ok: false,
       error: "range_too_large",
-      message: DATE_RANGE_TOO_LARGE_MESSAGE,
+      message: `date range must not exceed ${maxMonths} months`,
     }
   }
 

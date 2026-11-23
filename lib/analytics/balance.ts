@@ -1,10 +1,11 @@
 /**
  * Shared snapshot-anchor and time-scoped balance predicates (ADR-0037).
  *
- * Extracted verbatim from `engine.ts` so the forecast reuses the exact same
- * anchor pick and booked predicate instead of mirroring them. This module is
- * the *implementation* both scopes share; the scopes themselves stay
- * separate (ADR-0022): this predicate never accepts `TransactionFilters`.
+ * Extracted from `engine.ts` so the forecast reuses the exact same anchor
+ * pick and booked predicate instead of mirroring them (the anchor selection
+ * is now one ordered SQL query rather than a JS reduce). This module is the
+ * *implementation* both scopes share; the scopes themselves stay separate
+ * (ADR-0022): this predicate never accepts `TransactionFilters`.
  */
 import { and, desc, eq, isNotNull, lte } from "drizzle-orm"
 import type { SQL } from "drizzle-orm"

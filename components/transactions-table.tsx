@@ -39,9 +39,9 @@ import {
 import {
   TransactionDetailRow,
   TransactionRow,
-  planPrefillFromTx,
   type TxRow,
 } from "@/components/transaction-row"
+import { planPrefillFromTx } from "@/lib/planning/prefill"
 import { PlanDialog } from "@/components/planning/plan-dialog"
 import type { PlanRow } from "@/components/planning/api"
 import { AssignLabelDialog } from "@/components/assign-label-dialog"

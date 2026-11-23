@@ -144,7 +144,9 @@ export function computeAnalytics(
       // date). Rather than reject the request, degrade to the months that
       // actually have data instead of materializing a synthetic zero-fill
       // across centuries. Explicit two-sided ranges are capped by
-      // parseDateRange.
+      // parseDateRange. The degraded series is also the average denominator:
+      // monthsCounted and avg* below count the populated full months the
+      // chart shows, never the synthetic span that was not materialized.
       const allMonths = monthSpanExceedsCap(spanStartMonth, spanEndMonth)
         ? [...dataMonths].sort()
         : monthsBetween(spanStartMonth, spanEndMonth)

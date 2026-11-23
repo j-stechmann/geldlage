@@ -604,6 +604,20 @@ describe("computeForecast", () => {
     expect(clamped.horizon.to).toBe("2031-02-28")
   })
 
+  it("clamps a horizon that would leave the representable month range", () => {
+    // not reachable from the route (todayLocal), but the exported helper
+    // must not throw when a caller supplies a today near 9999-12
+    const forecast = computeForecast(userId, {
+      months: 3,
+      today: "9999-11-15",
+    })
+    expect(forecast.horizon).toEqual({
+      from: "9999-11-15",
+      to: "9999-12-31",
+    })
+    expect(forecast.monthlyPlanned).toEqual([])
+  })
+
   // Horizon edge (regression): a match whose booking posts AFTER horizonEnd
   // is outside the projection's real data entirely (starting balance stops
   // at today, realFuture at horizonEnd) — the planned occurrence must stay

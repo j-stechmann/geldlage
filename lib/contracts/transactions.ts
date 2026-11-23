@@ -3,8 +3,8 @@
  *
  * Types only — client-safe. `TransactionRow` is the full transactions-table
  * projection; `CalendarTransaction` is the deliberately compact calendar
- * projection (derived counterparty, nullable account, narrower status). They
- * stay separate shapes; only the type declarations are single-sourced.
+ * projection (derived counterparty, always-present account, narrower status).
+ * They stay separate shapes; only the type declarations are single-sourced.
  */
 
 export interface TransactionRow {
@@ -48,6 +48,6 @@ export interface CalendarTransaction {
   categoryId: number | null
   categoryName: string | null
   categoryColor: string | null
-  /** legacy rows may carry no account (transactions.account_id is nullable) */
-  accountId: number | null
+  /** always present — transactions.account_id is NOT NULL */
+  accountId: number
 }
