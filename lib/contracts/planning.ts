@@ -113,28 +113,3 @@ export interface PlanPrefill {
   accountId: number | null
   categoryId: number | null
 }
-
-export interface ForecastResult {
-  startingBalanceCents: number
-  /** true when no snapshot exists → balance is Σ(booked) only */
-  withoutSnapshot: boolean
-  today: string
-  horizon: { from: string; to: string }
-  /** planned sums per month, calendar-ascending (netCents = income − expenses) */
-  monthlyPlanned: Array<{
-    month: string
-    incomeCents: number
-    expensesCents: number
-    netCents: number
-  }>
-  /** balance projection points: today, then each day with movement, ascending */
-  projectedBalance: Array<{ date: string; balanceCents: number }>
-  /** planned expense totals per category over the horizon (income excluded) */
-  plannedCategories: Array<{
-    categoryId: number | null
-    name: string
-    color: string | null
-    totalCents: number
-    share: number
-  }>
-}

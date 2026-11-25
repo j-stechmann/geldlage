@@ -142,6 +142,100 @@ function createPreTranscriptFileDb(filePath: string) {
   sqlite.close()
 }
 
+function createIntermediatePredictionFileDb(filePath: string) {
+  const sqlite = new Database(filePath)
+  sqlite.pragma("journal_mode = WAL")
+  sqlite.exec(`
+    CREATE TABLE users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      issuer TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      iban TEXT NOT NULL,
+      name TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE prediction_models (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+      scope_key TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'ready',
+      algorithm TEXT NOT NULL,
+      feature_version INTEGER NOT NULL,
+      data_from TEXT NOT NULL,
+      data_to TEXT NOT NULL,
+      day_count INTEGER NOT NULL,
+      transaction_count INTEGER NOT NULL,
+      data_signature TEXT NOT NULL,
+      plan_signature TEXT NOT NULL,
+      artifact_json TEXT NOT NULL,
+      metrics_json TEXT NOT NULL,
+      checksum TEXT NOT NULL,
+      last_error TEXT,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      next_retry_at TEXT,
+      trained_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )
+  `)
+  sqlite.close()
+}
+
+function createNullablePredictionFileDb(filePath: string) {
+  const sqlite = new Database(filePath)
+  sqlite.pragma("journal_mode = WAL")
+  sqlite.exec(`
+    CREATE TABLE users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      issuer TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      iban TEXT NOT NULL,
+      name TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE prediction_models (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+      scope_key TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'ready',
+      algorithm TEXT NOT NULL,
+      feature_version INTEGER NOT NULL,
+      data_from TEXT,
+      data_to TEXT,
+      day_count INTEGER,
+      transaction_count INTEGER,
+      data_signature TEXT,
+      plan_signature TEXT,
+      artifact_json TEXT,
+      metrics_json TEXT,
+      checksum TEXT,
+      last_error TEXT,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      next_retry_at TEXT,
+      trained_at TEXT,
+      updated_at TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )
+  `)
+  sqlite.close()
+}
+
 function withFileDbPath(filePath: string, fn: () => void) {
   const original = process.env.DATABASE_PATH
   process.env.DATABASE_PATH = filePath
@@ -372,6 +466,59 @@ describe("file DB migration: old (iban, name_key) label_rules shape", () => {
     })
   })
 
+  it("rebuilds the intermediate NOT NULL prediction_models shape", () => {
+    tmpDir = makeTmpDir("geldlage-prediction-migration-")
+    const dbPath = path.join(tmpDir, "geldlage.db")
+    createIntermediatePredictionFileDb(dbPath)
+
+    withFileDbPath(dbPath, () => {
+      db = getDb()
+    })
+
+    const raw = new Database(dbPath)
+    try {
+      const columns = raw.pragma(`table_info(prediction_models)`) as {
+        name: string
+        notnull: number
+      }[]
+      expect(columns.find((c) => c.name === "artifact_json")?.notnull).toBe(0)
+      const sql = (
+        raw
+          .prepare(
+            `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'prediction_models'`
+          )
+          .get() as { sql: string }
+      ).sql
+      expect(sql).toContain("account_id IS NULL AND scope_key")
+    } finally {
+      raw.close()
+    }
+  })
+
+  it("rebuilds a nullable prediction_models table without the scope CHECK", () => {
+    tmpDir = makeTmpDir("geldlage-prediction-check-migration-")
+    const dbPath = path.join(tmpDir, "geldlage.db")
+    createNullablePredictionFileDb(dbPath)
+
+    withFileDbPath(dbPath, () => {
+      db = getDb()
+    })
+
+    const raw = new Database(dbPath)
+    try {
+      const sql = (
+        raw
+          .prepare(
+            `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'prediction_models'`
+          )
+          .get() as { sql: string }
+      ).sql
+      expect(sql).toContain("prediction_models_scope_check")
+    } finally {
+      raw.close()
+    }
+  })
+
   it("fresh (empty) file DB still creates the full schema via getDb()", () => {
     tmpDir = makeTmpDir("geldlage-fresh-")
     const dbPath = path.join(tmpDir, "fresh.db")
@@ -397,6 +544,7 @@ describe("file DB migration: old (iban, name_key) label_rules shape", () => {
         "categories",
         "label_rules",
         "transactions",
+        "prediction_models",
       ]) {
         expect(tables).toContain(expected)
       }

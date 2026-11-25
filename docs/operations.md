@@ -167,6 +167,9 @@ superseding the no-auth posture of [ADR-0031](adr/adr-0031-no-auth-local-first-p
   labels are per user.
 - The v1→v2 migration **drops pre-user tables** (fresh start for everyone —
   legacy single-user data is not attributed to any owner).
+- Prediction artifacts are derived data in the same SQLite database. They
+  contain daily aggregates/weights, not payer/payee/purpose text, and are
+  per-user/per-account scoped. Deleting an account cascades its model away.
 - Data locality remains ([ADR-0031](adr/adr-0031-no-auth-local-first-privacy.md)):
   all bank data stays local (SQLite in `data/`, model in `models/`, no
   telemetry). The only network egress is the model download from Hugging Face
@@ -205,4 +208,5 @@ them back — the schema is auto-created/migrated on next boot.
 | Labels stay "wird kategorisiert" forever              | llama-server down or unhealthy — check the header badge / `make llm-status`; the health gate is pausing the worker                                                                                                                         |
 | Rows "ohne Kategorie"                                 | Attempts exhausted — use the retry button (fresh budget); no fallback labels are ever invented                                                                                                                                             |
 | Batches `failed` after a crash                        | Startup recovery marked interrupted batches failed; re-import the CSV (dedupe makes this safe)                                                                                                                                             |
+| Prediction missing / stuck on baseline                | Needs ≥ 28 observed days; check server logs for `[prediction] training failed`; failures back off automatically and retry on future triggers/reads. Interrupted training rows are reset at startup.                                        |
 | CPU-only warning from `make llm`                      | GPU build not detected; install CUDA/Vulkan llama.cpp packages or use `Makefile.local` with Ollama's binary                                                                                                                                |

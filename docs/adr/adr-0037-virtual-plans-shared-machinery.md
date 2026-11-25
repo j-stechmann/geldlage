@@ -14,7 +14,9 @@ The isolation also let the planning feature grow a parallel copy of machinery
 the transaction side already owned:
 
 - hand-written server/client DTOs (`PlanRow`, `PlanOccurrence`,
-  `ForecastResult`, `TransactionPage`, `TxRow`, `CalendarTransaction`);
+  `TransactionPage`, `TxRow`, `CalendarTransaction`); the planned-only
+  `ForecastResult` was later removed by
+  [ADR-0038](adr-0038-automatic-daily-prediction.md);
 - calendar-window and `accountId` validation copied into three routes, with
   the transactions calendar importing its window caps from the planning
   service (an inverted dependency);

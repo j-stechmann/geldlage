@@ -148,8 +148,8 @@ export type WindowParse =
 /** occurrence-window cap for the occurrences/calendar endpoints (days) */
 export const MAX_OCCURRENCE_WINDOW_DAYS = 400
 /**
- * Window distance cap, each side of today (= 60 months, the forecast
- * horizon cap). rrule expansion iterates occurrence by occurrence from
+ * Window distance cap, each side of today (= 60 months). rrule expansion
+ * iterates occurrence by occurrence from
  * dtstart up to the window start — it cannot seek — so an arbitrary far
  * window would make every recurring plan cost CPU linear in that distance
  * on every read (measured: ~0.6 s per DAILY plan for a window at year

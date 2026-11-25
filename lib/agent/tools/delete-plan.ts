@@ -1,5 +1,6 @@
 import type { AgentTool } from "@/lib/agent/types"
-import { deletePlan } from "@/lib/planning/service"
+import { deletePlan, getPlan } from "@/lib/planning/service"
+import { notifyPlanChanged } from "@/lib/prediction/triggers"
 import { planIdOnlyFromArgs } from "./plan-shared"
 
 /**
@@ -32,12 +33,19 @@ export const delete_plan = {
   },
   async execute(args: unknown, ctx): Promise<unknown> {
     const id = planIdOnlyFromArgs(args ?? null)
+    const before = getPlan(ctx.uid, id)
+    if (!before) {
+      throw new Error(
+        "not_found: no plan with this id (look up ids via list_plans or query_data first)"
+      )
+    }
     const deleted = deletePlan(ctx.uid, id)
     if (!deleted) {
       throw new Error(
         "not_found: no plan with this id (look up ids via list_plans or query_data first)"
       )
     }
+    notifyPlanChanged(ctx.uid, before.accountId)
     return { deleted: true, id }
   },
 } satisfies AgentTool

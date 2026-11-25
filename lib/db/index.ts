@@ -286,6 +286,45 @@ export function createSchemaSqlite(db: Db) {
   db.run(
     `CREATE INDEX IF NOT EXISTS planned_transactions_account_idx ON planned_transactions (account_id)`
   )
+  // ── prediction models (ADR-0038): automatic per-account/all-accounts daily
+  // forecast artifacts. One current row per scope; `scope_key` makes the
+  // NULL-account all-model uniquely addressable.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS prediction_models (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+      scope_key TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'ready' CHECK (status IN ('ready', 'training', 'failed')),
+      algorithm TEXT NOT NULL,
+      feature_version INTEGER NOT NULL,
+      data_from TEXT,
+      data_to TEXT,
+      day_count INTEGER,
+      transaction_count INTEGER,
+      data_signature TEXT,
+      plan_signature TEXT,
+      artifact_json TEXT,
+      metrics_json TEXT,
+      checksum TEXT,
+      last_error TEXT,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      next_retry_at TEXT,
+      trained_at TEXT,
+      updated_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      CONSTRAINT prediction_models_scope_check CHECK ((account_id IS NULL AND scope_key = 'all') OR (account_id IS NOT NULL AND scope_key = 'account:' || account_id))
+    )
+  `)
+  db.run(
+    `CREATE UNIQUE INDEX IF NOT EXISTS prediction_models_user_scope_unique ON prediction_models (user_id, scope_key)`
+  )
+  db.run(
+    `CREATE INDEX IF NOT EXISTS prediction_models_user_account_idx ON prediction_models (user_id, account_id)`
+  )
+  db.run(
+    `CREATE INDEX IF NOT EXISTS prediction_models_status_idx ON prediction_models (status)`
+  )
   // ── agent chat (ADR-0033): threads + invites/members + messages. The
   // role CHECK is runtime-enforced here; the drizzle check() defs in
   // schema.ts must stay in sync with it.
@@ -405,17 +444,25 @@ function adoptLegacyIssuer(db: Db) {
   // DELETE FROM users below fails the whole startup migration. The agent
   // chat tables (ADR-0033) carry the FK too; chat_thread_members'
   // (thread_id, user_id) uniqueness gets the pre-merge cleanup below.
+  const existingTables = new Set(
+    db
+      .all<{ name: string }>(
+        `SELECT name FROM sqlite_master WHERE type = 'table'`
+      )
+      .map((row) => row.name)
+  )
   const childTables = [
     "accounts",
     "categories",
     "label_rules",
     "import_batches",
     "planned_transactions",
+    "prediction_models",
     "transactions",
     "chat_threads",
     "chat_thread_members",
     "chat_messages",
-  ]
+  ].filter((table) => existingTables.has(table))
   for (const legacyUser of legacyUsers) {
     // A JIT-created duplicate (same subject, already on the new issuer) is
     // merged into the legacy user: its data moves over, the row is deleted,
@@ -445,6 +492,21 @@ function adoptLegacyIssuer(db: Db) {
                   AND other.user_id = ${legacyUser.id}
               )`
         )
+        // prediction_models carries a (user_id, scope_key) unique index:
+        // the duplicate's all-accounts row would collide with the legacy
+        // user's own all-model during the generic re-point. Drop the
+        // duplicate's colliding scope first (the legacy model wins, exactly
+        // like the membership cleanup above).
+        if (existingTables.has("prediction_models")) {
+          tx.run(
+            sql`DELETE FROM prediction_models WHERE user_id = ${duplicate.id}
+                AND EXISTS (
+                  SELECT 1 FROM prediction_models AS other
+                  WHERE other.user_id = ${legacyUser.id}
+                    AND other.scope_key = prediction_models.scope_key
+                )`
+          )
+        }
         for (const table of childTables) {
           tx.run(
             sql`UPDATE ${sql.raw(table)} SET user_id = ${legacyUser.id} WHERE user_id = ${duplicate.id}`
@@ -505,6 +567,28 @@ export function migrateSchema(db: Db) {
   // the canonical DDL below. Runs in both createSchemaSqlite (fresh getDb)
   // and here (hot-reload heal) — same as the old label_rules shape check.
   dropLegacyUserlessTables(db)
+  // The branch that introduced prediction_models originally created its
+  // artifact columns NOT NULL; a development/hot-reload database may still
+  // carry that shape. The table is derived cache data, so rebuilding it is
+  // safe and lets failed/training rows exist before the first artifact.
+  {
+    const predictionColumns = db.all<{ name: string; notnull: number }>(
+      `PRAGMA table_info(prediction_models)`
+    )
+    const predictionSql =
+      db.all<{ sql: string }>(
+        `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'prediction_models'`
+      )[0]?.sql ?? ""
+    const needsRebuild =
+      predictionColumns.length > 0 &&
+      (["data_from", "artifact_json", "checksum", "trained_at"].some((name) =>
+        predictionColumns.some(
+          (column) => column.name === name && column.notnull === 1
+        )
+      ) ||
+        !predictionSql.includes("prediction_models_scope_check"))
+    if (needsRebuild) db.run(`DROP TABLE prediction_models`)
+  }
   adoptLegacyIssuer(db)
   if (!cols("import_batches").includes("rows_updated")) {
     db.run(
@@ -728,6 +812,45 @@ export function migrateSchema(db: Db) {
   )
   db.run(
     `CREATE INDEX IF NOT EXISTS planned_transactions_account_idx ON planned_transactions (account_id)`
+  )
+  // ── prediction models (ADR-0038): automatic per-account/all-accounts daily
+  // forecast artifacts. One current row per scope; `scope_key` makes the
+  // NULL-account all-model uniquely addressable.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS prediction_models (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+      scope_key TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'ready' CHECK (status IN ('ready', 'training', 'failed')),
+      algorithm TEXT NOT NULL,
+      feature_version INTEGER NOT NULL,
+      data_from TEXT,
+      data_to TEXT,
+      day_count INTEGER,
+      transaction_count INTEGER,
+      data_signature TEXT,
+      plan_signature TEXT,
+      artifact_json TEXT,
+      metrics_json TEXT,
+      checksum TEXT,
+      last_error TEXT,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      next_retry_at TEXT,
+      trained_at TEXT,
+      updated_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      CONSTRAINT prediction_models_scope_check CHECK ((account_id IS NULL AND scope_key = 'all') OR (account_id IS NOT NULL AND scope_key = 'account:' || account_id))
+    )
+  `)
+  db.run(
+    `CREATE UNIQUE INDEX IF NOT EXISTS prediction_models_user_scope_unique ON prediction_models (user_id, scope_key)`
+  )
+  db.run(
+    `CREATE INDEX IF NOT EXISTS prediction_models_user_account_idx ON prediction_models (user_id, account_id)`
+  )
+  db.run(
+    `CREATE INDEX IF NOT EXISTS prediction_models_status_idx ON prediction_models (status)`
   )
   // ── agent chat (ADR-0033): threads + invites/members + messages. The
   // role CHECK is runtime-enforced here; the drizzle check() defs in

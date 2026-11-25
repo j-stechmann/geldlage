@@ -10,6 +10,7 @@ import {
 import type { PlanListFilters, PlanStatus } from "@/lib/contracts/planning"
 import { isPlanStatus } from "@/lib/planning/fields"
 import { todayLocal } from "@/lib/dates"
+import { notifyPlanChanged } from "@/lib/prediction/triggers"
 import { parsePagination } from "@/lib/api/query"
 import {
   assertSameOrigin,
@@ -28,7 +29,7 @@ const MAX_PAGE_SIZE = 100
  * rejected (null) instead of silently falling back to the unfiltered list — a
  * typo'd or renamed client value must not read as a successful "all" query.
  * The other planning routes reject malformed query params the same way
- * (invalid_account / invalid_months / invalid_window).
+ * (invalid_account / invalid_window).
  */
 function parseStatus(raw: string | null): PlanStatus | "all" | null {
   if (raw === null || raw === "" || raw === "all") return "all"
@@ -103,6 +104,7 @@ export async function POST(request: NextRequest) {
   }
   try {
     const plan = createPlan(session.uid, body)
+    notifyPlanChanged(session.uid, plan.accountId)
     return NextResponse.json({ plan }, { status: 201 })
   } catch (err) {
     if (err instanceof PlanValidationError) {

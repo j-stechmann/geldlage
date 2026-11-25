@@ -1,6 +1,6 @@
 /**
- * Planning limits, shared by the server validation, the forecast route and
- * service, plan matching and the plan dialog (ADR-0035/0037). The calendar
+ * Planning limits, shared by the server validation, the planning service,
+ * plan matching and the plan dialog (ADR-0035/0037). The calendar
  * window caps live in `lib/api/query.ts` beside `parseWindow`.
  *
  * The free-text byte limits matter on both sides: HTML maxLength counts JS
@@ -23,9 +23,6 @@ export const MAX_TEXT = 500
  * preview must enforce the same floor) and the service validator.
  */
 export const MIN_DTSTART_YEAR = 1900
-
-/** forecast horizon cap (months) */
-export const MAX_FORECAST_MONTHS = 60
 
 /** A real transaction may post BEFORE the due date (max 5 days early). */
 export const MATCH_DAYS_BEFORE = 5

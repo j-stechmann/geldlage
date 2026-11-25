@@ -7,10 +7,10 @@
  * *implementation* both scopes share; the scopes themselves stay separate
  * (ADR-0022): this predicate never accepts `TransactionFilters`.
  */
-import { and, desc, eq, isNotNull, lte } from "drizzle-orm"
+import { and, desc, eq, isNotNull, lte, sql } from "drizzle-orm"
 import type { SQL } from "drizzle-orm"
 import { getDb } from "@/lib/db"
-import { importBatches } from "@/lib/db/schema"
+import { importBatches, transactions } from "@/lib/db/schema"
 import {
   buildTransactionScope,
   type TransactionScopeDateBounds,
@@ -71,9 +71,9 @@ function snapshotWhere(
  * with booking_date > snapshot_date) — robust to missing older history.
  * Batches tied on snapshotDate resolve deterministically, freshest import
  * first: SQL orders by snapshot_date, created_at, id — all descending.
- * Snapshots dated AFTER today are ignored — both the balance KPI and
- * computeForecast apply this identical rule, so a future-dated Saldo line
- * never anchors one scope alone.
+ * Snapshots dated AFTER today are ignored — both the balance KPI and the
+ * daily prediction forecast apply this identical rule, so a future-dated
+ * Saldo line never anchors one scope alone.
  */
 export function latestAnchor(
   userId: number,
@@ -102,4 +102,49 @@ export function latestAnchor(
   // SQLite's BINARY collation matches the old JS `>` comparator for these
   // ASCII ISO date/timestamp/UUID values.
   return (row as BalanceAnchor | undefined) ?? null
+}
+
+/**
+ * Current balance for a scope: latest snapshot anchor ≤ today plus booked
+ * movement in (snapshot, today]; without a snapshot, booked movement ≤ today.
+ * Mirrors the analytics balance KPI and is shared with the daily prediction
+ * forecast.
+ */
+export function computeStartingBalance(
+  userId: number,
+  accountId: number | undefined,
+  today: string
+): { startingBalanceCents: number; withoutSnapshot: boolean } {
+  const db = getDb()
+  const anchor = latestAnchor(userId, accountId, today)
+  if (anchor !== null) {
+    const sumAfter = Number(
+      db
+        .select({
+          sum: sql<string>`COALESCE(SUM(${transactions.amountCents}), 0)`,
+        })
+        .from(transactions)
+        .where(
+          buildTimeScopedWhere(userId, accountId, {
+            after: anchor.snapshotDate,
+            to: today,
+          })
+        )
+        .get()?.sum ?? "0"
+    )
+    return {
+      startingBalanceCents: anchor.snapshotAmountCents + sumAfter,
+      withoutSnapshot: false,
+    }
+  }
+  const sumUpToToday = Number(
+    db
+      .select({
+        sum: sql<string>`COALESCE(SUM(${transactions.amountCents}), 0)`,
+      })
+      .from(transactions)
+      .where(buildTimeScopedWhere(userId, accountId, { to: today }))
+      .get()?.sum ?? "0"
+  )
+  return { startingBalanceCents: sumUpToToday, withoutSnapshot: true }
 }

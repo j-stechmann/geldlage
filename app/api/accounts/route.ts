@@ -7,6 +7,10 @@ import {
   unauthorized,
 } from "@/lib/auth/guard"
 import { and, eq } from "drizzle-orm"
+import {
+  notifyAccountCreated,
+  notifyAccountDeleted,
+} from "@/lib/prediction/triggers"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -49,6 +53,7 @@ export async function POST(request: NextRequest) {
     .onConflictDoNothing()
     .returning()
     .get()
+  if (inserted) notifyAccountCreated(session.uid, inserted.id)
   return NextResponse.json({ account: inserted }, { status: 201 })
 }
 
@@ -62,6 +67,19 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "iban required" }, { status: 400 })
   }
   const db = getDb()
+  const account = db
+    .select({ id: accounts.id })
+    .from(accounts)
+    .where(
+      and(
+        eq(accounts.userId, session.uid),
+        eq(accounts.iban, iban.toUpperCase())
+      )
+    )
+    .get()
+  if (!account) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 })
+  }
   try {
     const result = db
       .delete(accounts)
@@ -75,6 +93,7 @@ export async function DELETE(request: NextRequest) {
     if (result.changes === 0) {
       return NextResponse.json({ error: "not_found" }, { status: 404 })
     }
+    notifyAccountDeleted(session.uid, account.id)
     return NextResponse.json({ deleted: result.changes })
   } catch (err) {
     // accounts own transactions/import_batches/planned_transactions (FK, no

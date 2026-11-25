@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import {
   deletePlan,
+  getPlan,
   updatePlan,
   PlanValidationError,
 } from "@/lib/planning/service"
+import { notifyPlanChanged } from "@/lib/prediction/triggers"
 import {
   assertSameOrigin,
   requireSession,
@@ -30,10 +32,16 @@ export async function PATCH(
     return NextResponse.json({ error: "invalid_body" }, { status: 400 })
   }
   try {
+    const before = getPlan(session.uid, id)
+    if (!before) {
+      return NextResponse.json({ error: "not_found" }, { status: 404 })
+    }
     const plan = updatePlan(session.uid, id, body)
     if (!plan) {
       return NextResponse.json({ error: "not_found" }, { status: 404 })
     }
+    notifyPlanChanged(session.uid, before.accountId)
+    notifyPlanChanged(session.uid, plan.accountId)
     return NextResponse.json({ plan })
   } catch (err) {
     if (err instanceof PlanValidationError) {
@@ -55,9 +63,14 @@ export async function DELETE(
   const csrf = assertSameOrigin(request)
   if (csrf) return csrf
   const { id } = await params
+  const before = getPlan(session.uid, id)
+  if (!before) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 })
+  }
   const deleted = deletePlan(session.uid, id)
   if (!deleted) {
     return NextResponse.json({ error: "not_found" }, { status: 404 })
   }
+  notifyPlanChanged(session.uid, before.accountId)
   return NextResponse.json({ deleted: true })
 }

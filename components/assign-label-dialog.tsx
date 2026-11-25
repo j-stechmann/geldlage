@@ -88,6 +88,7 @@ export function AssignLabelDialog({
         void queryClient.invalidateQueries({ queryKey: ["analytics"] })
         void queryClient.invalidateQueries({ queryKey: ["categories"] })
         void queryClient.invalidateQueries({ queryKey: ["labels"] })
+        void queryClient.invalidateQueries({ queryKey: ["prediction"] })
         onClose()
       } else {
         toast.error("Zuweisung fehlgeschlagen", {
@@ -118,6 +119,7 @@ export function AssignLabelDialog({
         void queryClient.invalidateQueries({ queryKey: ["analytics"] })
         void queryClient.invalidateQueries({ queryKey: ["categories"] })
         void queryClient.invalidateQueries({ queryKey: ["labels"] })
+        void queryClient.invalidateQueries({ queryKey: ["prediction"] })
         onClose()
       } else {
         toast.error("Erstellen fehlgeschlagen", {

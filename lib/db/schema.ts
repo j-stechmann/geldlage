@@ -346,6 +346,56 @@ export const plannedTransactions = sqliteTable(
   ]
 )
 
+export const predictionModels = sqliteTable(
+  "prediction_models",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => randomUUID()),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    /** NULL = the user's all-accounts model */
+    accountId: integer("account_id").references(() => accounts.id, {
+      onDelete: "cascade",
+    }),
+    /** "all" or "account:<id>"; enforces one current model per scope */
+    scopeKey: text("scope_key").notNull(),
+    /** ready | training | failed */
+    status: text("status").notNull().default("ready"),
+    algorithm: text("algorithm").notNull(),
+    featureVersion: integer("feature_version").notNull(),
+    dataFrom: text("data_from"),
+    dataTo: text("data_to"),
+    dayCount: integer("day_count"),
+    transactionCount: integer("transaction_count"),
+    dataSignature: text("data_signature"),
+    planSignature: text("plan_signature"),
+    artifactJson: text("artifact_json"),
+    metricsJson: text("metrics_json"),
+    checksum: text("checksum"),
+    lastError: text("last_error"),
+    attempts: integer("attempts").notNull().default(0),
+    nextRetryAt: text("next_retry_at"),
+    trainedAt: text("trained_at"),
+    updatedAt: text("updated_at").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("prediction_models_user_scope_unique").on(t.userId, t.scopeKey),
+    index("prediction_models_user_account_idx").on(t.userId, t.accountId),
+    index("prediction_models_status_idx").on(t.status),
+    check(
+      "prediction_models_status_check",
+      sql`${t.status} IN ('ready', 'training', 'failed')`
+    ),
+    check(
+      "prediction_models_scope_check",
+      sql`(${t.accountId} IS NULL AND ${t.scopeKey} = 'all') OR (${t.accountId} IS NOT NULL AND ${t.scopeKey} = 'account:' || ${t.accountId})`
+    ),
+  ]
+)
+
 export type ChatThread = typeof chatThreads.$inferSelect
 export type ChatThreadMember = typeof chatThreadMembers.$inferSelect
 export type ChatMessage = typeof chatMessages.$inferSelect
@@ -360,6 +410,8 @@ export type Category = typeof categories.$inferSelect
 export type LabelRule = typeof labelRules.$inferSelect
 export type Transaction = typeof transactions.$inferSelect
 export type PlannedTransaction = typeof plannedTransactions.$inferSelect
+export type PredictionModel = typeof predictionModels.$inferSelect
+export type NewPredictionModel = typeof predictionModels.$inferInsert
 export type { PlanStatus }
 export type NewPlannedTransaction = typeof plannedTransactions.$inferInsert
 export type NewTransaction = typeof transactions.$inferInsert

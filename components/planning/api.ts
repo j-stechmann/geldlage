@@ -9,7 +9,6 @@ import { MATCH_DAYS_BEFORE, MATCH_DAYS_AFTER } from "@/lib/planning/limits"
 // this module only needs the shapes its hooks return/produce ──────────────
 
 import type {
-  ForecastResult,
   PlanListFilters,
   PlanListPage,
   PlanOccurrence,
@@ -41,19 +40,13 @@ export function calendarTransactionsKey(
   return ["transactions-calendar", sp.toString()] as const
 }
 
-export function forecastKey(months: number, accountId: number | null) {
-  const sp = new URLSearchParams({ months: String(months) })
-  if (accountId !== null) sp.set("accountId", String(accountId))
-  return ["forecast", sp.toString()] as const
-}
-
 /** invalidation fan-out after any plan mutation */
 export function invalidatePlans(
   queryClient: ReturnType<typeof useQueryClient>
 ) {
   void queryClient.invalidateQueries({ queryKey: PLANS_KEY })
   void queryClient.invalidateQueries({ queryKey: ["plan-occurrences"] })
-  void queryClient.invalidateQueries({ queryKey: ["forecast"] })
+  void queryClient.invalidateQueries({ queryKey: ["prediction"] })
   void queryClient.invalidateQueries({ queryKey: ["transactions-calendar"] })
 }
 
@@ -337,34 +330,6 @@ export function useMatchedPlanForTx(ref: MatchedTxRef | null): {
       ? null
       : (plansQuery.data?.plans.find((p) => p.id === occurrence.planId) ?? null)
   return { matchedPlan, resolved: true }
-}
-
-export function useForecast(
-  enabled: boolean,
-  months: number,
-  accountId: number | null
-) {
-  const key = forecastKey(months, accountId)
-  return useQuery<ForecastResult>({
-    queryKey: key,
-    queryFn: async () => {
-      const sp = new URLSearchParams({ months: String(months) })
-      if (accountId !== null) sp.set("accountId", String(accountId))
-      const res = await apiFetch(`/api/plans/forecast?${sp.toString()}`)
-      if (!res.ok) {
-        throw await parseError(res, "Prognose konnte nicht geladen werden")
-      }
-      return (await res.json()).forecast as ForecastResult
-    },
-    enabled,
-    // NO placeholderData, unlike the calendar hooks: this query re-keys on
-    // the account filter, and a placeholder would keep the PREVIOUS
-    // account's projection on screen (header figure, chart overlay) while
-    // the differently scoped one loads — concrete money figures must never
-    // briefly belong to another account. Same-key refetches (plan mutations
-    // → invalidatePlans) already keep the query's own data, and the
-    // calendar's stale-while-loading visibility is unaffected.
-  })
 }
 
 /**

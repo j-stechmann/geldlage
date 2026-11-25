@@ -1,7 +1,11 @@
 /**
- * Planned-transaction service (ADR-0035): CRUD, occurrence expansion +
- * read-time matching, and the forecast. All reads/writes are user-scoped
- * like every other domain table. Money stays integer cents (ADR-0002).
+ * Planned-transaction service (ADR-0035): CRUD, occurrence expansion and
+ * read-time matching. All reads/writes are user-scoped like every other
+ * domain table. Money stays integer cents (ADR-0002).
+ *
+ * The actual forecast lives in the automatic daily prediction engine
+ * (ADR-0038, lib/prediction/); plans feed it as deterministic future
+ * occurrences.
  */
 import { and, eq, inArray, or, sql } from "drizzle-orm"
 import type { SQL } from "drizzle-orm"
@@ -14,7 +18,6 @@ import {
   transactions,
 } from "@/lib/db/schema"
 import type {
-  ForecastResult,
   PlanInput,
   PlanListFilters,
   PlanOccurrence,
@@ -32,13 +35,8 @@ import {
 import {
   isValidIsoDate,
   isoDatePlus,
-  lastDayOfMonthIso,
   MAX_ISO_DATE,
-  MAX_MONTH_KEY,
   MIN_ISO_DATE,
-  monthCountBetween,
-  monthOffset,
-  todayLocal,
 } from "@/lib/dates"
 import {
   matchPlannedOccurrences,
@@ -48,7 +46,6 @@ import {
 import {
   MATCH_DAYS_AFTER,
   MATCH_DAYS_BEFORE,
-  MAX_FORECAST_MONTHS,
   MIN_DTSTART_YEAR,
 } from "@/lib/planning/limits"
 import {
@@ -57,7 +54,7 @@ import {
   PLAN_INPUT_KEYS,
 } from "@/lib/planning/fields"
 import { paginate } from "@/lib/pagination"
-import { buildTimeScopedWhere, latestAnchor } from "@/lib/analytics/balance"
+import { buildTimeScopedWhere } from "@/lib/analytics/balance"
 
 export class PlanValidationError extends Error {
   constructor(
@@ -667,208 +664,5 @@ function enrichWithMatches(
   for (const m of matchPlannedOccurrences(matchables, rows)) {
     const occurrence = occurrencesById.get(m.occurrenceKey)
     if (occurrence) occurrence.matched = txById.get(m.transactionId) ?? null
-  }
-}
-
-// ── forecast ──────────────────────────────────────────────────────────────
-
-/**
- * The forecast is the third analytics scope (ADR-0035): the current balance
- * (real data, snapshot-anchored like engine.ts) plus planned occurrences of
- * ACTIVE plans from today through `months` months — paused plans stay visible
- * on the calendar and plan list but never enter the projection. Real booked
- * amounts never enter the planned sums (they only move the balance line), and
- * projected amounts never enter the real analytics.
- *
- * Known limitation, inherited from the anchor math it mirrors: the anchor
- * is the SINGLE latest snapshot batch, so for an all-accounts projection
- * of a user whose accounts carry per-account snapshots only that one
- * account's snapshot money enters the starting balance (the Σ booked term
- * is all-account, the anchor is not) — like the analytics balance KPI.
- * Account-scoped forecasts are exact; withoutSnapshot flags the
- * snapshot-free case. If this matters, anchor per latest snapshot DATE
- * across the scoped batches.
- */
-export function computeForecast(
-  userId: number,
-  options: { months?: number; accountId?: number; today?: string } = {}
-): ForecastResult {
-  const db = getDb()
-  const months =
-    typeof options.months === "number" &&
-    Number.isInteger(options.months) &&
-    options.months >= 1
-      ? Math.min(options.months, MAX_FORECAST_MONTHS)
-      : 12
-  const accountId =
-    typeof options.accountId === "number" &&
-    Number.isInteger(options.accountId) &&
-    options.accountId > 0
-      ? options.accountId
-      : undefined
-  const today = options.today ?? todayLocal()
-  // A caller-supplied `today` near the storable ceiling can push the horizon
-  // past 9999-12, which monthOffset rejects. Clamp there instead of throwing:
-  // the routes always pass todayLocal(), so this only keeps the exported
-  // function total, with the horizon ending on the last representable day.
-  const monthsToCeiling = monthCountBetween(today, MAX_MONTH_KEY)
-  const horizonMonth =
-    months - 1 >= monthsToCeiling
-      ? MAX_MONTH_KEY
-      : monthOffset(today, months - 1)
-  const horizonEnd = lastDayOfMonthIso(horizonMonth)
-
-  // ── current balance: snapshot-anchored, shared with analytics/engine.ts ──
-  // latestAnchor applies the same snapshotDate <= today filter and the same
-  // deterministic tie-break as the balance KPI, so a future-dated Saldo line
-  // never anchors one scope while the other rejects it.
-  const anchor = latestAnchor(userId, accountId, today)
-
-  let startingBalanceCents: number
-  let withoutSnapshot: boolean
-  if (anchor !== null) {
-    withoutSnapshot = false
-    const sumAfter = Number(
-      db
-        .select({
-          sum: sql<string>`COALESCE(SUM(${transactions.amountCents}), 0)`,
-        })
-        .from(transactions)
-        .where(
-          buildTimeScopedWhere(userId, accountId, {
-            after: anchor.snapshotDate,
-            to: today,
-          })
-        )
-        .get()?.sum ?? "0"
-    )
-    startingBalanceCents = anchor.snapshotAmountCents + sumAfter
-  } else {
-    withoutSnapshot = true
-    const sumUpToToday = Number(
-      db
-        .select({
-          sum: sql<string>`COALESCE(SUM(${transactions.amountCents}), 0)`,
-        })
-        .from(transactions)
-        .where(buildTimeScopedWhere(userId, accountId, { to: today }))
-        .get()?.sum ?? "0"
-    )
-    startingBalanceCents = sumUpToToday
-  }
-
-  // ── planned occurrences over the horizon ──
-  // The paused filter must run inside the query (before matching) so a paused
-  // occurrence cannot claim an active plan's booking — see listOccurrences().
-  const occurrences = listOccurrences(
-    userId,
-    { from: today, to: horizonEnd },
-    accountId,
-    { includePaused: false }
-  )
-
-  const monthlyPlanned = new Map<
-    string,
-    { incomeCents: number; expensesCents: number }
-  >()
-  const plannedByDate = new Map<string, number>()
-  const catTotals = new Map<number | null, number>()
-  let totalPlannedExpenses = 0
-  for (const o of occurrences) {
-    // MATCHED occurrences are real money already — they sit in the booked
-    // history and would double-count the forecast (planned = not-yet-booked).
-    // Horizon edge: a match whose booking posts AFTER horizonEnd is not part
-    // of this projection at all (starting balance stops at today, realFuture
-    // at horizonEnd), so the planned occurrence remains its only in-horizon
-    // representation and stays counted. bookingDate ≤ horizonEnd is what
-    // makes "already booked" true within this projection: ≤ today sits in
-    // the starting balance, > today in the realFuture sum.
-    if (o.matched !== null && o.matched.bookingDate <= horizonEnd) continue
-    const month = o.date.slice(0, 7)
-    const entry = monthlyPlanned.get(month) ?? {
-      incomeCents: 0,
-      expensesCents: 0,
-    }
-    if (o.amountCents > 0) {
-      entry.incomeCents += o.amountCents
-    } else {
-      entry.expensesCents += -o.amountCents
-      catTotals.set(
-        o.categoryId,
-        (catTotals.get(o.categoryId) ?? 0) + -o.amountCents
-      )
-      totalPlannedExpenses += -o.amountCents
-    }
-    monthlyPlanned.set(month, entry)
-    plannedByDate.set(o.date, (plannedByDate.get(o.date) ?? 0) + o.amountCents)
-  }
-
-  // ── real future bookings (already imported, booked AFTER today) also move
-  // the projected balance — they are certain money, unlike the plans
-  const realFutureRows = db
-    .select({
-      date: transactions.bookingDate,
-      sum: sql<string>`SUM(${transactions.amountCents})`,
-    })
-    .from(transactions)
-    .where(
-      buildTimeScopedWhere(userId, accountId, {
-        after: today,
-        to: horizonEnd,
-      })
-    )
-    .groupBy(transactions.bookingDate)
-    .all()
-  const realFuture = new Map(realFutureRows.map((r) => [r.date, Number(r.sum)]))
-
-  // ── projected timeline: today's point, then every day with movement ──
-  const projectedBalance: Array<{ date: string; balanceCents: number }> = []
-  projectedBalance.push({
-    date: today,
-    balanceCents: startingBalanceCents + (plannedByDate.get(today) ?? 0),
-  })
-  const movementDates = [
-    ...new Set([...plannedByDate.keys(), ...realFuture.keys()]),
-  ].sort()
-  let running = startingBalanceCents + (plannedByDate.get(today) ?? 0)
-  for (const date of movementDates) {
-    if (date === today) continue // already folded into the starting point
-    running += (plannedByDate.get(date) ?? 0) + (realFuture.get(date) ?? 0)
-    projectedBalance.push({ date, balanceCents: running })
-  }
-
-  // ── planned expenses per category ──
-  const catIds = [
-    ...new Set([...catTotals.keys()].filter((id): id is number => id !== null)),
-  ]
-  const catById = categoriesByIds(userId, catIds)
-  const plannedCategories = [...catTotals.entries()]
-    .map(([categoryId, totalCents]) => {
-      const cat = categoryId === null ? null : catById.get(categoryId)
-      return {
-        categoryId,
-        name: cat?.name ?? "ohne Kategorie",
-        color: cat?.color ?? null,
-        totalCents,
-        share: totalPlannedExpenses > 0 ? totalCents / totalPlannedExpenses : 0,
-      }
-    })
-    .sort((a, b) => b.totalCents - a.totalCents)
-
-  return {
-    startingBalanceCents,
-    withoutSnapshot,
-    today,
-    horizon: { from: today, to: horizonEnd },
-    monthlyPlanned: [...monthlyPlanned.entries()]
-      .map(([month, v]) => ({
-        month,
-        incomeCents: v.incomeCents,
-        expensesCents: v.expensesCents,
-        netCents: v.incomeCents - v.expensesCents,
-      }))
-      .sort((a, b) => a.month.localeCompare(b.month)),
-    projectedBalance,
-    plannedCategories,
   }
 }

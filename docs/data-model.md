@@ -38,7 +38,7 @@ lexically sortable; the analytics engine slices months with
 
 ## Tables
 
-Ten tables ([lib/db/schema.ts](../lib/db/schema.ts)); every domain table
+Eleven tables ([lib/db/schema.ts](../lib/db/schema.ts)); every domain table
 carries `user_id` — rows are invisible to other users
 ([ADR-0032](adr/adr-0032-multi-user-oidc.md)):
 
@@ -50,12 +50,14 @@ erDiagram
   USERS ||--o{ LABEL_RULES : "user_id"
   USERS ||--o{ TRANSACTIONS : "user_id (denormalized)"
   USERS ||--o{ PLANNED_TRANSACTIONS : "user_id"
+  USERS ||--o{ PREDICTION_MODELS : "user_id"
   USERS ||--o{ CHAT_THREADS : "user_id (owner)"
   USERS ||--o{ CHAT_THREAD_MEMBERS : "user_id"
   USERS ||--o{ CHAT_MESSAGES : "user_id (author, nullable)"
   ACCOUNTS ||--o{ TRANSACTIONS : "account_id"
   ACCOUNTS ||--o{ IMPORT_BATCHES : "account_id"
   ACCOUNTS ||--o{ PLANNED_TRANSACTIONS : "account_id (nullable)"
+  ACCOUNTS ||--o{ PREDICTION_MODELS : "account_id (nullable, cascade)"
   IMPORT_BATCHES ||--o{ TRANSACTIONS : "batch_id"
   CATEGORIES ||--o{ TRANSACTIONS : "category_id"
   CATEGORIES ||--o{ LABEL_RULES : "label_id (cascade delete)"
@@ -175,23 +177,59 @@ the recurrence engine, matching and forecast live in
 **Never inserted into `transactions`** — expansion + read-time matching
 compute everything per request ([ADR-0035](adr/adr-0035-planned-transactions-rrule.md)).
 
-| Column                      | Type                    | Notes                                                                                                                                                                                             |
-| --------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                        | TEXT PK                 | UUID                                                                                                                                                                                              |
-| `user_id`                   | INTEGER FK → users      | owning user                                                                                                                                                                                       |
-| `account_id`                | INTEGER FK → accounts   | nullable — NULL = "any account"                                                                                                                                                                   |
-| `counterparty`              | TEXT                    | free text; drives the occurrence match (normalized substring vs. payer/payee)                                                                                                                     |
-| `purpose`                   | TEXT                    | free text                                                                                                                                                                                         |
-| `amount_cents`              | INTEGER NOT NULL        | signed ([ADR-0002](adr/adr-0002-integer-cents.md)); CHECK `<> 0`                                                                                                                                  |
-| `category_id`               | INTEGER FK → categories | nullable                                                                                                                                                                                          |
-| `dtstart`                   | TEXT NOT NULL           | first occurrence, ISO `YYYY-MM-DD`                                                                                                                                                                |
-| `rrule`                     | TEXT                    | bare RFC 5545 RRULE (allowlisted parts, caps); **NULL = one-off on `dtstart`**                                                                                                                    |
-| `status`                    | TEXT NOT NULL           | `active / paused / finished` — CHECK enforced (`planned_transactions_status_check`); paused stays visible on the calendar and plan list but is excluded from the forecast, finished never expands |
-| `notes`                     | TEXT                    |                                                                                                                                                                                                   |
-| `created_at` / `updated_at` | TEXT ISO                |                                                                                                                                                                                                   |
+| Column                      | Type                    | Notes                                                                                                                                                                                               |
+| --------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                        | TEXT PK                 | UUID                                                                                                                                                                                                |
+| `user_id`                   | INTEGER FK → users      | owning user                                                                                                                                                                                         |
+| `account_id`                | INTEGER FK → accounts   | nullable — NULL = "any account"                                                                                                                                                                     |
+| `counterparty`              | TEXT                    | free text; drives the occurrence match (normalized substring vs. payer/payee)                                                                                                                       |
+| `purpose`                   | TEXT                    | free text                                                                                                                                                                                           |
+| `amount_cents`              | INTEGER NOT NULL        | signed ([ADR-0002](adr/adr-0002-integer-cents.md)); CHECK `<> 0`                                                                                                                                    |
+| `category_id`               | INTEGER FK → categories | nullable                                                                                                                                                                                            |
+| `dtstart`                   | TEXT NOT NULL           | first occurrence, ISO `YYYY-MM-DD`                                                                                                                                                                  |
+| `rrule`                     | TEXT                    | bare RFC 5545 RRULE (allowlisted parts, caps); **NULL = one-off on `dtstart`**                                                                                                                      |
+| `status`                    | TEXT NOT NULL           | `active / paused / finished` — CHECK enforced (`planned_transactions_status_check`); paused stays visible on the calendar and plan list but is excluded from the prediction, finished never expands |
+| `notes`                     | TEXT                    |                                                                                                                                                                                                     |
+| `created_at` / `updated_at` | TEXT ISO                |                                                                                                                                                                                                     |
 
 Indexes: `planned_transactions_user_status_idx` `(user_id, status)`,
 `planned_transactions_account_idx` `(account_id)`.
+
+### `prediction_models`
+
+Automatic daily prediction artifacts ([ADR-0038](adr/adr-0038-automatic-daily-prediction.md),
+guide: [prediction.md](prediction.md)). One current row per scope: one per
+owned account plus one all-accounts row (`account_id` NULL). Rows are derived
+data; training never touches bank truth.
+
+| Column                                     | Type                  | Notes                                                           |
+| ------------------------------------------ | --------------------- | --------------------------------------------------------------- |
+| `id`                                       | TEXT PK               | UUID                                                            |
+| `user_id`                                  | INTEGER FK → users    | owner                                                           |
+| `account_id`                               | INTEGER FK → accounts | NULL = all-accounts; `ON DELETE CASCADE`                        |
+| `scope_key`                                | TEXT NOT NULL         | `"all"` or `"account:<id>"`; unique per user                    |
+| `status`                                   | TEXT NOT NULL         | `ready / training / failed`                                     |
+| `algorithm`                                | TEXT NOT NULL         | `tweedie-daily-v1` (per-direction choice lives in the artifact) |
+| `feature_version`                          | INTEGER NOT NULL      | artifact compatibility                                          |
+| `data_from` / `data_to`                    | TEXT                  | observed booking span; NULL before first artifact               |
+| `day_count`                                | INTEGER               | observed days; NULL before first artifact                       |
+| `transaction_count`                        | INTEGER               | booked rows read; NULL before first artifact                    |
+| `data_signature`                           | TEXT                  | daily sums + plan/account signature                             |
+| `plan_signature`                           | TEXT                  | active plan definition hash                                     |
+| `artifact_json`                            | TEXT                  | weights, feature stats, metrics                                 |
+| `metrics_json`                             | TEXT                  | internal bake-off metrics                                       |
+| `checksum`                                 | TEXT                  | SHA-256 of the artifact JSON                                    |
+| `last_error`                               | TEXT                  | last failure                                                    |
+| `attempts` / `next_retry_at`               | INTEGER / TEXT        | retry bookkeeping                                               |
+| `trained_at` / `updated_at` / `created_at` | TEXT                  | ISO; `trained_at` is NULL before the first artifact             |
+
+Nullable artifact columns let a failed first training attempt exist as a
+`failed` row (with `last_error`/backoff) before any model JSON is written.
+
+Unique index: `prediction_models_user_scope_unique` `(user_id, scope_key)`.
+Further indexes: `(user_id, account_id)`, `(status)`. A CHECK ties
+`account_id IS NULL` to `scope_key = 'all'` and a non-NULL account to
+`scope_key = 'account:<id>'`.
 
 ### `chat_threads` / `chat_thread_members` / `chat_messages`
 
@@ -268,8 +306,18 @@ cover the whole lifecycle ([ADR-0005](adr/adr-0005-code-first-ddl.md)):
    (`import_batches.rows_updated`, `categories.origin`,
    `categories.usage_count`); re-checked on every `getDb()`.
 
-The drizzle `check()` definitions on `label_rules` exist only for
-drizzle-kit push parity and must stay in sync with the hand-written DDL.
+The drizzle `check()` definitions on `label_rules` and
+`prediction_models` exist only for drizzle-kit push parity and must stay in
+sync with the hand-written DDL.
+
+### The `prediction_models` rebuild
+
+`prediction_models` is derived cache data. `migrateSchema` drops and
+recreates it when the table has NOT NULL artifact columns **or** its DDL lacks
+the named `prediction_models_scope_check` marker (the earlier unnamed-CHECK
+shape), leaving nullable columns plus the constraint.
+Models retrain automatically, so no bank-truth data is affected. The rebuild
+is regression-tested in [tests/db-migration.test.ts](../tests/db-migration.test.ts).
 
 ### The destructive `label_rules` rebuild
 
