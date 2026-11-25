@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
+import { describe, it, expect, beforeEach, vi } from "vitest"
 import { eq } from "drizzle-orm"
 import { NextRequest } from "next/server"
 import type { Db } from "@/lib/db"
@@ -14,10 +14,8 @@ import {
   DELETE as deletePlanRoute,
 } from "@/app/api/plans/[id]/route"
 import { GET as getOccurrencesRoute } from "@/app/api/plans/occurrences/route"
-import { GET as getForecastRoute } from "@/app/api/plans/forecast/route"
 import { GET as getCalendarRoute } from "@/app/api/transactions/calendar/route"
 import { GET as getTransactionsRoute } from "@/app/api/transactions/route"
-import { todayLocal } from "@/lib/analytics/date"
 import { authedRequest, setupTestDb, seedUser } from "./helpers"
 
 const BASE = "http://localhost:3000"
@@ -76,11 +74,6 @@ function getPlansQuery(query: string, uid: number = userId) {
 function getOccurrences(query: string, uid: number = userId) {
   return authedRequest(`${BASE}/api/plans/occurrences?${query}`, uid).then(
     getOccurrencesRoute
-  )
-}
-function getForecast(query: string, uid: number = userId) {
-  return authedRequest(`${BASE}/api/plans/forecast?${query}`, uid).then(
-    getForecastRoute
   )
 }
 
@@ -546,16 +539,18 @@ describe("GET /api/plans", () => {
     expect("nextDueDate" in without.plans[0]).toBe(false)
   })
 
-  it("falls back to page 1 for an unsafe page number", async () => {
+  it("answers an empty page when the OFFSET exceeds SQLite's int64 range", async () => {
     await seedSimplePlan({ counterparty: "A" })
-    // (page - 1) * pageSize would exceed SQLite's int64 OFFSET range
+    // (page - 1) * pageSize is 2e19, beyond SQLite's int64 OFFSET range
     const res = await getPlansQuery("page=1000000000000000000&pageSize=20")
     expect(res.status).toBe(200)
     const data = await res.json()
-    expect(data.page).toBe(1)
-    expect(data.plans).toHaveLength(1)
+    expect(data.page).toBe(1e18)
+    expect(data.plans).toHaveLength(0)
+    expect(data.total).toBe(1)
+    expect(data.pageCount).toBe(1)
 
-    // non-positive / non-numeric pages fall back too (paging params are
+    // non-positive / non-numeric pages fall back to 1 (paging params are
     // lenient, unlike the strict status allowlist)
     for (const page of ["0", "-3", "abc"]) {
       const fallback = await getPlansQuery(`page=${page}&pageSize=20`)
@@ -566,17 +561,18 @@ describe("GET /api/plans", () => {
     }
   })
 
-  it("falls back to page 1 when the OFFSET product leaves the safe range", async () => {
+  it("echoes a huge page whose OFFSET is still representable", async () => {
     await seedSimplePlan({ counterparty: "A" })
-    // the page itself is a safe integer, but (page - 1) * 100 is not — the
-    // OFFSET would be bound as a REAL
+    // (page - 1) * 100 ≈ 9.0e17 is above 2^53 but inside SQLite's int64
+    // range, so the query runs and simply matches no rows
     const res = await getPlansQuery(
       `page=${Number.MAX_SAFE_INTEGER}&pageSize=100`
     )
     expect(res.status).toBe(200)
     const data = await res.json()
-    expect(data.page).toBe(1)
-    expect(data.plans).toHaveLength(1)
+    expect(data.page).toBe(Number.MAX_SAFE_INTEGER)
+    expect(data.plans).toHaveLength(0)
+    expect(data.total).toBe(1)
   })
 
   it("filters by status and paginates with a stable total/pageCount", async () => {
@@ -1169,95 +1165,29 @@ describe("GET /api/transactions id lookup", () => {
     const list = await (await getTransactions("status=all")).json()
     expect(list.rows).toHaveLength(1)
   })
-})
 
-describe("GET /api/plans/forecast", () => {
-  // safety net: the frozen-clock test below restores Date in `finally`, but a
-  // thrown setup line or timeout must never leak fake timers into later tests
-  afterEach(() => {
-    vi.useRealTimers()
-  })
+  it("echoes huge pages and answers empty when the OFFSET is unrepresentable", async () => {
+    // 9.0e17 is above 2^53 but inside SQLite's int64 range: the query runs
+    // and matches no rows; the page number is echoed back
+    const representable = await getTransactions(
+      `page=${Number.MAX_SAFE_INTEGER}&pageSize=100`
+    )
+    expect(representable.status).toBe(200)
+    const representableData = await representable.json()
+    expect(representableData.page).toBe(Number.MAX_SAFE_INTEGER)
+    expect(representableData.rows).toHaveLength(0)
 
-  it("401 without session; 400 on garbage months", async () => {
-    expect(
-      (await getForecastRoute(anonRequest(`${BASE}/api/plans/forecast`))).status
-    ).toBe(401)
-    expect((await getForecast("months=abc")).status).toBe(400)
-    // digits-only: parseInt coercion would read "12abc" as a 12-month
-    // horizon instead of the invalid_months 400 garbage gets
-    expect((await getForecast("months=12abc")).status).toBe(400)
-    expect((await getForecast("months=12.9")).status).toBe(400)
-    expect((await getForecast("months=-1")).status).toBe(400)
-    // same digits-only contract as accountId on /plans/occurrences and
-    // /transactions/calendar: "12.9" → 12 would silently scope the
-    // projection to account 12 instead of answering invalid_account
-    expect((await getForecast("accountId=12.9")).status).toBe(400)
-    expect((await getForecast("accountId=12abc")).status).toBe(400)
-    expect((await getForecast("accountId=-1")).status).toBe(400)
-  })
+    // 2e19 exceeds int64: guard in paginate, same empty-page answer
+    const huge = await getTransactions("page=1000000000000000000&pageSize=25")
+    expect(huge.status).toBe(200)
+    const hugeData = await huge.json()
+    expect(hugeData.page).toBe(1e18)
+    expect(hugeData.rows).toHaveLength(0)
 
-  it("returns the forecast envelope", async () => {
-    const res = await getForecast("months=3")
-    expect(res.status).toBe(200)
-    const data = await res.json()
-    expect(data.forecast).toMatchObject({
-      withoutSnapshot: expect.any(Boolean),
-      monthlyPlanned: expect.any(Array),
-      projectedBalance: expect.any(Array),
-      plannedCategories: expect.any(Array),
-    })
-  })
-
-  it("projects active plans only, even when a paused plan shares the date", async () => {
-    // freeze the local clock so the seeded dtstart and the route's own
-    // todayLocal() cannot disagree across midnight
-    vi.useFakeTimers({ toFake: ["Date"] })
-    vi.setSystemTime(new Date(2026, 5, 15, 12, 0, 0))
-    try {
-      const today = todayLocal()
-      await seedSimplePlan({
-        dtstart: today,
-        amountCents: -1_000,
-        rrule: null,
-        status: "active",
-      })
-      await seedSimplePlan({
-        dtstart: today,
-        amountCents: -9_000,
-        rrule: null,
-        status: "paused",
-      })
-
-      const res = await getForecast("months=1")
-      expect(res.status).toBe(200)
-      const { forecast } = (await res.json()) as {
-        forecast: {
-          monthlyPlanned: unknown
-          plannedCategories: unknown
-        }
-      }
-      // computeForecast must scope occurrences to active plans before
-      // building the sums: only the active 1.000-cent plan reaches the sums
-      // and category shares
-      expect(forecast.monthlyPlanned).toEqual([
-        {
-          month: today.slice(0, 7),
-          incomeCents: 0,
-          expensesCents: 1_000,
-          netCents: -1_000,
-        },
-      ])
-      expect(forecast.plannedCategories).toEqual([
-        {
-          categoryId: null,
-          name: "ohne Kategorie",
-          color: null,
-          totalCents: 1_000,
-          share: 1,
-        },
-      ])
-    } finally {
-      vi.useRealTimers()
+    for (const page of ["0", "-3", "abc"]) {
+      const fallback = await getTransactions(`page=${page}&pageSize=25`)
+      expect(fallback.status).toBe(200)
+      expect((await fallback.json()).page).toBe(1)
     }
   })
 })

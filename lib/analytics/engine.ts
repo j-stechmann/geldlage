@@ -1,7 +1,19 @@
-import { and, eq, gt, gte, lte, sql, type SQL } from "drizzle-orm"
+import { and, gt, sql } from "drizzle-orm"
 import { getDb } from "@/lib/db"
-import { importBatches, transactions } from "@/lib/db/schema"
+import { transactions } from "@/lib/db/schema"
 import { buildWhere, type TransactionFilters } from "@/lib/analytics/queries"
+import { buildTimeScopedWhere, latestAnchor } from "@/lib/analytics/balance"
+import {
+  isValidMonthKey,
+  lastDayOfMonthDay,
+  MAX_MONTH_KEY,
+  MIN_MONTH_KEY,
+  monthOf,
+  monthsBetween,
+  monthSpanExceedsCap,
+  nextMonth,
+  prevMonth,
+} from "@/lib/dates"
 
 export interface MonthlyCashflowPoint {
   month: string // YYYY-MM
@@ -41,26 +53,6 @@ export interface AnalyticsResult {
   topCategories: TopCategoryPoint[]
 }
 
-interface BalanceAnchor {
-  snapshotDate: string
-  snapshotAmountCents: number
-  /** deterministic same-day tie-break part: fresher import wins */
-  createdAt: string
-  /** deterministic last tie-break part (createdAt is not unique) */
-  id: string
-}
-
-/** True when r should replace latest — snapshotDate then createdAt then id. */
-export function isLaterAnchor(
-  r: BalanceAnchor,
-  latest: BalanceAnchor
-): boolean {
-  if (r.snapshotDate !== latest.snapshotDate)
-    return r.snapshotDate > latest.snapshotDate
-  if (r.createdAt !== latest.createdAt) return r.createdAt > latest.createdAt
-  return r.id > latest.id
-}
-
 /**
  * There are two filter scopes, kept separate by construction:
  *
@@ -70,109 +62,9 @@ export function isLaterAnchor(
  * 2. **Time-scoped scope** — balance (KPI + timeline).
  *    Snapshots anchor an *absolute booked* account balance, so every content
  *    filter is structurally out of scope: these aggregates are built from an
- *    allowlist (`buildTimeScopedWhere`: user, booked rows, optional account,
- *    caller-supplied date bounds), never by stripping fields off the flow
- *    filters — a new filter added to `TransactionFilters` cannot leak here.
+ *    allowlist (`buildTimeScopedWhere`, shared with the forecast), never by
+ *    stripping fields off the flow filters.
  */
-function buildTimeScopedWhere(
-  userId: number,
-  accountId: number | undefined,
-  dateBounds?: { from?: string; to?: string }
-): SQL | undefined {
-  const conditions: SQL[] = [
-    eq(transactions.userId, userId),
-    eq(transactions.status, "Gebucht"),
-  ]
-  if (accountId !== undefined) {
-    conditions.push(eq(transactions.accountId, accountId))
-  }
-  if (dateBounds?.from !== undefined) {
-    conditions.push(gte(transactions.bookingDate, dateBounds.from))
-  }
-  if (dateBounds?.to !== undefined) {
-    conditions.push(lte(transactions.bookingDate, dateBounds.to))
-  }
-  return and(...conditions)
-}
-
-/**
- * Balance anchor = LATEST snapshot across all batches (most recent known
- * absolute balance point). Current balance = snapshot + Σ(booked amounts
- * with booking_date > snapshot_date) — robust to missing older history.
- * Batches tied on snapshotDate resolve deterministically, freshest import
- * first (see isLaterAnchor); snapshots dated AFTER today are ignored —
- * computeForecast (lib/planning/service.ts) applies the identical rule, so
- * both scopes pick the same snapshot (a future-dated Saldo line, e.g. from
- * an export holding future bookings, never anchors one scope alone). The
- * no-snapshot fallbacks remain conceptually different (engine: pseudo
- * balance cumulated from zero, unbounded; forecast: Σ booked ≤ today).
- */
-function latestAnchor(
-  userId: number,
-  accountId: number | undefined,
-  today: string
-): BalanceAnchor | null {
-  const db = getDb()
-  const rows = db
-    .select({
-      id: importBatches.id,
-      createdAt: importBatches.createdAt,
-      snapshotDate: importBatches.snapshotDate,
-      snapshotAmountCents: importBatches.snapshotAmountCents,
-    })
-    .from(importBatches)
-    .where(
-      accountId !== undefined
-        ? and(
-            eq(importBatches.userId, userId),
-            eq(importBatches.accountId, accountId),
-            sql`${importBatches.snapshotDate} IS NOT NULL AND ${importBatches.snapshotAmountCents} IS NOT NULL`
-          )
-        : sql`${importBatches.userId} = ${userId} AND ${importBatches.snapshotDate} IS NOT NULL AND ${importBatches.snapshotAmountCents} IS NOT NULL`
-    )
-    .all()
-  const valid = rows.filter(
-    (r): r is BalanceAnchor =>
-      r.snapshotDate !== null &&
-      r.snapshotAmountCents !== null &&
-      // matches computeForecast's candidate filter: a snapshot dated after
-      // today (export header mis-parse, future bookings priced into the
-      // Saldo) is not a "current balance" point yet — anchoring on it would
-      // let the KPI name a snapshot the forecast rejects
-      r.snapshotDate <= today
-  )
-  if (valid.length === 0) return null
-  return valid.reduce(
-    (latest, r) => (isLaterAnchor(r, latest) ? r : latest),
-    valid[0]
-  )
-}
-
-function monthOf(isoDate: string): string {
-  return isoDate.slice(0, 7)
-}
-
-/** list of YYYY-MM between two ISO dates, inclusive, zero-filled */
-function monthsBetween(fromIso: string, toIso: string): string[] {
-  const months: string[] = []
-  let [y, m] = fromIso.split("-").map(Number)
-  const [ty, tm] = toIso.split("-").map(Number)
-  while (y < ty || (y === ty && m <= tm)) {
-    months.push(`${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}`)
-    m++
-    if (m > 12) {
-      m = 1
-      y++
-    }
-  }
-  return months
-}
-
-/** day-of-month of the last calendar day of the month containing iso */
-function lastDayOfMonth(iso: string): string {
-  const [y, m] = iso.split("-").map(Number)
-  return String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")
-}
 
 /**
  * Flow aggregates (cashflow, categories, KPIs) react to every filter and
@@ -212,73 +104,103 @@ export function computeAnalytics(
   let savingsRate: number | null = null
 
   if (monthlyRows.length > 0) {
-    const bounds = db
-      .select({
-        min: sql<string>`MIN(${transactions.bookingDate})`,
-        max: sql<string>`MAX(${transactions.bookingDate})`,
-      })
-      .from(transactions)
-      .where(flowWhere)
-      .get()
-    // bounds are inclusive (the DB predicates are gte/lte on booking_date)
-    const minDate = f.dateFrom ?? bounds?.min ?? today
-    const maxDate = f.dateTo ?? bounds?.max ?? today
-
-    // partial current month: include in series, exclude from averages
-    const currentMonth = monthOf(today)
-    let lastFullMonth = monthOf(maxDate)
-    if (lastFullMonth >= currentMonth) {
-      lastFullMonth = prevMonth(currentMonth)
-    } else if (
-      f.dateTo !== undefined &&
-      f.dateTo.slice(8, 10) !== lastDayOfMonth(f.dateTo)
-    ) {
-      // mid-month dateTo in a past month: that month is partial, not full
-      lastFullMonth = prevMonth(lastFullMonth)
-    }
-
-    const spanStartMonth = monthOf(minDate)
-    const allMonths = monthsBetween(spanStartMonth, monthOf(maxDate))
-
-    // mid-month dateFrom: that month is partial, not full (mirrors dateTo)
-    let firstFullMonth = spanStartMonth
-    if (f.dateFrom !== undefined && f.dateFrom.slice(8, 10) !== "01") {
-      firstFullMonth = nextMonth(firstFullMonth)
-    }
-
-    const byMonth = new Map(monthlyRows.map((r) => [r.month, r]))
-    for (const m of allMonths) {
-      const row = byMonth.get(m)
-      const income = row?.income ?? 0
-      const expenses = row?.expenses ?? 0
-      monthlyCashflow.push({
-        month: m,
-        incomeCents: income,
-        expensesCents: expenses,
-        netCents: income - expenses,
-      })
-    }
-
-    // averages over full months only (partial end months excluded)
-    const fullMonths = allMonths.filter(
-      (m) => m <= lastFullMonth && m >= firstFullMonth
+    // GROUP BY already yields one row per month; ignore unrepresentable
+    // booking dates (the column has no format CHECK) instead of feeding them
+    // into month arithmetic.
+    const dataMonths = monthlyRows.map((r) => r.month).filter(isValidMonthKey)
+    const firstDataMonth = dataMonths.reduce<string | undefined>(
+      (min, m) => (min === undefined || m < min ? m : min),
+      undefined
     )
-    monthsCounted = fullMonths.length
-    const sumIncome = fullMonths.reduce(
-      (acc, m) => acc + (byMonth.get(m)?.income ?? 0),
-      0
+    const lastDataMonth = dataMonths.reduce<string | undefined>(
+      (max, m) => (max === undefined || m > max ? m : max),
+      undefined
     )
-    const sumExpenses = fullMonths.reduce(
-      (acc, m) => acc + (byMonth.get(m)?.expenses ?? 0),
-      0
-    )
-    avgIncome = monthsCounted > 0 ? Math.round(sumIncome / monthsCounted) : null
-    avgExpenses =
-      monthsCounted > 0 ? Math.round(sumExpenses / monthsCounted) : null
-    savingsRate =
-      avgIncome !== null && avgIncome > 0
-        ? (avgIncome - (avgExpenses ?? 0)) / avgIncome
-        : null
+    const spanStartMonth =
+      f.dateFrom !== undefined ? monthOf(f.dateFrom) : firstDataMonth
+    const spanEndMonth =
+      f.dateTo !== undefined ? monthOf(f.dateTo) : lastDataMonth
+
+    // Every matching row has an unrepresentable booking_date: there is no
+    // month series and no data-derived bound to build.
+    if (spanStartMonth !== undefined && spanEndMonth !== undefined) {
+      // partial current month: include in series, exclude from averages
+      const currentMonth = monthOf(today)
+      let lastFullMonth: string | null = spanEndMonth
+      if (lastFullMonth >= currentMonth) {
+        // the current month itself is partial; a caller-supplied today in
+        // 0000-01 has no representable predecessor month (guard mirrored
+        // below for a partial 9999-12 dateFrom)
+        lastFullMonth =
+          currentMonth === MIN_MONTH_KEY ? null : prevMonth(currentMonth)
+      } else if (
+        f.dateTo !== undefined &&
+        f.dateTo.slice(8, 10) !== lastDayOfMonthDay(f.dateTo)
+      ) {
+        // mid-month dateTo in a past month: that month is partial, not full.
+        // A partial 0000-01 has no representable predecessor month, so no
+        // month is fully inside the range.
+        lastFullMonth =
+          lastFullMonth === MIN_MONTH_KEY ? null : prevMonth(lastFullMonth)
+      }
+
+      // Either bound can make the span arbitrarily wide: an explicit range
+      // the FilterBar allows, or a data-derived one (an outlier booking
+      // date). Rather than reject the request, degrade to the months that
+      // actually have data instead of materializing a synthetic zero-fill
+      // across centuries. The degraded series is also the average denominator:
+      // monthsCounted and avg* below count the populated full months the
+      // chart shows, never the synthetic span that was not materialized.
+      const allMonths = monthSpanExceedsCap(spanStartMonth, spanEndMonth)
+        ? [...dataMonths].sort()
+        : monthsBetween(spanStartMonth, spanEndMonth)
+
+      // mid-month dateFrom: that month is partial, not full (mirrors dateTo)
+      let firstFullMonth: string | null = spanStartMonth
+      if (f.dateFrom !== undefined && f.dateFrom.slice(8, 10) !== "01") {
+        // Symmetrically, a partial 9999-12 has no representable successor.
+        firstFullMonth =
+          firstFullMonth === MAX_MONTH_KEY ? null : nextMonth(firstFullMonth)
+      }
+
+      const byMonth = new Map(monthlyRows.map((r) => [r.month, r]))
+      for (const m of allMonths) {
+        const row = byMonth.get(m)
+        const income = row?.income ?? 0
+        const expenses = row?.expenses ?? 0
+        monthlyCashflow.push({
+          month: m,
+          incomeCents: income,
+          expensesCents: expenses,
+          netCents: income - expenses,
+        })
+      }
+
+      // averages over full months only (partial end months excluded)
+      const last = lastFullMonth
+      const first = firstFullMonth
+      const fullMonths =
+        last === null || first === null
+          ? []
+          : allMonths.filter((m) => m <= last && m >= first)
+      monthsCounted = fullMonths.length
+      const sumIncome = fullMonths.reduce(
+        (acc, m) => acc + (byMonth.get(m)?.income ?? 0),
+        0
+      )
+      const sumExpenses = fullMonths.reduce(
+        (acc, m) => acc + (byMonth.get(m)?.expenses ?? 0),
+        0
+      )
+      avgIncome =
+        monthsCounted > 0 ? Math.round(sumIncome / monthsCounted) : null
+      avgExpenses =
+        monthsCounted > 0 ? Math.round(sumExpenses / monthsCounted) : null
+      savingsRate =
+        avgIncome !== null && avgIncome > 0
+          ? (avgIncome - (avgExpenses ?? 0)) / avgIncome
+          : null
+    }
   }
 
   // ── transaction count + top categories (flow scope) ───────────────
@@ -453,18 +375,4 @@ export function computeAnalytics(
     balanceTimeline,
     topCategories,
   }
-}
-
-function prevMonth(month: string): string {
-  const [y, m] = month.split("-").map(Number)
-  const ny = m === 1 ? y - 1 : y
-  const nm = m === 1 ? 12 : m - 1
-  return `${String(ny).padStart(4, "0")}-${String(nm).padStart(2, "0")}`
-}
-
-function nextMonth(month: string): string {
-  const [y, m] = month.split("-").map(Number)
-  const ny = m === 12 ? y + 1 : y
-  const nm = m === 12 ? 1 : m + 1
-  return `${String(ny).padStart(4, "0")}-${String(nm).padStart(2, "0")}`
 }

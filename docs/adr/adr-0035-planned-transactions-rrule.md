@@ -103,6 +103,12 @@ EXDATE/RDATE` as well as multi-line/`DTSTART:` pastes (dtstart is a
    the current month count from TODAY (the dashboard merges partial actuals
    with the remaining plans).
 
+   _Superseded by [ADR-0038](adr-0038-automatic-daily-prediction.md):_ the
+   planned-only forecast endpoint and `computeForecast` were removed. Plans
+   now feed the automatic daily prediction engine as residual-excluded
+   actuals and exact future occurrences; the starting-balance anchor and
+   read-time matching described here still apply.
+
 5. **Calendar UI from the ReUI shadcn registry** (`@reui/event-calendar`,
    Base UI twin matching the app's `@base-ui/react` primitives, base-nova
    style). Copy-and-own source under `components/reui/` (ADR-0026

@@ -25,16 +25,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import {
-  ArrowDown,
-  ArrowUp,
-  ArrowUpDown,
-  ChevronLeft,
-  ChevronRight,
-  Columns3,
-} from "lucide-react"
+import { ArrowDown, ArrowUp, ArrowUpDown, Columns3 } from "lucide-react"
 import { filtersToParams, type TableFilters } from "@/lib/filters"
 import { ErrorState } from "@/components/error-state"
+import { Pager } from "@/components/pager"
 import { apiFetch } from "@/lib/api-fetch"
 import {
   COLUMNS,
@@ -45,20 +39,14 @@ import {
 import {
   TransactionDetailRow,
   TransactionRow,
-  planPrefillFromTx,
   type TxRow,
 } from "@/components/transaction-row"
+import { planPrefillFromTx } from "@/lib/planning/prefill"
 import { PlanDialog } from "@/components/planning/plan-dialog"
-import type { PlanRow } from "@/components/planning/api"
+import type { PlanRow } from "@/lib/contracts/planning"
 import { AssignLabelDialog } from "@/components/assign-label-dialog"
 import { useRowActivation } from "@/hooks/use-row-activation"
-
-interface TransactionsResponse {
-  rows: TxRow[]
-  total: number
-  page: number
-  pageCount: number
-}
+import type { TransactionPage } from "@/lib/contracts/transactions"
 
 type SortKey = "bookingDate" | "valueDate" | "amountCents" | "payee" | "status"
 
@@ -242,7 +230,7 @@ export function TransactionsTable({
   }
 
   const { data, isLoading, isFetching, isError, refetch } =
-    useQuery<TransactionsResponse>({
+    useQuery<TransactionPage>({
       queryKey: ["transactions", params.toString()],
       queryFn: async () => {
         const res = await apiFetch(`/api/transactions?${params}`)
@@ -480,35 +468,20 @@ export function TransactionsTable({
         </Table>
       </div>
 
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          {data ? `${data.total.toLocaleString("de-DE")} Transaktionen` : "…"}
-        </p>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={focusMode || page <= 1}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-          >
-            <ChevronLeft className="size-4" /> Zurück
-          </Button>
-          <span className="text-sm text-muted-foreground tabular-nums">
-            {/* focus mode ignores the page state entirely (the id lookup is a
-                single row): the pager must not offer dead controls — the
-                buttons disable and the stale "N / 1" indicator reads "Fokus" */}
-            {focusMode ? "Fokus" : `${page} / ${data?.pageCount ?? 1}`}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={focusMode || page >= (data?.pageCount ?? 1)}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            Weiter <ChevronRight className="size-4" />
-          </Button>
-        </div>
-      </div>
+      {/* focus mode ignores the page state entirely (the id lookup is a
+          single row): the pager must not offer dead controls — the buttons
+          disable and the stale "N / 1" indicator reads "Fokus" */}
+      <Pager
+        page={page}
+        pageCount={data?.pageCount ?? 1}
+        onPageChange={setPage}
+        prevDisabled={focusMode}
+        nextDisabled={focusMode}
+        summary={
+          data ? `${data.total.toLocaleString("de-DE")} Transaktionen` : "…"
+        }
+        indicator={focusMode ? "Fokus" : `${page} / ${data?.pageCount ?? 1}`}
+      />
 
       {assignTarget && (
         <AssignLabelDialog

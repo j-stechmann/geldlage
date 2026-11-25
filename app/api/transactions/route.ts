@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import {
-  parseFilters,
+  parseRouteFilters,
   queryTransactionById,
   queryTransactions,
 } from "@/lib/analytics/queries"
+import { parsePagination } from "@/lib/api/query"
 import { requireSession, unauthorized } from "@/lib/auth/guard"
 
 export const runtime = "nodejs"
@@ -21,15 +22,22 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(queryTransactionById(id, session.uid))
   }
 
-  const filters = parseFilters(sp)
+  // shares date validation with /api/analytics. Its 1200-month span cap is
+  // deliberately not applied here: this list never materializes a month
+  // series, so a wide range only widens the SQL bound and stays valid.
+  const parsed = parseRouteFilters(sp)
+  if (!parsed.ok) {
+    return NextResponse.json(
+      { error: parsed.error, message: parsed.message },
+      { status: 400 }
+    )
+  }
+  const filters = parsed.filters
 
-  const pageRaw = Number.parseInt(sp.get("page") ?? "1", 10)
-  const page = Number.isSafeInteger(pageRaw) && pageRaw > 0 ? pageRaw : 1
-  const pageSizeRaw = Number.parseInt(sp.get("pageSize") ?? "25", 10)
-  const pageSize =
-    Number.isSafeInteger(pageSizeRaw) && pageSizeRaw > 0
-      ? Math.min(pageSizeRaw, 100)
-      : 25
+  const { page, pageSize } = parsePagination(sp, {
+    defaultPageSize: 25,
+    maxPageSize: 100,
+  })
 
   const result = queryTransactions(filters, session.uid, page, pageSize)
   return NextResponse.json(result)

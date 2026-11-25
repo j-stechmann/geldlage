@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, render, screen } from "@testing-library/react"
 import { TopCategoriesChart } from "@/components/analytics-charts"
 import type { AnalyticsResponse } from "@/components/analytics-kpis"
-import type { ForecastResult } from "@/components/planning/api"
+import type { PredictionForecast } from "@/lib/contracts/prediction"
 
 const captured = vi.hoisted(() => ({
   xAxis: [] as Array<Record<string, unknown>>,
@@ -97,17 +97,44 @@ const DATA: AnalyticsResponse["topCategories"] = [
   }),
 ]
 
-const FORECAST = {
-  plannedCategories: [
-    {
-      categoryId: 1,
-      name: "Miete",
-      color: null,
-      totalCents: 100000,
-      share: 0.4,
-    },
-  ],
-} as unknown as ForecastResult
+function prediction(
+  categories: PredictionForecast["monthly"][number]["categories"]
+): PredictionForecast {
+  return {
+    today: "2026-10-27",
+    horizon: { from: "2026-10-27", to: "2026-12-31", months: 2 },
+    startingBalanceCents: 0,
+    withoutSnapshot: false,
+    daily: [],
+    monthly: [
+      {
+        month: "2026-11",
+        partial: false,
+        incomeCents: 0,
+        expensesCents: categories.reduce(
+          (sum, category) => sum + category.expensesCents,
+          0
+        ),
+        netCents: 0,
+        bookedFuture: { incomeCents: 0, expensesCents: 0 },
+        categories,
+      },
+    ],
+    projectedBalance: [],
+    source: "model",
+    pending: false,
+    retryAt: null,
+  }
+}
+
+const FORECAST = prediction([
+  {
+    categoryId: 1,
+    name: "Miete",
+    color: null,
+    expensesCents: 100000,
+  },
+])
 
 beforeEach(() => {
   captured.xAxis.length = 0
@@ -183,9 +210,9 @@ describe("TopCategoriesChart x-axis", () => {
     )
   })
 
-  it("omits the share line while the forecast overlay is on", () => {
+  it("omits the share line while the prediction overlay is on", () => {
     render(
-      <TopCategoriesChart data={DATA} forecast={FORECAST} loading={false} />
+      <TopCategoriesChart data={DATA} prediction={FORECAST} loading={false} />
     )
     const props = captured.xAxis[0]
     // the height stays at the two-line size while Ist data exists, so
@@ -205,14 +232,12 @@ describe("TopCategoriesChart x-axis", () => {
     expect(container.querySelectorAll("text tspan")).toHaveLength(1)
   })
 
-  it("keeps the share line when the overlay has no planned expenses", () => {
-    const emptyForecast = {
-      plannedCategories: [],
-    } as unknown as ForecastResult
+  it("keeps the share line when the overlay has no predicted expenses", () => {
+    const emptyForecast = prediction([])
     render(
       <TopCategoriesChart
         data={DATA}
-        forecast={emptyForecast}
+        prediction={emptyForecast}
         loading={false}
       />
     )
@@ -248,36 +273,33 @@ describe("TopCategoriesChart x-axis", () => {
     expect(captured.barChart[0].margin).toMatchObject({ right: 40 })
   })
 
-  it("includes the planned stack in the domain while the overlay is on", () => {
+  it("includes the prediction stack in the domain while the overlay is on", () => {
     render(
-      <TopCategoriesChart data={DATA} forecast={FORECAST} loading={false} />
+      <TopCategoriesChart data={DATA} prediction={FORECAST} loading={false} />
     )
     const props = captured.xAxis[0]
-    // Miete: 2.437 € Ist + 1.000 € geplant
+    // Miete: 2.437 € Ist + 1.000 € Prognose
     expect(props.domain).toEqual([0, 3437])
     expect((props.ticks as number[]).at(-1)).toBe(3437)
   })
 
-  it("renders a planned-only dataset instead of the empty state", () => {
-    const plannedOnly = {
-      plannedCategories: [
-        {
-          categoryId: 3,
-          name: "Urlaub",
-          color: null,
-          totalCents: 250000,
-          share: 1,
-        },
-      ],
-    } as unknown as ForecastResult
+  it("renders a prediction-only dataset instead of the empty state", () => {
+    const plannedOnly = prediction([
+      {
+        categoryId: 3,
+        name: "Urlaub",
+        color: null,
+        expensesCents: 250000,
+      },
+    ])
     render(
-      <TopCategoriesChart data={[]} forecast={plannedOnly} loading={false} />
+      <TopCategoriesChart data={[]} prediction={plannedOnly} loading={false} />
     )
     const props = captured.xAxis[0]
     expect(props.domain).toEqual([0, 2500])
     expect((props.ticks as number[]).at(-1)).toBe(2500)
     // no Ist denominator exists here: the axis is single-line (30 px) and
-    // the planned-only bar never grows a share line
+    // the prediction-only bar never grows a share line
     expect(props.height).toBe(30)
     const tick = props.tick as (props: Record<string, unknown>) => ReactElement
     const { container } = render(

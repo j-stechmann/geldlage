@@ -2,103 +2,19 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "@/lib/api-fetch"
-import { isValidIsoDate, isoDatePlus } from "@/lib/planning/recurrence"
-import { MATCH_DAYS_BEFORE, MATCH_DAYS_AFTER } from "@/lib/planning/matching"
+import { isValidIsoDate, isoDatePlus } from "@/lib/dates"
+import { MATCH_DAYS_BEFORE, MATCH_DAYS_AFTER } from "@/lib/planning/limits"
 
-// ── DTOs (mirror the server contract in lib/planning/service.ts) ──────────
+// ── DTOs: consumers import them straight from lib/contracts/* (ADR-0037);
+// this module only needs the shapes its hooks return/produce ──────────────
 
-export interface PlanRow {
-  id: string
-  accountId: number | null
-  accountName: string | null
-  counterparty: string | null
-  purpose: string | null
-  amountCents: number
-  categoryId: number | null
-  categoryName: string | null
-  categoryColor: string | null
-  dtstart: string
-  rrule: string | null
-  status: "active" | "paused" | "finished"
-  notes: string | null
-  createdAt: string
-  updatedAt: string
-}
-
-/**
- * Prefill source for the plan dialog's create mode — built from an
- * existing context (e.g. a booked transaction being "umgewandelt"). Pure
- * data: the dialog derives the direction from the amount sign and guesses
- * a monthly recurrence from the dtstart day-of-month. No linkage is
- * stored — plans keep being read-time matched against bookings
- * (lib/planning/matching.ts).
- */
-export interface PlanPrefill {
-  amountCents: number
-  dtstart: string
-  counterparty: string | null
-  purpose: string | null
-  accountId: number | null
-  categoryId: number | null
-}
-
-export interface PlanListRow extends PlanRow {
-  nextDueDate: string | null
-}
-
-export interface PlanListPage {
-  plans: PlanListRow[]
-  total: number
-  page: number
-  pageCount: number
-}
-
-export type PlanStatusFilter = PlanRow["status"] | "all"
-
-export interface PlanListFilters {
-  q: string
-  status: PlanStatusFilter
-}
-
-export interface PlanOccurrence {
-  id: string
-  planId: string
-  date: string
-  amountCents: number
-  counterparty: string | null
-  purpose: string | null
-  categoryId: number | null
-  categoryName: string | null
-  categoryColor: string | null
-  accountId: number | null
-  planStatus: "active" | "paused"
-  matched: {
-    transactionId: string
-    bookingDate: string
-    amountCents: number
-  } | null
-}
-
-export interface ForecastResult {
-  startingBalanceCents: number
-  withoutSnapshot: boolean
-  today: string
-  horizon: { from: string; to: string }
-  monthlyPlanned: Array<{
-    month: string
-    incomeCents: number
-    expensesCents: number
-    netCents: number
-  }>
-  projectedBalance: Array<{ date: string; balanceCents: number }>
-  plannedCategories: Array<{
-    categoryId: number | null
-    name: string
-    color: string | null
-    totalCents: number
-    share: number
-  }>
-}
+import type {
+  PlanListFilters,
+  PlanListPage,
+  PlanOccurrence,
+  PlanRow,
+} from "@/lib/contracts/planning"
+import type { CalendarTransaction } from "@/lib/contracts/transactions"
 
 // ── query keys (house convention: two-phase, serializable params) ─────────
 
@@ -124,34 +40,13 @@ export function calendarTransactionsKey(
   return ["transactions-calendar", sp.toString()] as const
 }
 
-export interface CalendarTransaction {
-  id: string
-  date: string
-  /** verbatim DKB status: Gebucht | Nicht gebucht */
-  status: "Gebucht" | "Nicht gebucht"
-  counterparty: string | null
-  purpose: string | null
-  amountCents: number
-  categoryId: number | null
-  categoryName: string | null
-  categoryColor: string | null
-  /** legacy rows carry no account (transactions.account_id is nullable) */
-  accountId: number | null
-}
-
-export function forecastKey(months: number, accountId: number | null) {
-  const sp = new URLSearchParams({ months: String(months) })
-  if (accountId !== null) sp.set("accountId", String(accountId))
-  return ["forecast", sp.toString()] as const
-}
-
 /** invalidation fan-out after any plan mutation */
 export function invalidatePlans(
   queryClient: ReturnType<typeof useQueryClient>
 ) {
   void queryClient.invalidateQueries({ queryKey: PLANS_KEY })
   void queryClient.invalidateQueries({ queryKey: ["plan-occurrences"] })
-  void queryClient.invalidateQueries({ queryKey: ["forecast"] })
+  void queryClient.invalidateQueries({ queryKey: ["prediction"] })
   void queryClient.invalidateQueries({ queryKey: ["transactions-calendar"] })
 }
 
@@ -220,7 +115,9 @@ export function plansPageKey(
     pageSize: String(pageSize),
   })
   if (filters.q) sp.set("q", filters.q)
-  if (filters.status !== "all") sp.set("status", filters.status)
+  if (filters.status && filters.status !== "all") {
+    sp.set("status", filters.status)
+  }
   return ["plans", sp.toString()] as const
 }
 
@@ -270,7 +167,11 @@ export function usePlanOccurrences(
   })
 }
 
-/** Booked real transactions of the same window — the calendar's "Buchungen". */
+/**
+ * Real transactions of the same window — the calendar's "Buchungen". Both
+ * booked and pending rows are returned (`Gebucht` + `Nicht gebucht`); the
+ * calendar renders pending chips hollow.
+ */
 export function useCalendarTransactions(
   from: string | null,
   to: string | null,
@@ -429,34 +330,6 @@ export function useMatchedPlanForTx(ref: MatchedTxRef | null): {
       ? null
       : (plansQuery.data?.plans.find((p) => p.id === occurrence.planId) ?? null)
   return { matchedPlan, resolved: true }
-}
-
-export function useForecast(
-  enabled: boolean,
-  months: number,
-  accountId: number | null
-) {
-  const key = forecastKey(months, accountId)
-  return useQuery<ForecastResult>({
-    queryKey: key,
-    queryFn: async () => {
-      const sp = new URLSearchParams({ months: String(months) })
-      if (accountId !== null) sp.set("accountId", String(accountId))
-      const res = await apiFetch(`/api/plans/forecast?${sp.toString()}`)
-      if (!res.ok) {
-        throw await parseError(res, "Prognose konnte nicht geladen werden")
-      }
-      return (await res.json()).forecast as ForecastResult
-    },
-    enabled,
-    // NO placeholderData, unlike the calendar hooks: this query re-keys on
-    // the account filter, and a placeholder would keep the PREVIOUS
-    // account's projection on screen (header figure, chart overlay) while
-    // the differently scoped one loads — concrete money figures must never
-    // briefly belong to another account. Same-key refetches (plan mutations
-    // → invalidatePlans) already keep the query's own data, and the
-    // calendar's stale-while-loading visibility is unaffected.
-  })
 }
 
 /**

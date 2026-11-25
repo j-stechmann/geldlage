@@ -1,5 +1,7 @@
 import type { AgentTool } from "@/lib/agent/types"
-import { updatePlan, type PlanRow } from "@/lib/planning/service"
+import { getPlan, updatePlan } from "@/lib/planning/service"
+import { notifyPlanChanged } from "@/lib/prediction/triggers"
+import type { PlanRow } from "@/lib/contracts/planning"
 import {
   assertArgsObject,
   planIdFromArgs,
@@ -84,6 +86,12 @@ export const update_plan = {
     if (Object.keys(rest).length === 0) {
       throw new Error("invalid args: provide at least one field to update")
     }
+    const before = getPlan(ctx.uid, id)
+    if (!before) {
+      throw new Error(
+        "not_found: no plan with this id (look up ids via list_plans or query_data first)"
+      )
+    }
     let plan: PlanRow | null
     try {
       plan = updatePlan(ctx.uid, id, planInputFromArgs(rest))
@@ -100,6 +108,8 @@ export const update_plan = {
         "not_found: no plan with this id (look up ids via list_plans or query_data first)"
       )
     }
+    notifyPlanChanged(ctx.uid, before.accountId)
+    notifyPlanChanged(ctx.uid, plan.accountId)
     return { plan: planView(plan) }
   },
 } satisfies AgentTool

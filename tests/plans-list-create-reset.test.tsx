@@ -74,4 +74,26 @@ describe("PlansList create reset", () => {
     })
     expect(getByLabelText("Pläne durchsuchen")).toHaveValue("")
   })
+
+  it("cancels a search debounce that is still pending when the create saves", async () => {
+    const stub = stubFetch([{ url: /\/api\/plans$/, json: PAGE }])
+    const { container, getByLabelText, getByRole } = renderWithQuery(
+      <PlansList />
+    )
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("21 Pläne")
+    })
+
+    fireEvent.change(getByLabelText("Pläne durchsuchen"), {
+      target: { value: "Miete" },
+    })
+    // Save before the 300 ms debounce has emitted the search.
+    fireEvent.click(getByRole("button", { name: "mock-save" }))
+
+    // Give the would-be stale timer time to fire; it must not re-filter.
+    await new Promise((resolve) => setTimeout(resolve, 350))
+    expect(stub.calls.some((c) => c.url.includes("q=Miete"))).toBe(false)
+    expect(getByLabelText("Pläne durchsuchen")).toHaveValue("")
+  })
 })

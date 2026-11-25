@@ -31,15 +31,19 @@ import {
   type XAxisTickContentProps,
 } from "recharts"
 import type { AnalyticsResponse } from "@/components/analytics-kpis"
-import type { ForecastResult } from "@/components/planning/api"
+import {
+  PREDICTION_HORIZON_MONTHS,
+  predictionMonthsLabel,
+  type PredictionForecast,
+} from "@/lib/contracts/prediction"
 import { resolveCategoryColor } from "@/lib/category-colors"
 
 const cashflowConfig = {
   income: { label: "Einnahmen", color: "var(--chart-2)" },
   expenses: { label: "Ausgaben", color: "var(--chart-1)" },
   net: { label: "Netto", color: "var(--chart-4)" },
-  plannedIncome: { label: "Geplant (Einnahmen)", color: "var(--chart-2)" },
-  plannedExpenses: { label: "Geplant (Ausgaben)", color: "var(--chart-1)" },
+  predictedIncome: { label: "Prognose (Einnahmen)", color: "var(--chart-2)" },
+  predictedExpenses: { label: "Prognose (Ausgaben)", color: "var(--chart-1)" },
 } satisfies ChartConfig
 
 const balanceConfig = {
@@ -70,12 +74,12 @@ function euroShort(euros: number): string {
   return Math.round(euros).toLocaleString("de-DE")
 }
 
-/** One merged row of the planned-vs-actual categories chart. */
+/** One merged row of the Ist-vs-Prognose categories chart. */
 export interface CategoryTooltipRow {
-  /** Ist euros of the actual-filter period (0 = planned-only row) */
+  /** Ist euros of the actual-filter period (0 = prediction-only row) */
   value?: number
-  planned?: number
-  /** share among the row's own denominator: the Ist total for actual rows, the planned horizon total for planned-only rows */
+  predicted?: number
+  /** share among the row's own denominator: the Ist total for actual rows, the prediction horizon total for prediction-only rows */
   share?: number
 }
 
@@ -101,13 +105,9 @@ function sharePercentText(
 }
 
 /**
- * Tooltip text of one stacked segment of the planned-vs-actual categories
- * chart (exported for the denominator regression tests). Each segment prints
- * its own amount exactly once: the planned (washed) entry prints the planned
- * amount, the Ist entry the Ist amount. The Ist entry carries a share against
- * the Ist-period total; a planned-only row's planned entry carries its share
- * against the forecast horizon. Both bases are named explicitly, so the two
- * scopes overlaid by the chart can never be mistaken for each other.
+ * Tooltip text of one stacked segment of the Ist-vs-Prognose categories
+ * chart. Each segment prints its own amount exactly once: the prediction
+ * entry prints the predicted amount, the Ist entry the Ist amount.
  */
 export function topCategoriesTooltip(
   value: unknown,
@@ -117,19 +117,17 @@ export function topCategoriesTooltip(
   const payload = item?.payload
   const fmt = (n: number) =>
     n.toLocaleString("de-DE", { minimumFractionDigits: 2 })
-  // The two scopes carry DIFFERENT share denominators: Ist rows divide by
-  // the filtered period's total, planned-only rows by the forecast horizon's
-  // total. Name the basis — a bare " (N %)" could silently belong to either.
   const isIstRow = (payload?.value ?? 0) > 0
   const share = payload?.share
   const shareText = share != null ? sharePercentText(share, false) : undefined
   const withBasis = shareText
-    ? `(${shareText} ${isIstRow ? "der Ist-Ausgaben" : "der geplanten Ausgaben"})`
+    ? `(${shareText} ${isIstRow ? "der Ist-Ausgaben" : "der prognostizierten Ausgaben"})`
     : undefined
-  if (name === "planned") {
-    // mixed rows only store the Ist share; the horizon share exists on
-    // planned-only rows, which is where this entry belongs
-    return [`${fmt(Number(value))} € geplant`, isIstRow ? undefined : withBasis]
+  if (name === "predicted") {
+    return [
+      `${fmt(Number(value))} € Prognose`,
+      isIstRow ? undefined : withBasis,
+    ]
       .filter((part): part is string => part != null)
       .join(" ")
   }
@@ -226,11 +224,11 @@ export function topCategoryAxisMinGap(
  * on the previous tick.
  *
  * The euro value is the primary scale. While the axis describes Ist money
- * alone (no planned bars share it), a second tick line prints the share of
+ * alone (no predicted bars share it), a second tick line prints the share of
  * the filtered Ist total. That line is a readout, not a 0-100 % ruler: the
  * axis ends on the largest bar total, so its 100 % point (the total spend)
- * is usually off-chart. Once planned money shares the axis there are two
- * share denominators (Ist period vs. forecast horizon, see
+ * is usually off-chart. Once predicted money shares the axis there are two
+ * share denominators (Ist period vs. prediction horizon, see
  * topCategoriesMerge), so only euros render and the basis lives in the
  * tooltip.
  *
@@ -298,7 +296,7 @@ export function topCategoryAxisTicks(
  * ends on the largest bar total, so the 100 % point (total spend) is usually
  * off-chart. Stacking the lines instead of `1.000 € · 13 %` keeps the label as
  * narrow as the euro-only one; at the card's one-third width a single-line
- * dual label left room for only a few ticks. Once planned money shares the
+ * dual label left room for only a few ticks. Once predicted money shares the
  * axis the component passes `totalEuros = 0`, so only euros render (see
  * topCategoriesMerge).
  *
@@ -373,73 +371,63 @@ function ZoomResetButton({
 }
 
 /**
- * Merged monthly rows when the forecast toggle is on. Planned sums already
- * exclude matched occurrences (booked money lives in the actual bars), so
- * per month: actual + planned never double-count. The net line adds both —
- * for past months planned contributes 0, for the current month it covers
- * the remaining dated-from-today plans, for future months it is the whole
- * row.
+ * Merged monthly rows for the always-on daily prediction. The prediction's
+ * monthly buckets are the remaining amount for the current month and the
+ * full amount for the next month, so they stack on top of the actual partial
+ * bars without double counting. Zero segments become `undefined` so Recharts
+ * does not print a noise "0,00 €" tooltip row.
  *
- * Zero segments become `undefined` instead of 0: recharts keeps tooltip
- * items with `value != null`, so a 0 planned segment would print a
- * "0,00 € geplant" row under every history month (and a "Einnahmen
- * 0,00 €" row under plan-only months). Exported for the zero-row
- * regression tests.
- *
- * PLANNED EXPENSES KEEP THE EXPENSE SIGN: the wire's `expensesCents` is
- * positive, but this chart renders the Ist expense bar negated (downward,
- * the app's original cashflow convention) — `plannedExpenses` mirrors that
- * so the forecast-mode stack (stackOffset "sign") stacks the remaining
- * planned outflow BELOW the actual outflow instead of into the income pile.
+ * Predicted expenses keep the chart's expense sign (negative/downward), the
+ * same convention as the actual expense bars.
  */
 export function mergeCashflow(
   history: AnalyticsResponse["monthlyCashflow"],
-  forecast: ForecastResult | undefined
+  prediction: PredictionForecast | undefined
 ): Array<{
   month: string
   income: number | undefined
   expenses: number | undefined
   net: number
-  plannedIncome: number | undefined
-  plannedExpenses: number | undefined
+  predictedIncome: number | undefined
+  predictedExpenses: number | undefined
 }> {
-  const rows = (history ?? []).map((d) => ({
-    month: d.month,
-    income: d.incomeCents / 100,
-    expenses: -d.expensesCents / 100,
-    net: d.netCents / 100,
-    // only the forecast merge below fills these; undefined keeps months
-    // without planned money out of the tooltip
-    plannedIncome: undefined as number | undefined,
-    plannedExpenses: undefined as number | undefined,
-  }))
-  if (!forecast) return rows
-  const byMonth = new Map(rows.map((r) => [r.month, r]))
-  const extra: Array<{
+  const rows: Array<{
     month: string
     income: number | undefined
     expenses: number | undefined
     net: number
-    plannedIncome: number | undefined
-    plannedExpenses: number | undefined
-  }> = []
-  for (const p of forecast.monthlyPlanned) {
+    predictedIncome: number | undefined
+    predictedExpenses: number | undefined
+  }> = (history ?? []).map((d) => ({
+    month: d.month,
+    income: d.incomeCents / 100,
+    expenses: -d.expensesCents / 100,
+    net: d.netCents / 100,
+    predictedIncome: undefined,
+    predictedExpenses: undefined,
+  }))
+  if (!prediction) return rows
+  const byMonth = new Map(rows.map((r) => [r.month, r]))
+  const extra: typeof rows = []
+  for (const p of prediction.monthly) {
     const row = byMonth.get(p.month)
-    const plannedNet = (p.incomeCents - p.expensesCents) / 100
+    const predictedNet = (p.incomeCents - p.expensesCents) / 100
     if (row) {
-      row.plannedIncome = p.incomeCents !== 0 ? p.incomeCents / 100 : undefined
-      row.plannedExpenses =
+      row.predictedIncome =
+        p.incomeCents !== 0 ? p.incomeCents / 100 : undefined
+      row.predictedExpenses =
         p.expensesCents !== 0 ? -(p.expensesCents / 100) : undefined
-      row.net += plannedNet
+      row.net += predictedNet
     } else {
+      const income = p.incomeCents + p.bookedFuture.incomeCents
+      const expenses = p.expensesCents + p.bookedFuture.expensesCents
       extra.push({
         month: p.month,
         income: undefined,
         expenses: undefined,
-        net: plannedNet,
-        plannedIncome: p.incomeCents !== 0 ? p.incomeCents / 100 : undefined,
-        plannedExpenses:
-          p.expensesCents !== 0 ? -(p.expensesCents / 100) : undefined,
+        net: (income - expenses) / 100,
+        predictedIncome: income !== 0 ? income / 100 : undefined,
+        predictedExpenses: expenses !== 0 ? -(expenses / 100) : undefined,
       })
     }
   }
@@ -448,44 +436,34 @@ export function mergeCashflow(
 
 export function CashflowChart({
   data,
-  forecast,
+  prediction,
   loading,
 }: {
   data: AnalyticsResponse["monthlyCashflow"] | undefined
-  forecast?: ForecastResult | undefined
+  prediction?: PredictionForecast | undefined
   loading: boolean
 }) {
   const chartData = React.useMemo(
-    () => mergeCashflow(data ?? [], forecast),
-    [data, forecast]
+    () => mergeCashflow(data ?? [], prediction),
+    [data, prediction]
   )
   const zoom = useChartZoom({
     length: chartData.length,
     resetKey: chartData.length
-      ? `${chartData[0].month}..${chartData[chartData.length - 1].month}:${chartData.length}${forecast === undefined ? "" : "+f"}`
+      ? `${chartData[0].month}..${chartData[chartData.length - 1].month}:${chartData.length}${prediction === undefined ? "" : "+p"}`
       : "0",
   })
   const { wrapRef, handlers } = zoom
   const visible = zoom.slice(chartData)
 
-  // stacked ONLY while the overlay is on: the translucent planned segments
-  // must land on top of the real bars in one column; with the toggle off the
-  // bars keep the pre-planning grouped layout (income/expenses side by side,
-  // heights individually comparable) instead of silently changing the
-  // dashboard's default chart
-  const flowStackId = forecast !== undefined ? "flow" : undefined
-
-  // @min-[1024px] (container query on <main>, same threshold as the grid
-  // in app/page.tsx): a col-span keyed off the viewport would still span 2
-  // when the dock squeezes main below 1024px on a wide window — the card
-  // would span an implicit second column instead of stacking full-width.
   return (
     <Card className="@min-[1024px]:col-span-2">
       <CardHeader>
         <CardTitle>Monatlicher Cashflow</CardTitle>
         <CardDescription>
-          Einnahmen, Ausgaben und Saldo pro Monat
-          {forecast ? " — ab heute geplant (halbdurchsichtig)" : ""}
+          {prediction
+            ? `Einnahmen, Ausgaben und Saldo pro Monat — Prognose für ${prediction.horizon.months} ${predictionMonthsLabel(prediction.horizon.months)} (halbdurchsichtig)`
+            : "Einnahmen, Ausgaben und Saldo pro Monat"}
         </CardDescription>
         <ZoomResetButton zoomed={zoom.isZoomed} onReset={zoom.reset} />
       </CardHeader>
@@ -498,10 +476,6 @@ export function CashflowChart({
               <ComposedChart
                 data={visible}
                 accessibilityLayer
-                /* the flow stack mixes signs (Ist Ausgaben render downward)
-                   — "sign" is what makes the stacked segments accumulate
-                   upward/downward per sign instead of carving inward over
-                   the income bar; all-positive bars behave identically */
                 stackOffset="sign"
               >
                 <CartesianGrid vertical={false} />
@@ -524,27 +498,27 @@ export function CashflowChart({
                 />
                 <Bar
                   dataKey="income"
-                  stackId={flowStackId}
+                  stackId="flow"
                   fill="var(--color-income)"
                   radius={4}
                 />
                 <Bar
                   dataKey="expenses"
-                  stackId={flowStackId}
+                  stackId="flow"
                   fill="var(--color-expenses)"
                   radius={4}
                 />
-                {forecast !== undefined && (
+                {prediction !== undefined && (
                   <>
                     <Bar
-                      dataKey="plannedIncome"
+                      dataKey="predictedIncome"
                       stackId="flow"
                       fill="var(--color-income)"
                       fillOpacity={0.35}
                       radius={4}
                     />
                     <Bar
-                      dataKey="plannedExpenses"
+                      dataKey="predictedExpenses"
                       stackId="flow"
                       fill="var(--color-expenses)"
                       fillOpacity={0.35}
@@ -568,49 +542,36 @@ export function CashflowChart({
 }
 
 /**
- * Merged series when the forecast toggle is on: the solid balance line runs
- * through the real history; at its last point the dashed projection takes
- * over (running balance from real future bookings + unmatched, still-future
- * planned occurrences of active plans — see computeForecast). A history
- * extending beyond today (imported future bookings) suppresses the
- * projection line entirely: its anchor overlaps real dates and the merged
- * line would run backwards.
- * With NO history at all (fresh user: no snapshots, no bookings) the dashed
- * projection stands alone from today so planned-only balances still render.
- * Exported for the balance-merge regression tests (connection-point
- * semantics).
+ * Merged balance series. The solid line is booked history clipped at today;
+ * the dashed line takes over at its last point using the daily prediction's
+ * projected balance. Post-dated booked history is clipped so the projection
+ * stays visible and the merged line cannot run backwards. With no history at
+ * all, the projection stands alone.
  */
 export function mergeBalance(
   hist: AnalyticsResponse["balanceTimeline"],
-  forecast: ForecastResult | undefined
+  prediction: PredictionForecast | undefined
 ): Array<{ date: string; balance: number | null; projected: number | null }> {
   const points: Array<{
     date: string
     balance: number | null
     projected: number | null
-  }> = hist.map((d) => ({
-    date: d.date,
-    balance: d.balanceCents / 100,
-    projected: null,
-  }))
-  if (!forecast) return points
+  }> = (prediction ? hist.filter((d) => d.date <= prediction.today) : hist).map(
+    (d) => ({
+      date: d.date,
+      balance: d.balanceCents / 100,
+      projected: null,
+    })
+  )
+  if (!prediction) return points
   const last = points[points.length - 1]
-  if (last && last.date > forecast.today) return points
   if (last) {
-    // connect the dashed series at the history's end. When the history ends
-    // ON today, anchor at the projection's own today point: it already folds
-    // the planned occurrences dated today into its baseline, while
-    // last.balance is booked-only — starting the dashed line at last.balance
-    // would push today's planned movement onto the next plotted date (and,
-    // with no later movement at all, drop it from the line entirely).
-    // last.date < today keeps this untouched: the projection's today point
-    // arrives as its own plotted point there.
     const todayPoint =
-      last.date === forecast.today
-        ? forecast.projectedBalance.find((p) => p.date === forecast.today)
+      last.date === prediction.today
+        ? prediction.projectedBalance.find((p) => p.date === prediction.today)
         : undefined
     last.projected = todayPoint ? todayPoint.balanceCents / 100 : last.balance
-    for (const p of forecast.projectedBalance) {
+    for (const p of prediction.projectedBalance) {
       if (p.date <= last.date) continue
       points.push({
         date: p.date,
@@ -618,54 +579,58 @@ export function mergeBalance(
         projected: p.balanceCents / 100,
       })
     }
-    return points
+  } else {
+    for (const p of prediction.projectedBalance) {
+      points.push({
+        date: p.date,
+        balance: null,
+        projected: p.balanceCents / 100,
+      })
+    }
   }
-  // no real balance points: the projection is the only series
-  for (const p of forecast.projectedBalance) {
-    points.push({
-      date: p.date,
-      balance: null,
-      projected: p.balanceCents / 100,
-    })
+  // Booked history beyond the prediction horizon remains actual data and
+  // must not disappear just because the projection ends earlier.
+  for (const d of hist) {
+    if (d.date > prediction.horizon.to) {
+      points.push({
+        date: d.date,
+        balance: d.balanceCents / 100,
+        projected: null,
+      })
+    }
   }
   return points
 }
 
 export function BalanceChart({
   data,
-  forecast,
+  prediction,
   loading,
 }: {
   data: AnalyticsResponse["balanceTimeline"] | undefined
-  forecast?: ForecastResult | undefined
+  prediction?: PredictionForecast | undefined
   loading: boolean
 }) {
   const chartData = React.useMemo(
-    () => mergeBalance(data ?? [], forecast),
-    [data, forecast]
+    () => mergeBalance(data ?? [], prediction),
+    [data, prediction]
   )
   const zoom = useChartZoom({
     length: chartData.length,
     resetKey: chartData.length
-      ? `${chartData[0].date}..${chartData[chartData.length - 1].date}:${chartData.length}${forecast === undefined ? "" : "+f"}`
+      ? `${chartData[0].date}..${chartData[chartData.length - 1].date}:${chartData.length}${prediction === undefined ? "" : "+p"}`
       : "0",
   })
   const { wrapRef, handlers } = zoom
   const visible = zoom.slice(chartData)
 
-  // @min-[1024px] (container query on <main>, same threshold as the grid
-  // in app/page.tsx): a col-span keyed off the viewport would still span
-  // columns when the dock squeezes main below 1024px on a wide window —
-  // the card would create an implicit column instead of stacking
-  // full-width. The timeline is the dashboard's hero chart and spans the
-  // grid's full width.
   return (
     <Card className="@min-[1024px]:col-span-3">
       <CardHeader>
         <CardTitle>Kontostand über Zeit</CardTitle>
         <CardDescription>
-          {forecast
-            ? `Ist ab frühestem Snapshot, Prognose ${forecast.horizon.from.slice(5).replace("-", "/")}–${forecast.horizon.to.slice(5).replace("-", "/")} (gestrichelt)`
+          {prediction
+            ? `Ist ab frühestem Snapshot, Prognose ${prediction.horizon.from.slice(5).replace("-", "/")}–${prediction.horizon.to.slice(5).replace("-", "/")} (gestrichelt)`
             : "ab frühestem Kontostand-Snapshot (alle Konten)"}
         </CardDescription>
         <ZoomResetButton zoomed={zoom.isZoomed} onReset={zoom.reset} />
@@ -713,7 +678,7 @@ export function BalanceChart({
                   activeDot={{ r: 4 }}
                   connectNulls={false}
                 />
-                {forecast !== undefined && (
+                {prediction !== undefined && (
                   <Line
                     dataKey="projected"
                     stroke="var(--color-projected)"
@@ -733,103 +698,106 @@ export function BalanceChart({
   )
 }
 
-/** One row of the Top-Ausgabenkategorien chart (Ist value + planned stack). */
+/** One row of the Top-Ausgabenkategorien chart (Ist value + predicted stack). */
 export interface TopCategoryRow {
   categoryId: number | null
   name: string
   value: number
-  /** undefined = no planned money: the merged/tooltip segment must vanish, never print as a 0-value bar */
-  planned: number | undefined
+  /** undefined = no predicted money: the merged/tooltip segment must vanish */
+  predicted: number | undefined
   share: number
   fill: string
 }
 
 /**
- * Merged rows of the planned-vs-actual categories chart (exported for the
- * merge-identity regression tests). Rows are FRESH COPIES: mutating the
- * memoized Ist rows in place leaked the planned sums into `chartData` —
- * with the toggle off (merged === chartData) that stale planned value kept
- * appearing in tooltips until the next analytics refetch.
- * Merge by CATEGORY ID, not name: the engine labels actual uncategorized
- * spending "Unlabeled" while plannedCategories calls the same bucket
- * "ohne Kategorie" — keyed on the id (null == null) the planned money
- * stacks onto its true bucket instead of a twin row.
+ * Merged rows of the Ist-vs-Prognose categories chart. Rows are fresh copies
+ * so the memoized Ist rows are never mutated. Merge by CATEGORY ID, not name:
+ * the analytics engine labels actual uncategorized spending "Unlabeled" while
+ * the prediction calls the same bucket "ohne Kategorie".
  *
- * Rows WITHOUT planned money carry `planned: undefined` (not 0): recharts
- * keeps tooltip items with `value != null`, so a 0-value planned segment
- * under a purely-Ist category would print a noise "0,00 € geplant" row.
- * Planned-only rows keep `value: 0` — their Ist segment prints a bare
- * "0,00 €"; the planned segment owns the planned amount and the horizon
- * share.
+ * Rows without predicted money carry `predicted: undefined` (not 0) so
+ * Recharts does not print a noise "0,00 €" tooltip segment.
  */
 export function topCategoriesMerge(
   chartData: TopCategoryRow[],
-  forecast: ForecastResult | undefined
+  prediction: PredictionForecast | undefined
 ): TopCategoryRow[] {
-  if (!forecast) return chartData
+  if (!prediction) return chartData
   const rows = chartData.map((r) => ({ ...r }))
   const byId = new Map(rows.map((r) => [r.categoryId, r]))
-  for (const p of forecast.plannedCategories) {
-    const planned = p.totalCents / 100
-    const existing = byId.get(p.categoryId)
+  const totals = new Map<
+    number | null,
+    { cents: number; name: string; color: string | null }
+  >()
+  for (const month of prediction.monthly) {
+    for (const category of month.categories) {
+      const prior = totals.get(category.categoryId) ?? {
+        cents: 0,
+        name: category.name,
+        color: category.color,
+      }
+      prior.cents += category.expensesCents
+      totals.set(category.categoryId, prior)
+    }
+  }
+  const grand = [...totals.values()].reduce(
+    (sum, value) => sum + value.cents,
+    0
+  )
+  for (const [categoryId, value] of totals) {
+    const predicted = value.cents / 100
+    const existing = byId.get(categoryId)
     if (existing) {
-      existing.planned = planned
+      existing.predicted = predicted
     } else {
       rows.push({
-        categoryId: p.categoryId,
-        name: p.name,
+        categoryId,
+        name: value.name,
         value: 0,
-        planned,
-        share: p.share,
-        fill: resolveCategoryColor(p.categoryId, p.color),
+        predicted,
+        share: grand > 0 ? value.cents / grand : 0,
+        fill: resolveCategoryColor(categoryId, value.color),
       })
     }
   }
   return rows
     .sort(
       (a, b) =>
-        // planned is number here (0 = never planned); zeroing to undefined
-        // happens only after the combined-total sort below
-        b.value + (b.planned ?? 0) - (a.value + (a.planned ?? 0)) ||
+        b.value + (b.predicted ?? 0) - (a.value + (a.predicted ?? 0)) ||
         a.name.localeCompare(b.name)
     )
     .slice(0, 12)
-    .map((r) => (r.planned === 0 ? { ...r, planned: undefined } : r))
+    .map((r) => (r.predicted === 0 ? { ...r, predicted: undefined } : r))
 }
 
 export function TopCategoriesChart({
   data,
-  forecast,
+  prediction,
   loading,
 }: {
   data: AnalyticsResponse["topCategories"] | undefined
-  forecast?: ForecastResult | undefined
+  prediction?: PredictionForecast | undefined
   loading: boolean
 }) {
   const chartData = React.useMemo(
     () =>
       (data ?? []).map((c) => ({
-        /** identity for the forecast merge: null = the uncategorized bucket */
         categoryId: c.categoryId,
         name: c.name,
         value: c.totalCents / 100,
-        /** 0 = merge-owned field while the forecast is idle; the planned
-         * series below stays gated OFF then (recharts keeps 0-value tooltip
-         * entries — `value != null` — so an un-gated series would print a
-         * noise "0,00 € geplant" line under every row) */
-        planned: 0,
+        predicted: 0,
         share: c.share,
         fill: resolveCategoryColor(c.categoryId, c.color),
       })),
     [data]
   )
   const merged = React.useMemo(
-    () => topCategoriesMerge(chartData, forecast),
-    [chartData, forecast]
+    () => topCategoriesMerge(chartData, prediction),
+    [chartData, prediction]
   )
   const xMax = React.useMemo(
     () =>
-      merged.reduce((max, d) => Math.max(max, d.value + (d.planned ?? 0)), 0),
+      merged.reduce((max, d) => Math.max(max, d.value + (d.predicted ?? 0)), 0),
     [merged]
   )
   // Recharts' own tick thinning drops a different subset per card width
@@ -862,16 +830,15 @@ export function TopCategoriesChart({
     const row = (data ?? []).find((c) => c.totalCents > 0 && c.share > 0)
     return row ? row.totalCents / 100 / row.share : 0
   }, [data])
-  // The second tick line needs a single denominator. Hide it once planned
-  // money actually shares the axis (planned-only rows use the horizon total);
-  // an overlay with no planned expenses leaves the chart Ist-only.
-  const hasPlannedMoney = merged.some((d) => (d.planned ?? 0) > 0)
-  const showShareTicks = !hasPlannedMoney && totalIst > 0
-  // Keep the axis height tied to the Ist denominator, not to the overlay:
-  // toggling the forecast re-renders once more when its data lands (the
-  // overlay prop is undefined while loading), and a 44→30 px axis would
-  // reflow every bar by 14 px. The extra line simply stays blank while
-  // planned money is on the axis.
+  // The second tick line needs a single denominator. Hide it once predicted
+  // money actually shares the axis; a prediction with no expenses leaves the
+  // chart Ist-only.
+  const hasPredictedMoney = merged.some((d) => (d.predicted ?? 0) > 0)
+  const showShareTicks = !hasPredictedMoney && totalIst > 0
+  // Keep the axis height tied to the Ist denominator, not to the prediction:
+  // the prediction prop starts undefined while loading, and a 44→30 px axis
+  // would reflow every bar by 14 px. The extra line simply stays blank while
+  // predicted money is on the axis.
   const axisHeight = totalIst > 0 ? 44 : 30
   const config = React.useMemo<ChartConfig>(() => {
     const cfg: ChartConfig = {}
@@ -886,8 +853,8 @@ export function TopCategoriesChart({
       <CardHeader>
         <CardTitle>Top Ausgabenkategorien</CardTitle>
         <CardDescription>
-          {forecast
-            ? "Ist + geplant (hell): Ist = gewählter Zeitraum, Geplant = Prognose-Horizont"
+          {prediction
+            ? `Ist + Prognose (hell): Ist = gewählter Zeitraum, Prognose = ${prediction?.horizon.months ?? PREDICTION_HORIZON_MONTHS} ${predictionMonthsLabel(prediction?.horizon.months ?? PREDICTION_HORIZON_MONTHS)}`
             : "Anteil an den Gesamtausgaben"}
         </CardDescription>
       </CardHeader>
@@ -958,30 +925,17 @@ export function TopCategoriesChart({
                 }
               />
               <Bar dataKey="value" stackId="cat" radius={4} />
-              {forecast !== undefined && (
-                /* the planned series must NOT register when the forecast is
-                   off: recharts keeps tooltip entries with `value != null`,
-                   so the rows' 0-value planned field would print a noise
-                   "0,00 € geplant" line under every Ist row (the data-side
-                   0 → undefined normalization in topCategoriesMerge only
-                   runs while the forecast is on). Same series-visibility
-                   gate as the cashflow and balance overlays. */
+              {prediction !== undefined && (
                 <Bar
-                  dataKey="planned"
+                  dataKey="predicted"
                   stackId="cat"
                   fillOpacity={0.35}
                   radius={4}
                 >
                   {merged.map((d) => (
                     <Cell
-                      // keyed on the merge identity, never the name: rows
-                      // carry DISTINCT categoryIds (grouped by id on the Ist
-                      // side, one catTotals entry per id on the planned side,
-                      // null → the single uncategorized row), while two
-                      // user-named categories can share a display name —
-                      // a name key would render duplicate React keys
                       key={String(d.categoryId)}
-                      fill={d.planned ? d.fill : "transparent"}
+                      fill={d.predicted ? d.fill : "transparent"}
                     />
                   ))}
                 </Bar>

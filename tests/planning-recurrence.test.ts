@@ -1,14 +1,13 @@
 import { describe, it, expect } from "vitest"
 import {
   expandOccurrenceDates,
-  isValidIsoDate,
-  isoDatePlus,
   isEmptyRule,
   MAX_RULE_LENGTH,
   nextOccurrenceDate,
   RuleValidationError,
   validateRrule,
 } from "@/lib/planning/recurrence"
+import { isValidIsoDate, isoDatePlus } from "@/lib/dates"
 
 function expectRuleError(input: string, message?: string) {
   expect(() => validateRrule(input)).toThrow(RuleValidationError)
@@ -179,6 +178,47 @@ describe("expandOccurrenceDates", () => {
         to: "2026-12-31",
       })
     ).toEqual([])
+  })
+
+  it("yields no rrule occurrences below year 100 (rrule remaps 0–99)", () => {
+    // rrule's Date.UTC math emits 1950 for a 0050 dtstart; expanding there
+    // would silently return the wrong century, so recurring starts below
+    // year 100 are unsupported (the plan API floors dtstart at 1900).
+    expect(
+      expandOccurrenceDates("0050-06-15", "FREQ=DAILY", {
+        from: "0050-06-15",
+        to: "0052-06-15",
+      })
+    ).toEqual([])
+    expect(
+      nextOccurrenceDate("0050-06-15", "FREQ=DAILY", "0050-06-15")
+    ).toBeNull()
+    // a one-off does not touch rrule and still works
+    expect(
+      expandOccurrenceDates("0050-06-15", null, {
+        from: "0050-06-15",
+        to: "0050-06-15",
+      })
+    ).toEqual(["0050-06-15"])
+    // year 100 is supported by rrule and expands in the right year
+    expect(
+      expandOccurrenceDates("0100-06-15", "FREQ=DAILY", {
+        from: "0100-06-15",
+        to: "0100-06-16",
+      })
+    ).toEqual(["0100-06-15", "0100-06-16"])
+  })
+
+  it("treats a corrupt dtstart as no occurrence instead of throwing", () => {
+    // legacy/direct-DB rows have no dtstart format CHECK; the read routes map
+    // nextOccurrenceDate over every plan, so a bad value must degrade, not 500
+    const w = { from: "2026-01-01", to: "2026-12-31" }
+    expect(expandOccurrenceDates("not-a-date", null, w)).toEqual([])
+    expect(expandOccurrenceDates("not-a-date", "FREQ=DAILY", w)).toEqual([])
+    expect(nextOccurrenceDate("not-a-date", null, "2026-11-23")).toBeNull()
+    expect(
+      nextOccurrenceDate("not-a-date", "FREQ=DAILY", "2026-11-23")
+    ).toBeNull()
   })
 
   it("monthly rules expand across the window", () => {

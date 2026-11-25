@@ -5,7 +5,6 @@ import {
   matchIncoming,
   sameBankIdentity,
   toDbMatchRow,
-  dayDiff,
   type DbMatchRow,
 } from "@/lib/db/match"
 import type { ParsedTransactionRow } from "@/lib/csv/parser"
@@ -81,15 +80,6 @@ function dbFromTransaction(id: string, t: ParsedTransactionRow): DbMatchRow {
   }
   return toDbMatchRow(tx)
 }
-
-describe("dayDiff", () => {
-  it("computes absolute day differences", () => {
-    expect(dayDiff("2026-02-03", "2026-02-03")).toBe(0)
-    expect(dayDiff("2026-02-01", "2026-02-08")).toBe(7)
-    expect(dayDiff("2026-02-08", "2026-02-01")).toBe(7)
-    expect(dayDiff("2026-01-31", "2026-02-01")).toBe(1)
-  })
-})
 
 describe("window boundaries", () => {
   it("matches at exactly +7 days", () => {

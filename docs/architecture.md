@@ -18,13 +18,14 @@ flowchart LR
   N -->|OpenAI-compatible HTTP| L["llama.cpp llama-server (127.0.0.1:8080)"]
   subgraph N[" "]
     direction TB
-    A1["25 REST route handlers"] --- A2["Import job (single-flight)"]
+    A1["REST route handlers"] --- A2["Import job (single-flight)"]
     A2 --- A3["Label worker (setInterval 3 s)"]
+    A3 --- A4["Prediction scheduler (coalescing queue)"]
   end
   L ---|"pinned GGUF model"| M["models/*.gguf (~19 GB)"]
 ```
 
-- **Browser** — three client-rendered pages (`/`, `/imports`, `/labels`);
+- **Browser** — client-rendered pages (`/`, `/transactions`, `/calendar`, `/plans`, `/labels`, `/imports`);
   all data flows through React Query (see [frontend.md](frontend.md)). Login
   is mandatory: `proxy.ts` redirects unauthenticated page requests to
   `/auth/login` and returns 401 JSON for `/api/*` ([ADR-0032](adr/adr-0032-multi-user-oidc.md)).
@@ -38,6 +39,12 @@ flowchart LR
   completions with grammar-constrained decoding
   (see [labelling.md](labelling.md) and
   [ADR-0012](adr/adr-0012-local-llama-server.md)).
+- **Prediction engine** — an automatic, in-process daily model per owned
+  account and per user (all accounts), trained from booked transactions and
+  active plans. The dashboard always shows the two-month forecast; training is
+  invisible and scheduled on imports, plan/account changes, startup and
+  stale forecast reads ([prediction.md](prediction.md),
+  [ADR-0038](adr/adr-0038-automatic-daily-prediction.md)).
 - **Agent chat** — a second consumer of the same llama-server: the browser
   streams a turn via `POST /api/agent/threads/[id]/chat` (SSE), the
   `lib/agent` loop runs native tool-call rounds against the model, and tools
@@ -48,15 +55,16 @@ flowchart LR
 
 ## Process model
 
-Everything runs **in one Node process**. The two background jobs are plain
-in-process loops, not external workers:
+Everything runs **in one Node process**. The three background jobs are plain
+in-process loops/queues, not external workers:
 
-| Job          | Scheduling                                                                      | Guard                                                                                 | Code                                                |
-| ------------ | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| Import job   | fire-and-forget promise from `POST /api/imports`                                | single-flight flag `globalThis.__geldlageImportJob`                                   | [lib/import/pipeline.ts](../lib/import/pipeline.ts) |
-| Label worker | `setInterval(tick, 3000)` + initial `setTimeout(tick, 3000)`, both `.unref()`ed | re-entry guard `workerState().ticking` + `globalThis.__geldlageLabellerWorkerStarted` | [lib/labeller/worker.ts](../lib/labeller/worker.ts) |
+| Job                  | Scheduling                                                                      | Guard                                                                                 | Code                                                          |
+| -------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| Import job           | fire-and-forget promise from `POST /api/imports`                                | single-flight flag `globalThis.__geldlageImportJob`                                   | [lib/import/pipeline.ts](../lib/import/pipeline.ts)           |
+| Label worker         | `setInterval(tick, 3000)` + initial `setTimeout(tick, 3000)`, both `.unref()`ed | re-entry guard `workerState().ticking` + `globalThis.__geldlageLabellerWorkerStarted` | [lib/labeller/worker.ts](../lib/labeller/worker.ts)           |
+| Prediction scheduler | coalescing queue, `setImmediate` drain; startup sweep after 3 s                 | `globalThis.__geldlagePredictionScheduler` + per-scope signature check                | [lib/prediction/scheduler.ts](../lib/prediction/scheduler.ts) |
 
-Both loops are keyed off `globalThis` so Next.js dev hot-reloads cannot start
+All loops are keyed off `globalThis` so Next.js dev hot-reloads cannot start
 duplicates ([ADR-0008](adr/adr-0008-in-process-workers-globalthis.md)). The
 label worker reads the import job's flag directly (`worker.ts:98-105`) — a
 tick is skipped while an import is running, so import reconciliation and LLM
@@ -81,22 +89,28 @@ sequenceDiagram
   participant R as registerNode()
   participant DB as SQLite
   participant W as Label worker
+  participant P as Prediction scheduler
   I->>I: NEXT_RUNTIME === "nodejs"? (edge bundle never touches better-sqlite3)
   I->>R: dynamic import instrumentation-node.ts
   R->>R: globalThis.__geldlageInstrumented? (idempotent across hot reloads)
   R->>DB: ensureSchema() — createSchemaSqlite + migrateSchema
   R->>DB: resetStuckBatches() — parsing/importing batches marked failed
   R->>W: startLabelWorker() — first tick after 3 s, then every 3 s
+  R->>DB: resetInterruptedPredictionModels() — training rows marked failed
+  R->>P: startPredictionScheduler() — sweep after 3 s, then event-driven
 ```
 
 ([instrumentation.ts](../instrumentation.ts),
 [instrumentation-node.ts](../instrumentation-node.ts))
 
-Two deliberate details:
+Deliberate details:
 
 1. **The edge guard is load-bearing.** `better-sqlite3` is a native addon; the
    conditional dynamic import keeps it out of the Edge bundle entirely.
-2. **Recovery happens before the worker starts.** Batches stuck in
+2. **Prediction recovery is part of the same startup pass.** Interrupted
+   `training` rows are marked failed and the scheduler re-enqueues every
+   scope with data; the scheduler's drain yields between scopes.
+3. **Recovery happens before the worker starts.** Batches stuck in
    `parsing`/`importing` (killed by a crash or restart) are marked `failed`
    with "interrupted by server restart"; batches in `labeling` are _not_
    touched — their rows persist and the worker resumes them
@@ -153,6 +167,10 @@ These hold everywhere in the codebase and are the backbone of the test suite:
    ([ADR-0014](adr/adr-0014-claim-time-attempt-increment.md)).
 5. **Every parse error aborts the whole import.** Fail-fast beats partial
    retention ([ADR-0003](adr/adr-0003-fail-fast-csv-parsing.md)).
+6. **Prediction never mutates bank truth.** The daily model reads booked
+   transactions and active plans, stores only a derived artifact in
+   `prediction_models`, and writes neither `transactions` nor
+   `planned_transactions` ([ADR-0038](adr/adr-0038-automatic-daily-prediction.md)).
 
 ## Performance facts (scattered in code, collected here)
 
@@ -166,6 +184,11 @@ These hold everywhere in the codebase and are the backbone of the test suite:
 - Import progress counters are computed live per read
   (`COUNT(*) FILTER (WHERE …)`), avoiding stored-counter drift
   ([ADR-0019](adr/adr-0019-live-batch-counters.md)).
+- Prediction training is CPU-only and dependency-free: a Tweedie daily GLM
+  plus a baseline bake-off. On the reference machine, 1,394 days of history
+  train in roughly 0.1 s per scope; the scheduler yields between scopes so
+  the UI and label worker keep running. No GPU, Python or ONNX runtime is
+  involved ([prediction.md](prediction.md)).
 
 ## Where to go next
 
@@ -173,4 +196,5 @@ These hold everywhere in the codebase and are the backbone of the test suite:
 - Import + dedupe: [csv-import.md](csv-import.md)
 - LLM labeling: [labelling.md](labelling.md)
 - KPIs/charts: [analytics.md](analytics.md)
+- Prediction: [prediction.md](prediction.md)
 - Running/operating: [operations.md](operations.md)

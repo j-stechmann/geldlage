@@ -1,3 +1,5 @@
+import { isValidIsoDate } from "@/lib/dates"
+
 export interface TableFilters {
   q: string
   dateFrom: string | null
@@ -38,10 +40,13 @@ export function filtersToParams(f: TableFilters): URLSearchParams {
 export function paramsToFilters(sp: URLSearchParams): TableFilters {
   const f: TableFilters = { ...EMPTY_FILTERS, categoryIds: [] }
   f.q = sp.get("q")?.trim() ?? ""
+  // the same predicate the list routes validate with: a shape-valid but
+  // impossible date (a hand-edited/shared URL) is dropped here, so the client
+  // never sends a value the API answers with 400 invalid_date
   const dateFrom = sp.get("dateFrom")
-  if (dateFrom && /^\d{4}-\d{2}-\d{2}$/.test(dateFrom)) f.dateFrom = dateFrom
+  if (dateFrom && isValidIsoDate(dateFrom)) f.dateFrom = dateFrom
   const dateTo = sp.get("dateTo")
-  if (dateTo && /^\d{4}-\d{2}-\d{2}$/.test(dateTo)) f.dateTo = dateTo
+  if (dateTo && isValidIsoDate(dateTo)) f.dateTo = dateTo
   const type = sp.get("type")
   if (type === "Ausgang" || type === "Eingang") f.type = type
   f.categoryIds = sp
@@ -64,22 +69,4 @@ export function paramsToFilters(sp: URLSearchParams): TableFilters {
     f.labelStatus = labelStatus
   }
   return f
-}
-
-/**
- * True when any filter besides the account is set. The analytics scopes
- * (cashflow, top categories, transaction rows) react to these; the planning
- * forecast does not (its money is anchored on absolute snapshots and is
- * account-scoped only) — UI copy uses this to explain the difference.
- */
-export function hasContentFilters(f: TableFilters): boolean {
-  return (
-    f.q !== "" ||
-    f.dateFrom !== null ||
-    f.dateTo !== null ||
-    f.type !== "all" ||
-    f.categoryIds.length > 0 ||
-    f.status !== "Gebucht" ||
-    f.labelStatus !== "all"
-  )
 }

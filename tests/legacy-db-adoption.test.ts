@@ -136,7 +136,7 @@ describe("legacy dkb.db adoption (rebrand file rename)", () => {
       db = getDb()
       expect(
         db.all(`SELECT name FROM sqlite_master WHERE type = 'table'`)
-      ).toHaveLength(11) // 8 app tables (incl. planned_transactions, ADR-0035) + 3 agent chat tables (ADR-0033)
+      ).toHaveLength(12) // 9 app tables (incl. planned_transactions + prediction_models) + 3 agent chat tables
     })
 
     expect(fs.existsSync(dbPath)).toBe(true)
@@ -313,6 +313,80 @@ describe("legacy issuer migration (rebrand users.issuer rewrite)", () => {
           updatedAt: new Date().toISOString(),
         })
         .run()
+      // A prediction model the duplicate created (ADR-0038): same users(id)
+      // FK shape as the plan row, so it must be listed in childTables too.
+      db.insert(schema.predictionModels)
+        .values({
+          id: "dup-model",
+          userId: dupId,
+          accountId: dupAccountId,
+          scopeKey: `account:${dupAccountId}`,
+          status: "ready",
+          algorithm: "tweedie-daily-v1",
+          featureVersion: 1,
+          dataFrom: "2026-01-01",
+          dataTo: "2026-02-01",
+          dayCount: 32,
+          transactionCount: 1,
+          dataSignature: "sig",
+          planSignature: "plans",
+          artifactJson: "{}",
+          metricsJson: "{}",
+          checksum: "checksum",
+          trainedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+        })
+        .run()
+      // The duplicate's all-accounts model collides with the legacy user's
+      // own all-model on (user_id, scope_key); the merge must drop the
+      // duplicate's colliding row before re-pointing the account model.
+      db.insert(schema.predictionModels)
+        .values({
+          id: "legacy-all-model",
+          userId: legacyId,
+          accountId: null,
+          scopeKey: "all",
+          status: "ready",
+          algorithm: "tweedie-daily-v1",
+          featureVersion: 1,
+          dataFrom: "2026-01-01",
+          dataTo: "2026-02-01",
+          dayCount: 32,
+          transactionCount: 1,
+          dataSignature: "legacy-sig",
+          planSignature: "legacy-plans",
+          artifactJson: "{}",
+          metricsJson: "{}",
+          checksum: "legacy-checksum",
+          trainedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+        })
+        .run()
+      db.insert(schema.predictionModels)
+        .values({
+          id: "dup-all-model",
+          userId: dupId,
+          accountId: null,
+          scopeKey: "all",
+          status: "ready",
+          algorithm: "tweedie-daily-v1",
+          featureVersion: 1,
+          dataFrom: "2026-01-01",
+          dataTo: "2026-02-01",
+          dayCount: 32,
+          transactionCount: 1,
+          dataSignature: "dup-sig",
+          planSignature: "dup-plans",
+          artifactJson: "{}",
+          metricsJson: "{}",
+          checksum: "dup-checksum",
+          trainedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+        })
+        .run()
       // A chat thread the duplicate created (ADR-0033): the same users(id)
       // FK shape — and chat_thread_members' (thread_id, user_id) uniqueness
       // additionally needs the pre-merge conflict cleanup when both
@@ -363,6 +437,16 @@ describe("legacy issuer migration (rebrand users.issuer rewrite)", () => {
           `SELECT COUNT(*) AS n FROM planned_transactions WHERE user_id = ${legacyId}`
         )[0]?.n
       ).toBe(1)
+      expect(
+        db.all<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM prediction_models WHERE user_id = ${legacyId}`
+        )[0]?.n
+      ).toBe(2)
+      expect(
+        db.all<{ id: string }>(
+          `SELECT id FROM prediction_models WHERE scope_key = 'all' AND user_id = ${legacyId}`
+        )
+      ).toEqual([{ id: "legacy-all-model" }])
       expect(
         db.all<{ n: number }>(
           `SELECT COUNT(*) AS n FROM chat_threads WHERE user_id = ${legacyId}`

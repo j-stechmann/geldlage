@@ -4,13 +4,10 @@ import { fireEvent, waitFor } from "@testing-library/react"
 import { TransactionsTable } from "@/components/transactions-table"
 import { EMPTY_FILTERS } from "@/lib/filters"
 import { renderWithQuery, stubFetch, stubLocalStorage } from "./helpers-dom"
-import {
-  PLANS_KEY,
-  planOccurrencesKey,
-  type PlanOccurrence,
-} from "@/components/planning/api"
-import { isoDatePlus } from "@/lib/planning/recurrence"
-import { MATCH_DAYS_AFTER, MATCH_DAYS_BEFORE } from "@/lib/planning/matching"
+import { PLANS_KEY, planOccurrencesKey } from "@/components/planning/api"
+import type { PlanOccurrence } from "@/lib/contracts/planning"
+import { isoDatePlus } from "@/lib/dates"
+import { MATCH_DAYS_AFTER, MATCH_DAYS_BEFORE } from "@/lib/planning/limits"
 
 const ROW_A = {
   id: "tx-1",

@@ -7,9 +7,11 @@ rules, and analytics (balance, monthly cash flow, savings rate, top
 categories) that always reflect the filtered query results. Future money is
 planned on `/plans` — **geplante Transaktionen**, recurring (full RFC 5545
 RRULE) or one-off — and rendered on `/calendar` with a check-off against real
-bookings (erwartet/überfällig/gebucht) plus a balance/cashflow projection
-behind the "Geplant einblenden" dashboard toggle
-([ADR-0035](docs/adr/adr-0035-planned-transactions-rrule.md)).
+bookings (erwartet/überfällig/gebucht). The dashboard always shows a
+**two-month daily prediction** trained automatically on the user's own
+bookings (one model per account plus an all-accounts model), with plans added exactly and already-booked
+future rows carried in the balance projection
+([ADR-0038](docs/adr/adr-0038-automatic-daily-prediction.md)).
 
 | Dashboard                                                                                                | Imports                                                                             |
 | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
@@ -26,9 +28,12 @@ make dev   # offers the model download on first run, then starts everything
 ```
 
 `make dev` (and `make app`) also bring up the **dev OIDC provider** the login
-requires: a throwaway Authentik stack in Docker
+requires: a throwaway Authentik stack in Docker or rootless Podman
 ([compose.dev.yaml](compose.dev.yaml), `127.0.0.1:8081`), with the app's OIDC
-client provisioned automatically. Its credentials live in `compose.dev.env`
+client provisioned automatically. The engine is selected by `OIDC_CTL` /
+`OIDC_COMPOSE_CMD` (`Makefile`), so a rootless setup just needs
+`OIDC_CTL = podman` and `OIDC_COMPOSE_CMD = podman-compose` in the gitignored
+`Makefile.local`. Its credentials live in `compose.dev.env`
 (gitignored — created from `compose.dev.env.example` on first `make oidc`;
 login is `akadmin` / your `AUTHENTIK_BOOTSTRAP_PASSWORD`). The stack is bound
 to localhost only and must never be exposed to other network hosts.

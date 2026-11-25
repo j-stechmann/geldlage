@@ -8,15 +8,16 @@ month-windowing/balance math in JavaScript
 reflects the filtered query results — with one deliberate exception
 (balances, see below).
 
-**The planned overlay is deliberately NOT part of this engine.** Planned
-(geplante) transactions and the balance projection form a
-**third scope** ([ADR-0035](adr/adr-0035-planned-transactions-rrule.md),
-[planning.md](planning.md)) with its own endpoint
-(`GET /api/plans/forecast`): planned money never enters `computeAnalytics`
-results, and real booked money never enters the planned sums (it only moves
-the balance line). The dashboard's
-"Geplant einblenden" toggle fetches the forecast separately and merges it
-into the charts client-side (`mergeBalance`/`mergeCashflow` in
+**The daily prediction is deliberately NOT part of this engine.** It uses
+booked transactions and active plans as inputs but its output is a separate
+projection scope ([ADR-0038](adr/adr-0038-automatic-daily-prediction.md),
+[prediction.md](prediction.md)) served by `GET /api/predictions/forecast`.
+Predicted money never enters `computeAnalytics` results. Real booked money
+is the residual model’s training input, but it is never added on top of the
+predicted residual again; already-booked _future_ money only moves the
+starting balance / real-future part of the projection. The dashboard always fetches the two-month
+prediction separately and merges it into the charts client-side
+(`mergeBalance`/`mergeCashflow` in
 [components/analytics-charts.tsx](../components/analytics-charts.tsx)).
 
 ## Filters
@@ -29,17 +30,35 @@ All list values are allow-listed; sort keys are restricted to
 `amount_cents / payee / booking_date`. The client serializes the same filter
 state into query params ([frontend.md](frontend.md)).
 
-`todayLocal()` ([lib/analytics/date.ts](../lib/analytics/date.ts)) returns
+`todayLocal()` / `isoDateLocal()` ([lib/dates.ts](../lib/dates.ts)) return
 the local-calendar date — deliberately **not** `new Date().toISOString()`,
 which would shift month boundaries for non-UTC timezones.
+
+Both list endpoints (`/api/analytics` and `/api/transactions`) share date
+_validation_ (`parseDateRange` in [lib/api/query.ts](../lib/api/query.ts)):
+`dateFrom`/`dateTo` must be real ISO dates inside the single representable
+range `0000-01-01` … `9999-12-31` (derived from `MIN_ISO_DATE`/`MAX_ISO_DATE`,
+which also derive the engine's month-key bounds). A syntactically valid range
+is never rejected for its width — the FilterBar can produce any range a user
+picks, and how much series a span costs is the engine's concern (see below).
+An inverted range (`dateFrom > dateTo`) is accepted and yields an empty
+filtered list, matching the pre-existing behavior — the balance KPI is
+deliberately unfiltered and still resolves as of `dateTo`.
 
 ## Monthly cash flow
 
 One grouped SQL query: `month = substr(booking_date, 1, 7)` (the ISO TEXT
 format makes this trivial), `income = SUM(CASE WHEN amount_cents > 0 …)`,
 `expenses = SUM(-amount_cents WHERE amount_cents < 0)`. JavaScript zero-fills
-months between the first and last booking month so the chart has no gaps;
-`net = income − expenses` per month.
+months between the effective bounds (the requested dates, falling back to the
+first/last booking month) so the chart has no gaps; `net = income − expenses`
+per month. The zero-fill is bounded by `MAX_DATE_RANGE_MONTHS` (1200 months).
+A span above the cap — an explicit wide range, a one-sided request, or an
+unfiltered one, possibly with an outlier booking date — is not rejected: the
+engine emits only the months that actually have data instead of zero-filling
+across centuries. When it degrades, the average denominator (`monthsCounted`)
+is the populated full months the chart actually shows, not the synthetic span
+that was never materialized.
 
 ## Averages and savings rate
 

@@ -16,6 +16,7 @@ import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
 import { resolveCategoryColor } from "@/lib/category-colors"
+import { counterpartyOf } from "@/lib/transactions"
 import type { TxRow } from "@/components/transaction-row"
 
 interface LabelOption {
@@ -81,12 +82,13 @@ export function AssignLabelDialog({
       const data2 = (await res.json()) as { error?: string; message?: string }
       if (res.ok) {
         toast.success("Kategorie zugewiesen", {
-          description: `Regel für ${row.type === "Ausgang" ? (row.payee ?? "Vertragspartner") : (row.payer ?? "Vertragspartner")} gelernt.`,
+          description: `Regel für ${counterpartyOf(row) ?? "Vertragspartner"} gelernt.`,
         })
         void queryClient.invalidateQueries({ queryKey: ["transactions"] })
         void queryClient.invalidateQueries({ queryKey: ["analytics"] })
         void queryClient.invalidateQueries({ queryKey: ["categories"] })
         void queryClient.invalidateQueries({ queryKey: ["labels"] })
+        void queryClient.invalidateQueries({ queryKey: ["prediction"] })
         onClose()
       } else {
         toast.error("Zuweisung fehlgeschlagen", {
@@ -117,6 +119,7 @@ export function AssignLabelDialog({
         void queryClient.invalidateQueries({ queryKey: ["analytics"] })
         void queryClient.invalidateQueries({ queryKey: ["categories"] })
         void queryClient.invalidateQueries({ queryKey: ["labels"] })
+        void queryClient.invalidateQueries({ queryKey: ["prediction"] })
         onClose()
       } else {
         toast.error("Erstellen fehlgeschlagen", {

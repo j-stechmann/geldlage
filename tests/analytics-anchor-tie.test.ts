@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest"
 import type { Db } from "@/lib/db"
 import { accounts, importBatches, transactions } from "@/lib/db/schema"
 import { computeAnalytics } from "@/lib/analytics/engine"
+import { latestAnchor } from "@/lib/analytics/balance"
 import { parseFilters } from "@/lib/analytics/queries"
 import { setupTestDb } from "./helpers"
 
@@ -55,8 +56,8 @@ function seedTx(bookingDate: string, amountCents: number) {
  * latestAnchor's same-snapshotDate tie (two batches of one day, e.g. a
  * second account's CSV imported later) used to be scan-order luck. The rule
  * is now explicit — freshest import wins (createdAt, then id) — and must
- * AGREE with computeForecast's anchor, or the balance KPI line and the
- * forecast starting balance would silently name different snapshots.
+ * AGREE with the daily prediction forecast's anchor, or the balance KPI line and the
+ * prediction starting balance would silently name different snapshots.
  */
 describe("latestAnchor snapshotDate ties", () => {
   it("picks the freshest batch on a snapshotDate tie (not scan order)", () => {
@@ -86,6 +87,11 @@ describe("latestAnchor snapshotDate ties", () => {
     )
     // 18:00 batch (300k) + the booked drift after 2026-01-31
     expect(analytics.kpis.currentBalanceCents).toBe(300_000 - 50_000)
+    // pin the SQL ordering directly, not just the derived KPI
+    expect(latestAnchor(userId, undefined, "2026-02-15")).toMatchObject({
+      id: "batch-tie-a",
+      snapshotAmountCents: 300_000,
+    })
   })
 
   it("ties down to id when createdAt is equal, deterministically", () => {
@@ -107,16 +113,20 @@ describe("latestAnchor snapshotDate ties", () => {
       "2026-02-15"
     )
     // same createdAt (default) → the higher id wins on both sides: engine
-    // KPI and forecast anchor stay in agreement
+    // KPI and prediction anchor stay in agreement
     expect(analytics.kpis.currentBalanceCents).toBe(300_000)
+    expect(latestAnchor(userId, undefined, "2026-02-15")).toMatchObject({
+      id: "batch-tie-z",
+      snapshotAmountCents: 300_000,
+    })
   })
 })
 
 describe("latestAnchor future-dated snapshots", () => {
-  it("ignores a snapshot dated after today (the forecast's rule)", () => {
+  it("ignores a snapshot dated after today (the prediction's rule)", () => {
     // an export whose Saldo line sits in the future (e.g. an export holding
     // future-dated bookings priced into the balance) must not anchor the
-    // balance KPI — computeForecast rejects such snapshots, so anchoring
+    // balance KPI — the daily prediction the prediction rejects such snapshots, so anchoring
     // here would strand the two scopes on different balance models
     seedBatch({ snapshotDate: "2026-02-20", snapshotAmountCents: 900_000 })
     seedTx("2026-02-01", +10_000)

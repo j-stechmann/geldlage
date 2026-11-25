@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.25.0
+
+### Added
+
+- **automatic daily prediction**: the dashboard now always shows a two-month
+  daily forecast trained on the user's own booked transactions. Each owned
+  account gets its own model plus one all-accounts model per user; imports,
+  plan edits and account changes enqueue automatic retraining, and a missing
+  model falls back to the daily baseline instead of hiding the overlay. Plans
+  are residual-excluded from training and added exactly on their dates; booked
+  future rows move the balance projection and are exposed per month as
+  `bookedFuture` (used for prediction-only cashflow months), while category
+  shares are computed live. Training starts with 28 observed days, including partial
+  months, and is CPU-only/TypeScript with no new runtime dependency. See
+  [docs/prediction.md](docs/prediction.md) and
+  [ADR-0038](docs/adr/adr-0038-automatic-daily-prediction.md). Closes #118.
+
+### Removed
+
+- **planned-only forecast**: `computeForecast`,
+  `GET /api/plans/forecast`, `ForecastResult`, the “Geplant einblenden”
+  toggle, its summary card and the forecast-specific tests/docs were removed.
+  The dashboard prediction is now always on.
+
 ## v1.24.3
 
 ### Fixed

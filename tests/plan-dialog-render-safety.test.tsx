@@ -5,9 +5,9 @@ import { fireEvent, waitFor } from "@testing-library/react"
 import { PlanDialog } from "@/components/planning/plan-dialog"
 import {
   calendarTransactionsKey,
-  forecastKey,
   planOccurrencesKey,
 } from "@/components/planning/api"
+import { predictionKey } from "@/components/prediction/api"
 import { renderWithQuery, stubFetch, stubLocalStorage } from "./helpers-dom"
 
 /**
@@ -664,11 +664,11 @@ describe("plan dialog: raw RRULE mode validates exactly like the server", () => 
 
 describe("plan dialog: saving fans the mutation out to the planning caches", () => {
   /**
-   * invalidatePlans (["plans"], ["plan-occurrences"], ["forecast"],
+   * invalidatePlans (["plans"], ["plan-occurrences"], ["prediction"],
    * ["transactions-calendar"]) used to run only for the board's own
    * status-toggle/delete paths — the dialog's create/update left every
    * planning cache stale. The app runs staleTime 5s +
-   * refetchOnWindowFocus:false, so board, calendar chips and forecast kept
+   * refetchOnWindowFocus:false, so board, calendar chips and prediction kept
    * showing pre-mutation data until the affected queries remounted
    * (navigate away and back).
    */
@@ -690,7 +690,7 @@ describe("plan dialog: saving fans the mutation out to the planning caches", () 
     queryClient.setQueryData(occKey, { occurrences: [] })
     const calKey = calendarTransactionsKey("2026-01-01", "2026-03-31", null)
     queryClient.setQueryData(calKey, { transactions: [] })
-    const fcKey = forecastKey(12, null)
+    const fcKey = predictionKey(null)
     queryClient.setQueryData(fcKey, {})
 
     stubFetch([
@@ -706,5 +706,33 @@ describe("plan dialog: saving fans the mutation out to the planning caches", () 
     expect(queryClient.getQueryState(occKey)?.isInvalidated).toBe(true)
     expect(queryClient.getQueryState(calKey)?.isInvalidated).toBe(true)
     expect(queryClient.getQueryState(fcKey)?.isInvalidated).toBe(true)
+  })
+})
+
+describe("plan dialog: dtstart floor", () => {
+  it("rejects a pre-1900 recurring start inline instead of blaming the rule", async () => {
+    renderWithQuery(
+      <PlanDialog
+        open
+        onOpenChange={() => {}}
+        plan={{
+          ...BASE_PLAN,
+          dtstart: "0050-06-15",
+          rrule: "FREQ=MONTHLY;BYMONTHDAY=15",
+        }}
+      />
+    )
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain(
+        "Startdatum muss ab 01.01.1900 liegen"
+      )
+    })
+    // the API's own floor is what rejects this; the preview must not claim
+    // the (valid) rule produces no occurrence
+    expect(document.body.textContent).not.toContain(
+      "Diese Regel erzeugt keinen Termin"
+    )
+    expect(saveButton().disabled).toBe(true)
   })
 })

@@ -19,12 +19,12 @@ import {
   useCalendarTransactions,
   usePlanOccurrences,
   transactionDeepLink,
-  type CalendarTransaction,
-  type PlanOccurrence,
-  type PlanPrefill,
 } from "@/components/planning/api"
+import type { PlanOccurrence, PlanPrefill } from "@/lib/contracts/planning"
+import type { CalendarTransaction } from "@/lib/contracts/transactions"
 import { ErrorState } from "@/components/error-state"
-import { isoDateLocal, todayLocal } from "@/lib/analytics/date"
+import { isoDateLocal, todayLocal } from "@/lib/dates"
+import { planPrefill } from "@/lib/planning/prefill"
 import { euro } from "@/lib/money"
 import { resolveCategoryColor } from "@/lib/category-colors"
 import { Button } from "@/components/ui/button"
@@ -37,7 +37,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { PlanDialog } from "@/components/planning/plan-dialog"
-import { useMatchedPlanForTx, type PlanRow } from "@/components/planning/api"
+import { useMatchedPlanForTx } from "@/components/planning/api"
+import type { PlanRow } from "@/lib/contracts/planning"
 
 function localMidnight(iso: string): Date {
   const [y, m, d] = iso.split("-").map(Number)
@@ -119,23 +120,6 @@ const CALENDAR_INTERACTIONS: Partial<EventCalendarInteractions> = {
   selectSlot: false,
 }
 const CALENDAR_EVENT_TOOLTIP = { delay: 300 }
-
-/**
- * Derive the plan dialog's create prefill from a calendar-booked
- * transaction (counterparty is precomputed by the API here, unlike the
- * transactions-table rows which derive it from type). accountId stays null
- * for legacy rows → the dialog selects "any account".
- */
-function planPrefillFromCalendarTx(tx: CalendarTransaction): PlanPrefill {
-  return {
-    counterparty: tx.counterparty,
-    purpose: tx.purpose,
-    amountCents: tx.amountCents,
-    dtstart: tx.date,
-    accountId: tx.accountId,
-    categoryId: tx.categoryId,
-  }
-}
 
 export interface PlanCalendarProps {
   accountId: number | null
@@ -411,7 +395,7 @@ export function PlanCalendar({ accountId, onEventClick }: PlanCalendarProps) {
                     const tx = txAction
                     setTxAction(null)
                     if (tx) {
-                      setConvertPrefill(planPrefillFromCalendarTx(tx))
+                      setConvertPrefill(planPrefill(tx))
                     }
                   }}
                 >

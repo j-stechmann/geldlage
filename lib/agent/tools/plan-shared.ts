@@ -1,10 +1,8 @@
-import {
-  nextDueDate,
-  PlanValidationError,
-  type PlanRow,
-} from "@/lib/planning/service"
+import { nextDueDate, PlanValidationError } from "@/lib/planning/service"
+import type { PlanRow } from "@/lib/contracts/planning"
 import { TOOL_RESULT_MAX_CHARS } from "@/lib/agent/window"
-import { todayLocal } from "@/lib/analytics/date"
+import { todayLocal } from "@/lib/dates"
+import { PLAN_AGENT_FIELD_MAP, PLAN_AGENT_KEYS } from "@/lib/planning/fields"
 
 /**
  * Shared plan-tool plumbing (ADR-0036): the four plan tools (list_plans,
@@ -163,30 +161,19 @@ function clipText(s: string | null): string | null {
  * ignored field (e.g. a typo'd amount) could read back as a successful
  * mutation the model trusts.
  */
-const PLAN_FIELD_MAP = {
-  amount_cents: "amountCents",
-  dtstart: "dtstart",
-  rrule: "rrule",
-  status: "status",
-  counterparty: "counterparty",
-  purpose: "purpose",
-  account_id: "accountId",
-  category_id: "categoryId",
-  notes: "notes",
-} as const
-
 export function planInputFromArgs(
   args: Record<string, unknown>
 ): Record<string, unknown> {
   const input: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(args)) {
-    const mapped = (PLAN_FIELD_MAP as Record<string, string>)[key]
-    if (mapped === undefined) {
+    // hasOwn, not `=== undefined`: the map is a plain object, so inherited
+    // keys (constructor, toString, __proto__, …) would otherwise pass.
+    if (!Object.hasOwn(PLAN_AGENT_FIELD_MAP, key)) {
       throw new Error(
-        `unknown field: ${key} (allowed fields: ${Object.keys(PLAN_FIELD_MAP).join(", ")})`
+        `unknown field: ${key} (allowed fields: ${PLAN_AGENT_KEYS.join(", ")})`
       )
     }
-    input[mapped] = value
+    input[PLAN_AGENT_FIELD_MAP[key]] = value
   }
   return input
 }

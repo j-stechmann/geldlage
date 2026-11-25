@@ -12,7 +12,19 @@ import {
 } from "drizzle-orm"
 import { getDb } from "@/lib/db"
 import { escapeLike, likeEscaped } from "@/lib/db/search"
+import { paginate } from "@/lib/pagination"
 import { accounts, categories, transactions } from "@/lib/db/schema"
+import type {
+  CalendarTransaction,
+  TransactionPage,
+} from "@/lib/contracts/transactions"
+import { counterpartyOf } from "@/lib/transactions"
+import { buildTransactionScope } from "@/lib/analytics/scope"
+import {
+  parseAnalyticsDate,
+  parseDateRange,
+  parseOptionalAccountId,
+} from "@/lib/api/query"
 
 export type SortField =
   "booking_date" | "value_date" | "amount_cents" | "payee" | "status"
@@ -31,23 +43,40 @@ export interface TransactionFilters {
   dir?: "asc" | "desc"
 }
 
+/** A valid ISO date param, or undefined for absent/malformed input. */
+function optionalIsoDate(raw: string | null): string | undefined {
+  const parsed = parseAnalyticsDate(raw)
+  return parsed.ok ? parsed.value : undefined
+}
+
+/**
+ * A digits-only positive id, or undefined. `parseInt` alone would coerce
+ * "12abc" → 12 and silently read a different row than the client asked for;
+ * the planning/calendar routes reject that input for the same reason.
+ */
+function optionalId(raw: string | null): number | undefined {
+  const parsed = parseOptionalAccountId(raw)
+  return parsed.ok ? parsed.value : undefined
+}
+
+/**
+ * Parse the shared filter params. Dates are validated with the route
+ * contract's predicate here too, so a direct caller (engine tests, query
+ * helpers) can never pass a malformed date on to SQL or the engine's month
+ * arithmetic; `parseRouteFilters` adds the 400 on top for the routes.
+ */
 export function parseFilters(sp: URLSearchParams): TransactionFilters {
   const q = sp.get("q")?.trim() || undefined
-  const dateFrom = sp.get("dateFrom") || undefined
-  const dateTo = sp.get("dateTo") || undefined
+  const dateFrom = optionalIsoDate(sp.get("dateFrom"))
+  const dateTo = optionalIsoDate(sp.get("dateTo"))
   const typeRaw = sp.get("type")
   const type =
     typeRaw === "Ausgang" || typeRaw === "Eingang" ? typeRaw : undefined
   const categoryIds = sp
     .getAll("categoryId")
-    .map((v) => Number.parseInt(v, 10))
-    .filter((v) => Number.isInteger(v) && v > 0)
-  const accountIdRaw = sp.get("accountId")
-  const accountIdParsed = Number.parseInt(accountIdRaw ?? "", 10)
-  const accountId =
-    accountIdRaw && Number.isInteger(accountIdParsed) && accountIdParsed > 0
-      ? accountIdParsed
-      : undefined
+    .map(optionalId)
+    .filter((v): v is number => v !== undefined)
+  const accountId = optionalId(sp.get("accountId"))
   const labelStatusRaw = sp.get("labelStatus")
   const labelStatus =
     labelStatusRaw === "pending" ||
@@ -77,6 +106,30 @@ export function parseFilters(sp: URLSearchParams): TransactionFilters {
     sort,
     dir,
   }
+}
+
+export type RouteFiltersParse =
+  | { ok: true; filters: TransactionFilters }
+  | { ok: false; error: "invalid_date" | "invalid_account"; message: string }
+
+/**
+ * Route-level filter parsing. Validation is not optional here: both list
+ * routes call this, so a new route cannot accidentally use the raw parser and
+ * skip the shared contract. Account ids get the same digits-only 400 as the
+ * planning/calendar routes; a malformed date still answers `invalid_date`.
+ */
+export function parseRouteFilters(sp: URLSearchParams): RouteFiltersParse {
+  const dates = parseDateRange(sp)
+  if (!dates.ok) return dates
+  const account = parseOptionalAccountId(sp.get("accountId"))
+  if (!account.ok) {
+    return {
+      ok: false,
+      error: "invalid_account",
+      message: "accountId must be a positive integer",
+    }
+  }
+  return { ok: true, filters: parseFilters(sp) }
 }
 
 /**
@@ -133,33 +186,6 @@ export function buildOrderBy(f: TransactionFilters) {
   }
 }
 
-export interface TransactionPage {
-  rows: Array<{
-    id: string
-    bookingDate: string
-    valueDate: string | null
-    status: string
-    payer: string | null
-    payee: string | null
-    purpose: string | null
-    type: string
-    counterpartyIban: string | null
-    amountCents: number
-    creditorId: string | null
-    mandateRef: string | null
-    customerRef: string | null
-    accountId: number
-    accountName: string | null
-    categoryId: number | null
-    categoryName: string | null
-    categoryColor: string | null
-    labelStatus: string
-  }>
-  total: number
-  page: number
-  pageCount: number
-}
-
 /** The shared row projection of both transactions queries. */
 function txRowSelect() {
   const db = getDb()
@@ -199,26 +225,87 @@ export function queryTransactions(
   const db = getDb()
   const where = buildWhere(f, userId)
 
-  const total =
-    db
-      .select({ count: sql<number>`count(*)` })
-      .from(transactions)
-      .where(where)
-      .get()?.count ?? 0
-
-  const rows = txRowSelect()
-    .where(where)
-    .orderBy(...buildOrderBy(f))
-    .limit(pageSize)
-    .offset((page - 1) * pageSize)
-    .all()
+  const result = paginate(
+    { page, pageSize },
+    () =>
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(transactions)
+        .where(where)
+        .get()?.count ?? 0,
+    (limit, offset) =>
+      txRowSelect()
+        .where(where)
+        .orderBy(...buildOrderBy(f))
+        .limit(limit)
+        .offset(offset)
+        .all()
+  )
 
   return {
-    rows,
-    total,
-    page,
-    pageCount: Math.max(1, Math.ceil(total / pageSize)),
+    rows: result.items,
+    total: result.total,
+    page: result.page,
+    pageCount: result.pageCount,
   }
+}
+
+/**
+ * Compact bank rows for a calendar window — both booked and pending rows.
+ *
+ * Deliberately has its own allowlist instead of `buildWhere`: the flow filter
+ * defaults to `Gebucht` and accepts content filters that must never apply to
+ * the calendar chip query (ADR-0022/0037). It shares the generic user/
+ * account/date scaffold with the balance predicate but supplies its own
+ * booked-and-pending status list. Ordering by booking date matches the
+ * previous route-level query.
+ */
+export function queryCalendarTransactions(
+  userId: number,
+  window: { from: string; to: string },
+  accountId?: number
+): CalendarTransaction[] {
+  const db = getDb()
+  const where = buildTransactionScope({
+    userId,
+    accountId,
+    statuses: ["Gebucht", "Nicht gebucht"],
+    dateBounds: { from: window.from, to: window.to },
+  })
+
+  const rows = db
+    .select({
+      id: transactions.id,
+      date: transactions.bookingDate,
+      status: transactions.status,
+      type: transactions.type,
+      payer: transactions.payer,
+      payee: transactions.payee,
+      purpose: transactions.purpose,
+      amountCents: transactions.amountCents,
+      categoryId: transactions.categoryId,
+      categoryName: categories.name,
+      categoryColor: categories.color,
+      accountId: transactions.accountId,
+    })
+    .from(transactions)
+    .leftJoin(categories, eq(categories.id, transactions.categoryId))
+    .where(where)
+    .orderBy(transactions.bookingDate)
+    .all()
+
+  return rows.map((r) => ({
+    id: r.id,
+    date: r.date,
+    status: r.status as CalendarTransaction["status"],
+    counterparty: counterpartyOf(r),
+    purpose: r.purpose,
+    amountCents: r.amountCents,
+    categoryId: r.categoryId,
+    categoryName: r.categoryName,
+    categoryColor: r.categoryColor,
+    accountId: r.accountId,
+  }))
 }
 
 /**
