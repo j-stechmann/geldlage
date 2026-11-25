@@ -50,12 +50,22 @@ LLM_REASONING     ?= on
 # sides aligned anyway so non-app traffic gets a sensible cap.
 LLM_REASONING_BUDGET ?= 1024
 
-# ── Dev OIDC provider (Authentik in Docker) ─────────────────────────────────
+# ── Dev OIDC provider (Authentik in containers) ─────────────────────────────
 # Throwaway Authentik stack (compose.dev.yaml) for the mandatory OIDC login
 # (ADR-0032). OIDC_PORT is what the app's OIDC_ISSUER_URL points at
 # (issuer: http://localhost:$(OIDC_PORT)/application/o/geldlage/).
+#
+# OIDC_CTL / OIDC_COMPOSE_CMD select the container engine: Docker (incl. the
+# podman-docker shim) by default, rootless Podman via Makefile.local:
+#   OIDC_CTL         = podman
+#   OIDC_COMPOSE_CMD = podman-compose
+# Everything below only relies on the shared CLI surface (`ps --quiet`,
+# `--env-file`, `--quiet-pull`, the com.docker.compose.project label), which
+# podman-compose implements too.
 OIDC_PORT         ?= 8081
 OIDC_COMPOSE      ?= compose.dev.yaml
+OIDC_CTL          ?= docker
+OIDC_COMPOSE_CMD  ?= $(OIDC_CTL) compose
 
 # an empty MODEL_HF_REVISION means "track the repo default branch"
 MODEL_REV = $(if $(MODEL_HF_REVISION),$(MODEL_HF_REVISION),main)
@@ -131,7 +141,7 @@ dev:
 		$(reasoning_sync_note); \
 		rm -f /tmp/llama-server.managed; \
 	fi; \
-	if curl -sf -m 2 http://localhost:$(OIDC_PORT)/-/health/ready/ >/dev/null 2>&1 || docker compose --env-file compose.dev.env -f $(OIDC_COMPOSE) ps --quiet 2>/dev/null | grep -q .; then \
+	if curl -sf -m 2 http://localhost:$(OIDC_PORT)/-/health/ready/ >/dev/null 2>&1 || $(OIDC_COMPOSE_CMD) --env-file compose.dev.env -f $(OIDC_COMPOSE) ps --quiet 2>/dev/null | grep -q .; then \
 		echo "dev OIDC provider already running on :$(OIDC_PORT) (left running after exit)"; \
 		rm -f /tmp/geldlage-oidc.managed; \
 	else \
@@ -378,9 +388,9 @@ llm-status:
 # edit it to change any password. The stack is bound to 127.0.0.1 — it must
 # never be reachable from other network hosts.
 oidc-teardown-legacy:
-	@if docker ps -a --filter label=com.docker.compose.project=dkb-analytics-dev-oidc --quiet | grep -q .; then \
+	@if $(OIDC_CTL) ps -a --filter label=com.docker.compose.project=dkb-analytics-dev-oidc --quiet | grep -q .; then \
 		echo "removing pre-rebrand dev OIDC stack (dkb-analytics-dev-oidc)…"; \
-		docker compose -p dkb-analytics-dev-oidc down; \
+		$(OIDC_COMPOSE_CMD) -p dkb-analytics-dev-oidc down; \
 	fi
 
 oidc: oidc-teardown-legacy
@@ -391,12 +401,12 @@ oidc: oidc-teardown-legacy
 	if curl -s -m 2 http://localhost:$(OIDC_PORT)/-/health/ready/ >/dev/null 2>&1; then \
 		echo "dev OIDC provider already running on :$(OIDC_PORT)"; \
 	else \
-		if ! docker info >/dev/null 2>&1; then \
-			echo "docker is not running — start it (or the podman equivalent) first"; \
+		if ! $(OIDC_CTL) info >/dev/null 2>&1; then \
+			echo "container engine '$(OIDC_CTL)' is not usable — for docker: systemctl start docker; for rootless podman: check 'podman info'"; \
 			exit 1; \
 		fi; \
 		echo "starting dev OIDC provider (Authentik) on :$(OIDC_PORT)…"; \
-		docker compose --env-file compose.dev.env -f $(OIDC_COMPOSE) up -d --quiet-pull || exit 1; \
+		$(OIDC_COMPOSE_CMD) --env-file compose.dev.env -f $(OIDC_COMPOSE) up -d --quiet-pull || exit 1; \
 	fi; \
 	$(MAKE) --no-print-directory oidc-wait; \
 	AUTHENTIK_BOOTSTRAP_TOKEN="$$(sed -n 's/^AUTHENTIK_BOOTSTRAP_TOKEN=//p' compose.dev.env)" bun scripts/dev-oidc-provision.ts; \
@@ -430,9 +440,9 @@ oidc-wait:
 # the current compose.dev.env instead of serving stale volume state.
 oidc-down:
 	@if [ ! -f compose.dev.env ]; then cp compose.dev.env.example compose.dev.env; fi; \
-	if docker compose --env-file compose.dev.env -f $(OIDC_COMPOSE) ps --quiet 2>/dev/null | grep -q .; then \
+	if $(OIDC_COMPOSE_CMD) --env-file compose.dev.env -f $(OIDC_COMPOSE) ps --quiet 2>/dev/null | grep -q .; then \
 		echo "stopping and removing dev OIDC provider containers (volume kept)…"; \
-		docker compose --env-file compose.dev.env -f $(OIDC_COMPOSE) down; \
+		$(OIDC_COMPOSE_CMD) --env-file compose.dev.env -f $(OIDC_COMPOSE) down; \
 	else \
 		echo "dev OIDC provider not running"; \
 	fi
@@ -446,7 +456,7 @@ oidc-status:
 
 oidc-logs:
 	@if [ ! -f compose.dev.env ]; then cp compose.dev.env.example compose.dev.env; fi; \
-	docker compose --env-file compose.dev.env -f $(OIDC_COMPOSE) logs -f --tail=50
+	$(OIDC_COMPOSE_CMD) --env-file compose.dev.env -f $(OIDC_COMPOSE) logs -f --tail=50
 
 # ── quality gates ────────────────────────────────────────────────────────────
 test:
