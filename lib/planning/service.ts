@@ -10,71 +10,54 @@ import { escapeLike, likeEscapedFolded } from "@/lib/db/search"
 import {
   accounts,
   categories,
-  importBatches,
   plannedTransactions,
   transactions,
-  type PlanStatus,
 } from "@/lib/db/schema"
+import type {
+  ForecastResult,
+  PlanInput,
+  PlanListFilters,
+  PlanOccurrence,
+  PlanPage,
+  PlanRow,
+} from "@/lib/contracts/planning"
 import { normalizeWhitespace } from "@/lib/money"
 import {
   expandOccurrenceDates,
-  isValidIsoDate,
-  isoDatePlus,
   isEmptyRule,
   nextOccurrenceDate,
   RuleValidationError,
   validateRrule,
 } from "@/lib/planning/recurrence"
 import {
+  isValidIsoDate,
+  isoDatePlus,
+  lastDayOfMonthIso,
+  MAX_ISO_DATE,
+  MAX_MONTH_KEY,
+  MIN_ISO_DATE,
+  monthCountBetween,
+  monthOffset,
+  todayLocal,
+} from "@/lib/dates"
+import {
   matchPlannedOccurrences,
-  MATCH_DAYS_AFTER,
-  MATCH_DAYS_BEFORE,
   type MatchCandidate,
   type MatchableOccurrence,
 } from "@/lib/planning/matching"
-import { MAX_COUNTERPARTY, MAX_TEXT } from "@/lib/planning/limits"
-import { todayLocal } from "@/lib/analytics/date"
-import { isLaterAnchor } from "@/lib/analytics/engine"
-
-/**
- * dtstart floor (year): occurrence expansion walks forward from dtstart on
- * every read (plan list, occurrences, forecast) and rrule has no internal
- * iteration cap — per-read cost is linear in the walk distance
- * (window end − dtstart) and grows forever with plan age, so a 1900-floor
- * DAILY plan already iterates ~126 years (~70 ms measured) on every read
- * window that touches today. The floor bounds the worst case at
- * one century-and-a-quarter back; anything earlier has no representable
- * purpose (bank data never reaches that far).
- */
-const MIN_DTSTART_YEAR = 1900
-/** occurrence-window cap for the occurrences endpoint (days) */
-export const MAX_OCCURRENCE_WINDOW_DAYS = 400
-/**
- * Window distance cap, each side of today (= 60 months, the forecast
- * horizon cap). rrule expansion iterates occurrence by occurrence from
- * dtstart up to the window start — it cannot seek — so an arbitrary far
- * window would make every recurring plan cost CPU linear in that distance
- * on every read (measured: ~0.6 s per DAILY plan for a window at year
- * 2999, ~6 s at 9999). Everything that actually queries occurrences stays
- * far inside: the /calendar page navigates month-sized windows.
- */
-export const MAX_WINDOW_DISTANCE_DAYS = 1826
-/** forecast horizon cap (months) */
-export const MAX_FORECAST_MONTHS = 60
-
-export interface PlanInput {
-  accountId?: number | null
-  counterparty?: string | null
-  purpose?: string | null
-  /** signed cents — required on create, optional on patch (only provided keys update) */
-  amountCents?: number
-  categoryId?: number | null
-  dtstart?: string
-  /** NULL/"" = one-off on dtstart; otherwise a bare RFC 5545 RRULE (allowlisted) */
-  rrule?: string | null
-  status?: PlanStatus
-  notes?: string | null
-}
+import {
+  MATCH_DAYS_AFTER,
+  MATCH_DAYS_BEFORE,
+  MAX_FORECAST_MONTHS,
+  MIN_DTSTART_YEAR,
+} from "@/lib/planning/limits"
+import {
+  isPlanStatus,
+  PLAN_FIELDS,
+  PLAN_INPUT_KEYS,
+} from "@/lib/planning/fields"
+import { paginate } from "@/lib/pagination"
+import { buildTimeScopedWhere, latestAnchor } from "@/lib/analytics/balance"
 
 export class PlanValidationError extends Error {
   constructor(
@@ -86,33 +69,6 @@ export class PlanValidationError extends Error {
   }
 }
 
-function lastDayOfMonth(month: string): string {
-  const [y, m] = month.split("-").map(Number)
-  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)
-}
-
-function monthOffset(baseIso: string, offset: number): string {
-  const base = baseIso.slice(0, 7)
-  const [y, m] = base.split("-").map(Number)
-  const total = y * 12 + (m - 1) + offset
-  const ny = Math.floor(total / 12)
-  const nm = (total % 12) + 1
-  return `${String(ny).padStart(4, "0")}-${String(nm).padStart(2, "0")}`
-}
-
-/** Createable/updatable field names — validatePlanInput's whole vocabulary. */
-const KNOWN_INPUT_KEYS = new Set([
-  "amountCents",
-  "dtstart",
-  "rrule",
-  "status",
-  "counterparty",
-  "purpose",
-  "notes",
-  "accountId",
-  "categoryId",
-])
-
 /**
  * Validate every provided field; returns exactly the keys that were provided.
  * Unknown keys fail loudly (same contract the agent tools enforce at their
@@ -123,86 +79,23 @@ const KNOWN_INPUT_KEYS = new Set([
 export function validatePlanInput(
   input: Record<string, unknown>
 ): Partial<PlanInput> {
-  const unknown = Object.keys(input).filter((k) => !KNOWN_INPUT_KEYS.has(k))
+  const unknown = Object.keys(input).filter((k) => !PLAN_INPUT_KEYS.has(k))
   if (unknown.length > 0) {
     throw new PlanValidationError(
-      `unknown field${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")} (allowed fields: ${[...KNOWN_INPUT_KEYS].join(", ")})`,
+      `unknown field${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")} (allowed fields: ${[...PLAN_INPUT_KEYS].join(", ")})`,
       "unknown_field"
     )
   }
   const out: Partial<PlanInput> = {}
 
-  if ("amountCents" in input) {
-    const v = input.amountCents
-    if (typeof v !== "number" || !Number.isSafeInteger(v) || v === 0) {
-      throw new PlanValidationError(
-        "amount must be a non-zero safe integer of cents",
-        "invalid_amount"
-      )
-    }
-    out.amountCents = v
-  }
+  // One pass in table order, so error precedence matches the vocabulary.
+  for (const spec of PLAN_FIELDS) {
+    if (!(spec.key in input)) continue
 
-  if ("dtstart" in input) {
-    // dtstart is not clearable (NOT NULL column) — an explicit null is as
-    // invalid as any other non-date value, never a silent no-op that reads
-    // back as a successful update
-    const v = input.dtstart
-    if (
-      typeof v !== "string" ||
-      !isValidIsoDate(v) ||
-      Number.parseInt(v.slice(0, 4), 10) < MIN_DTSTART_YEAR
-    ) {
-      throw new PlanValidationError(
-        `dtstart must be an ISO date (YYYY-MM-DD) from ${MIN_DTSTART_YEAR}-01-01 onward`,
-        "invalid_dtstart"
-      )
-    }
-    out.dtstart = v
-  }
-
-  if ("rrule" in input) {
-    const v = input.rrule
-    if (
-      v === null ||
-      typeof v === "undefined" ||
-      (typeof v === "string" && isEmptyRule(v))
-    ) {
-      out.rrule = null
-    } else if (typeof v === "string") {
-      try {
-        out.rrule = validateRrule(v)
-      } catch (err) {
-        if (err instanceof RuleValidationError) {
-          throw new PlanValidationError(err.message, "invalid_rrule")
-        }
-        throw err
-      }
-    } else {
-      throw new PlanValidationError(
-        "rrule must be a string or null",
-        "invalid_rrule"
-      )
-    }
-  }
-
-  if ("status" in input) {
-    const v = input.status
-    if (v !== "active" && v !== "paused" && v !== "finished") {
-      throw new PlanValidationError(
-        "status must be active|paused|finished",
-        "invalid_status"
-      )
-    }
-    out.status = v
-  }
-
-  for (const [key, max, code] of [
-    ["counterparty", MAX_COUNTERPARTY, "invalid_counterparty"],
-    ["purpose", MAX_TEXT, "invalid_purpose"],
-    ["notes", MAX_TEXT, "invalid_notes"],
-  ] as const) {
-    if (key in input) {
+    if (spec.kind === "text") {
+      const key = spec.key
+      const max = spec.maxBytes
+      const code = spec.errorCode
       const v = input[key]
       if (v === null || typeof v === "undefined") {
         ;(out as Record<string, unknown>)[key] = null
@@ -215,23 +108,96 @@ export function validatePlanInput(
       } else {
         throw new PlanValidationError("must be a string or null", code)
       }
+      continue
     }
-  }
 
-  if ("accountId" in input) {
-    out.accountId = normalizeOptionalId(input.accountId)
-  }
-  if ("categoryId" in input) {
-    out.categoryId = normalizeOptionalId(input.categoryId)
+    switch (spec.key) {
+      case "amountCents": {
+        const v = input.amountCents
+        if (typeof v !== "number" || !Number.isSafeInteger(v) || v === 0) {
+          throw new PlanValidationError(
+            "amount must be a non-zero safe integer of cents",
+            spec.errorCode
+          )
+        }
+        out.amountCents = v
+        break
+      }
+      case "dtstart": {
+        // dtstart is not clearable (NOT NULL column) — an explicit null is as
+        // invalid as any other non-date value, never a silent no-op that reads
+        // back as a successful update
+        const v = input.dtstart
+        if (
+          typeof v !== "string" ||
+          !isValidIsoDate(v) ||
+          Number.parseInt(v.slice(0, 4), 10) < MIN_DTSTART_YEAR
+        ) {
+          throw new PlanValidationError(
+            `dtstart must be an ISO date (YYYY-MM-DD) from ${MIN_DTSTART_YEAR}-01-01 onward`,
+            spec.errorCode
+          )
+        }
+        out.dtstart = v
+        break
+      }
+      case "rrule": {
+        const v = input.rrule
+        if (
+          v === null ||
+          typeof v === "undefined" ||
+          (typeof v === "string" && isEmptyRule(v))
+        ) {
+          out.rrule = null
+        } else if (typeof v === "string") {
+          try {
+            out.rrule = validateRrule(v)
+          } catch (err) {
+            if (err instanceof RuleValidationError) {
+              throw new PlanValidationError(err.message, spec.errorCode)
+            }
+            throw err
+          }
+        } else {
+          throw new PlanValidationError(
+            "rrule must be a string or null",
+            spec.errorCode
+          )
+        }
+        break
+      }
+      case "status": {
+        const v = input.status
+        if (!isPlanStatus(v)) {
+          throw new PlanValidationError(
+            "status must be active|paused|finished",
+            spec.errorCode
+          )
+        }
+        out.status = v
+        break
+      }
+      case "accountId":
+        out.accountId = normalizeOptionalId(input.accountId, spec.errorCode)
+        break
+      case "categoryId":
+        out.categoryId = normalizeOptionalId(input.categoryId, spec.errorCode)
+        break
+      default: {
+        // Exhaustiveness only — nothing runs here. A new non-text PLAN_FIELDS
+        // key makes `spec` non-never and fails tsc until a branch is added.
+        spec satisfies never
+      }
+    }
   }
   return out
 }
 
-function normalizeOptionalId(v: unknown): number | null {
+function normalizeOptionalId(v: unknown, code: string): number | null {
   if (v === null || typeof v === "undefined" || v === "") return null
   if (typeof v === "number" && Number.isInteger(v) && v > 0) return v
   if (typeof v === "string" && /^\d+$/.test(v)) return Number.parseInt(v, 10)
-  throw new PlanValidationError("invalid id", "invalid_reference")
+  throw new PlanValidationError("invalid id", code)
 }
 
 /** Ensure an optional referenced id exists and belongs to the user. */
@@ -280,24 +246,6 @@ function assertRuleProducesOccurrence(
 }
 
 // ── CRUD ──────────────────────────────────────────────────────────────────
-
-export interface PlanRow {
-  id: string
-  accountId: number | null
-  accountName: string | null
-  counterparty: string | null
-  purpose: string | null
-  amountCents: number
-  categoryId: number | null
-  categoryName: string | null
-  categoryColor: string | null
-  dtstart: string
-  rrule: string | null
-  status: PlanStatus
-  notes: string | null
-  createdAt: string
-  updatedAt: string
-}
 
 function planRowsQuery(db: Db = getDb()) {
   return db
@@ -359,19 +307,6 @@ function planListWhere(userId: number, filters: PlanListFilters = {}): SQL {
   return and(...conditions)!
 }
 
-export interface PlanListFilters {
-  /** free-text search over counterparty/purpose/notes/account/category */
-  q?: string
-  status?: PlanStatus | "all"
-}
-
-export interface PlanPage {
-  plans: PlanRow[]
-  total: number
-  page: number
-  pageCount: number
-}
-
 export function listPlans(userId: number): PlanRow[] {
   return planRowsQuery()
     .where(eq(plannedTransactions.userId, userId))
@@ -407,25 +342,29 @@ export function listPlansPage(
 ): PlanPage {
   const db = getDb()
   const where = planListWhere(userId, filters)
-  const total =
-    db
-      .select({ count: sql<number>`count(*)` })
-      .from(plannedTransactions)
-      .leftJoin(accounts, eq(accounts.id, plannedTransactions.accountId))
-      .leftJoin(categories, eq(categories.id, plannedTransactions.categoryId))
-      .where(where)
-      .get()?.count ?? 0
-  const plans = planRowsQuery(db)
-    .where(where)
-    .orderBy(...PLAN_LIST_ORDER)
-    .limit(pageSize)
-    .offset((page - 1) * pageSize)
-    .all()
+  const result = paginate(
+    { page, pageSize },
+    () =>
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(plannedTransactions)
+        .leftJoin(accounts, eq(accounts.id, plannedTransactions.accountId))
+        .leftJoin(categories, eq(categories.id, plannedTransactions.categoryId))
+        .where(where)
+        .get()?.count ?? 0,
+    (limit, offset) =>
+      planRowsQuery(db)
+        .where(where)
+        .orderBy(...PLAN_LIST_ORDER)
+        .limit(limit)
+        .offset(offset)
+        .all()
+  )
   return {
-    plans,
-    total,
-    page,
-    pageCount: Math.max(1, Math.ceil(total / pageSize)),
+    plans: result.items,
+    total: result.total,
+    page: result.page,
+    pageCount: result.pageCount,
   }
 }
 
@@ -568,30 +507,6 @@ export function deletePlan(userId: number, planId: string): boolean {
 
 // ── occurrences ───────────────────────────────────────────────────────────
 
-export interface PlanOccurrence {
-  /** stable occurrence key: `${planId}::${date}` */
-  id: string
-  planId: string
-  date: string
-  amountCents: number
-  counterparty: string | null
-  purpose: string | null
-  categoryId: number | null
-  categoryName: string | null
-  categoryColor: string | null
-  accountId: number | null
-  /**
-   * active | paused — paused occurrences expand for calendar/list reads;
-   * forecasts exclude them.
-   */
-  planStatus: "active" | "paused"
-  matched: {
-    transactionId: string
-    bookingDate: string
-    amountCents: number
-  } | null
-}
-
 /**
  * Expanded occurrences in [from, to] with read-time matching against booked
  * transactions (see lib/planning/matching.ts). The transaction candidate
@@ -659,21 +574,16 @@ export function listOccurrences(
 }
 
 /**
- * Resolve occurrence category names/colors — user-scoped like every other
- * read: category ids are globally unique, but scoping keeps the
- * enrichment dependent on the write-path ownership guarantees alone.
+ * User-scoped category lookup used by occurrence enrichment and the forecast
+ * category shares (ADR-0037). Ids are globally unique, but scoping keeps the
+ * reads dependent on the write-path ownership guarantees alone.
  */
-function enrichWithCategories(occurrences: PlanOccurrence[], userId: number) {
-  const db = getDb()
-  const ids = [
-    ...new Set(
-      occurrences
-        .map((o) => o.categoryId)
-        .filter((id): id is number => id !== null)
-    ),
-  ]
-  if (ids.length === 0) return
-  const rows = db
+function categoriesByIds(
+  userId: number,
+  ids: number[]
+): Map<number, { id: number; name: string; color: string | null }> {
+  if (ids.length === 0) return new Map()
+  const rows = getDb()
     .select({
       id: categories.id,
       name: categories.name,
@@ -682,7 +592,20 @@ function enrichWithCategories(occurrences: PlanOccurrence[], userId: number) {
     .from(categories)
     .where(and(inArray(categories.id, ids), eq(categories.userId, userId)))
     .all()
-  const byId = new Map(rows.map((r) => [r.id, r]))
+  return new Map(rows.map((r) => [r.id, r]))
+}
+
+/** Resolve occurrence category names/colors — user-scoped like every read. */
+function enrichWithCategories(occurrences: PlanOccurrence[], userId: number) {
+  const ids = [
+    ...new Set(
+      occurrences
+        .map((o) => o.categoryId)
+        .filter((id): id is number => id !== null)
+    ),
+  ]
+  if (ids.length === 0) return
+  const byId = categoriesByIds(userId, ids)
   for (const o of occurrences) {
     if (o.categoryId === null) continue
     const cat = byId.get(o.categoryId)
@@ -700,17 +623,14 @@ function enrichWithMatches(
   w: { from: string; to: string }
 ) {
   const db = getDb()
-  const txFrom = isoDatePlus(w.from, -MATCH_DAYS_BEFORE)
-  const txTo = isoDatePlus(w.to, MATCH_DAYS_AFTER)
-  const conditions: SQL[] = [
-    eq(transactions.userId, userId),
-    eq(transactions.status, "Gebucht"),
-    sql`${transactions.bookingDate} >= ${txFrom}`,
-    sql`${transactions.bookingDate} <= ${txTo}`,
-  ]
-  if (accountId !== undefined) {
-    conditions.push(eq(transactions.accountId, accountId))
-  }
+  // The padded bounds must stay four-digit ISO dates: `w` can reach the
+  // storable edge (the forecast clamps its horizon at 9999-12), where
+  // isoDatePlus overflows into the extended-year form ("+010000-…") that
+  // sorts below every real date and would match no candidates at all.
+  const paddedFrom = isoDatePlus(w.from, -MATCH_DAYS_BEFORE)
+  const paddedTo = isoDatePlus(w.to, MATCH_DAYS_AFTER)
+  const txFrom = isValidIsoDate(paddedFrom) ? paddedFrom : MIN_ISO_DATE
+  const txTo = isValidIsoDate(paddedTo) ? paddedTo : MAX_ISO_DATE
   const rows: MatchCandidate[] = db
     .select({
       id: transactions.id,
@@ -721,7 +641,7 @@ function enrichWithMatches(
       accountId: transactions.accountId,
     })
     .from(transactions)
-    .where(and(...conditions))
+    .where(buildTimeScopedWhere(userId, accountId, { from: txFrom, to: txTo }))
     .all()
 
   const matchables: MatchableOccurrence[] = occurrences.map((o) => ({
@@ -751,40 +671,6 @@ function enrichWithMatches(
 }
 
 // ── forecast ──────────────────────────────────────────────────────────────
-
-interface BalanceAnchor {
-  snapshotDate: string
-  snapshotAmountCents: number
-  /** deterministic same-day tie-break part: fresher import wins */
-  createdAt: string
-  /** deterministic last tie-break part (createdAt is not unique) */
-  id: string
-}
-
-export interface ForecastResult {
-  startingBalanceCents: number
-  /** true when no snapshot exists → balance is Σ(booked) only */
-  withoutSnapshot: boolean
-  today: string
-  horizon: { from: string; to: string }
-  /** planned sums per month, calendar-ascending (netCents = income − expenses) */
-  monthlyPlanned: Array<{
-    month: string
-    incomeCents: number
-    expensesCents: number
-    netCents: number
-  }>
-  /** balance projection points: today, then each day with movement, ascending */
-  projectedBalance: Array<{ date: string; balanceCents: number }>
-  /** planned expense totals per category over the horizon (income excluded) */
-  plannedCategories: Array<{
-    categoryId: number | null
-    name: string
-    color: string | null
-    totalCents: number
-    share: number
-  }>
-}
 
 /**
  * The forecast is the third analytics scope (ADR-0035): the current balance
@@ -821,52 +707,22 @@ export function computeForecast(
       ? options.accountId
       : undefined
   const today = options.today ?? todayLocal()
-  const horizonEnd = lastDayOfMonth(monthOffset(today, months - 1))
+  // A caller-supplied `today` near the storable ceiling can push the horizon
+  // past 9999-12, which monthOffset rejects. Clamp there instead of throwing:
+  // the routes always pass todayLocal(), so this only keeps the exported
+  // function total, with the horizon ending on the last representable day.
+  const monthsToCeiling = monthCountBetween(today, MAX_MONTH_KEY)
+  const horizonMonth =
+    months - 1 >= monthsToCeiling
+      ? MAX_MONTH_KEY
+      : monthOffset(today, months - 1)
+  const horizonEnd = lastDayOfMonthIso(horizonMonth)
 
-  // ── current balance: snapshot-anchored, mirrors lib/analytics/engine.ts ──
-  const anchorWhere =
-    accountId !== undefined
-      ? and(
-          eq(importBatches.userId, userId),
-          eq(importBatches.accountId, accountId)
-        )
-      : eq(importBatches.userId, userId)
-  const anchors = db
-    .select({
-      id: importBatches.id,
-      createdAt: importBatches.createdAt,
-      snapshotDate: importBatches.snapshotDate,
-      snapshotAmountCents: importBatches.snapshotAmountCents,
-    })
-    .from(importBatches)
-    .where(anchorWhere)
-    .all()
-    .filter(
-      (r): r is BalanceAnchor =>
-        r.snapshotDate !== null &&
-        r.snapshotAmountCents !== null &&
-        r.snapshotDate <= today
-    )
-  // Same-day batches (two accounts imported on one date, a re-import) tie
-  // on snapshotDate alone — the select has no order, so the pick would be
-  // scan-order luck and could even differ from the balance KPI for the same
-  // user. isLaterAnchor makes the freshest import win deterministically;
-  // lib/analytics/engine.ts's latestAnchor applies the identical rule —
-  // including the snapshotDate <= today filter here, so a future-dated
-  // Saldo line never anchors one scope while the other rejects it.
-  const anchor = anchors.reduce<BalanceAnchor | null>(
-    (latest, r) => (latest === null || isLaterAnchor(r, latest) ? r : latest),
-    null
-  )
-
-  const bookedWhere =
-    accountId !== undefined
-      ? and(
-          eq(transactions.userId, userId),
-          eq(transactions.status, "Gebucht"),
-          eq(transactions.accountId, accountId)
-        )
-      : and(eq(transactions.userId, userId), eq(transactions.status, "Gebucht"))
+  // ── current balance: snapshot-anchored, shared with analytics/engine.ts ──
+  // latestAnchor applies the same snapshotDate <= today filter and the same
+  // deterministic tie-break as the balance KPI, so a future-dated Saldo line
+  // never anchors one scope while the other rejects it.
+  const anchor = latestAnchor(userId, accountId, today)
 
   let startingBalanceCents: number
   let withoutSnapshot: boolean
@@ -879,11 +735,10 @@ export function computeForecast(
         })
         .from(transactions)
         .where(
-          and(
-            bookedWhere,
-            sql`${transactions.bookingDate} > ${anchor.snapshotDate}`,
-            sql`${transactions.bookingDate} <= ${today}`
-          )
+          buildTimeScopedWhere(userId, accountId, {
+            after: anchor.snapshotDate,
+            to: today,
+          })
         )
         .get()?.sum ?? "0"
     )
@@ -896,7 +751,7 @@ export function computeForecast(
           sum: sql<string>`COALESCE(SUM(${transactions.amountCents}), 0)`,
         })
         .from(transactions)
-        .where(and(bookedWhere, sql`${transactions.bookingDate} <= ${today}`))
+        .where(buildTimeScopedWhere(userId, accountId, { to: today }))
         .get()?.sum ?? "0"
     )
     startingBalanceCents = sumUpToToday
@@ -957,11 +812,10 @@ export function computeForecast(
     })
     .from(transactions)
     .where(
-      and(
-        bookedWhere,
-        sql`${transactions.bookingDate} > ${today}`,
-        sql`${transactions.bookingDate} <= ${horizonEnd}`
-      )
+      buildTimeScopedWhere(userId, accountId, {
+        after: today,
+        to: horizonEnd,
+      })
     )
     .groupBy(transactions.bookingDate)
     .all()
@@ -987,20 +841,7 @@ export function computeForecast(
   const catIds = [
     ...new Set([...catTotals.keys()].filter((id): id is number => id !== null)),
   ]
-  const catRows = catIds.length
-    ? db
-        .select({
-          id: categories.id,
-          name: categories.name,
-          color: categories.color,
-        })
-        .from(categories)
-        .where(
-          and(inArray(categories.id, catIds), eq(categories.userId, userId))
-        )
-        .all()
-    : []
-  const catById = new Map(catRows.map((r) => [r.id, r]))
+  const catById = categoriesByIds(userId, catIds)
   const plannedCategories = [...catTotals.entries()]
     .map(([categoryId, totalCents]) => {
       const cat = categoryId === null ? null : catById.get(categoryId)

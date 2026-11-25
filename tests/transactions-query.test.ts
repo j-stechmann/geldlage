@@ -12,11 +12,8 @@ import {
   categories,
 } from "@/lib/db/schema"
 import { computeDedupe } from "@/lib/db/dedupe"
-import {
-  parseFilters,
-  queryTransactions,
-  type TransactionPage,
-} from "@/lib/analytics/queries"
+import { parseFilters, queryTransactions } from "@/lib/analytics/queries"
+import type { TransactionPage } from "@/lib/contracts/transactions"
 
 const fixtureDir = join(__dirname, "fixtures")
 const csv = readFileSync(join(fixtureDir, "fixture.csv"), "utf8")
@@ -206,5 +203,20 @@ describe("queryTransactions extended fields", () => {
     expect(search("%").total).toBe(1)
     expect(search("_").total).toBe(1)
     expect(search("_").rows[0]?.payee).toBe("IBAN_DE02")
+  })
+})
+
+describe("parseFilters ids", () => {
+  it("is digits-only, never parseInt-coerced", () => {
+    // parseInt alone would read "12abc" as account 12 / "3abc" as category 3;
+    // the planning/calendar routes reject that input for the same reason
+    expect(
+      parseFilters(new URLSearchParams("accountId=12abc&categoryId=3abc"))
+    ).toMatchObject({ accountId: undefined, categoryIds: [] })
+    expect(
+      parseFilters(
+        new URLSearchParams("accountId=12&categoryId=3&categoryId=4")
+      )
+    ).toMatchObject({ accountId: 12, categoryIds: [3, 4] })
   })
 })

@@ -708,3 +708,31 @@ describe("plan dialog: saving fans the mutation out to the planning caches", () 
     expect(queryClient.getQueryState(fcKey)?.isInvalidated).toBe(true)
   })
 })
+
+describe("plan dialog: dtstart floor", () => {
+  it("rejects a pre-1900 recurring start inline instead of blaming the rule", async () => {
+    renderWithQuery(
+      <PlanDialog
+        open
+        onOpenChange={() => {}}
+        plan={{
+          ...BASE_PLAN,
+          dtstart: "0050-06-15",
+          rrule: "FREQ=MONTHLY;BYMONTHDAY=15",
+        }}
+      />
+    )
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain(
+        "Startdatum muss ab 01.01.1900 liegen"
+      )
+    })
+    // the API's own floor is what rejects this; the preview must not claim
+    // the (valid) rule produces no occurrence
+    expect(document.body.textContent).not.toContain(
+      "Diese Regel erzeugt keinen Termin"
+    )
+    expect(saveButton().disabled).toBe(true)
+  })
+})

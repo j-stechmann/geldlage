@@ -4,7 +4,7 @@ import {
   topCategoriesTooltip,
   type TopCategoryRow,
 } from "@/components/analytics-charts"
-import type { ForecastResult } from "@/components/planning/api"
+import type { ForecastResult } from "@/lib/contracts/planning"
 
 /**
  * Merge-identity regression (planned-vs-actual Top-Ausgabenkategorien): the

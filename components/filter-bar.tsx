@@ -19,9 +19,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { EMPTY_FILTERS, type TableFilters } from "@/lib/filters"
+import { isValidIsoDate, MAX_ISO_DATE } from "@/lib/dates"
 import { resolveCategoryColor } from "@/lib/category-colors"
 import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
+import { useDebouncedSearch } from "@/hooks/use-debounced-search"
 
 interface CategoryOption {
   id: number
@@ -52,34 +54,15 @@ export function FilterBar({
   filters: TableFilters
   onChange: (f: TableFilters) => void
 }) {
-  const [qDraft, setQDraft] = React.useState(filters.q)
-  const lastEmitted = React.useRef(filters.q)
-
-  // resync the draft when filters.q changes externally (back/forward,
-  // shared links); our own debounced emits are already reflected in the draft
-  const lastSyncedQ = React.useRef(filters.q)
-  React.useEffect(() => {
-    if (filters.q === lastSyncedQ.current) return
-    lastSyncedQ.current = filters.q
-    if (filters.q !== lastEmitted.current) {
-      lastEmitted.current = filters.q
-      setQDraft(filters.q)
-    }
-  }, [filters.q])
-
-  // debounce search input → propagate to parent via timeout callback;
-  // emit the trimmed value so the URL round-trip (paramsToFilters trims q)
-  // stays stable and echo keys match
-  React.useEffect(() => {
-    const t = setTimeout(() => {
-      const q = qDraft.trim()
-      if (q !== lastEmitted.current) {
-        lastEmitted.current = q
-        onChange({ ...filters, q })
-      }
-    }, 300)
-    return () => clearTimeout(t)
-  }, [qDraft, filters, onChange])
+  // debounce search input → propagate the trimmed value so the URL
+  // round-trip (paramsToFilters trims q) stays stable and echo keys match.
+  // The hook resyncs the draft on external q changes (back/forward, shared
+  // links) and ignores our own emits.
+  const {
+    draft: qDraft,
+    setDraft: setQDraft,
+    cancel: cancelSearch,
+  } = useDebouncedSearch(filters.q, (q) => onChange({ ...filters, q }))
 
   const { data: categories } = useQuery<CategoryOption[]>({
     queryKey: ["categories"],
@@ -130,9 +113,15 @@ export function FilterBar({
         <Input
           type="date"
           value={filters.dateFrom ?? ""}
-          onChange={(e) =>
-            onChange({ ...filters, dateFrom: e.target.value || null })
-          }
+          max={MAX_ISO_DATE}
+          onChange={(e) => {
+            const value = e.target.value
+            // a date input can return a year outside the four-digit ISO
+            // range (Chromium accepts "10000-01-01"); the list routes answer
+            // that with 400 invalid_date, so never store it
+            if (value !== "" && !isValidIsoDate(value)) return
+            onChange({ ...filters, dateFrom: value || null })
+          }}
           className="w-36"
           aria-label="Von"
         />
@@ -140,9 +129,12 @@ export function FilterBar({
         <Input
           type="date"
           value={filters.dateTo ?? ""}
-          onChange={(e) =>
-            onChange({ ...filters, dateTo: e.target.value || null })
-          }
+          max={MAX_ISO_DATE}
+          onChange={(e) => {
+            const value = e.target.value
+            if (value !== "" && !isValidIsoDate(value)) return
+            onChange({ ...filters, dateTo: value || null })
+          }}
           className="w-36"
           aria-label="Bis"
         />
@@ -283,6 +275,9 @@ export function FilterBar({
         size="icon"
         title="Filter zurücksetzen"
         onClick={() => {
+          // cancel a timer that may already be due before the reset lands;
+          // otherwise its pre-reset closure re-applies the old search
+          cancelSearch()
           setQDraft("")
           onChange(EMPTY_FILTERS)
         }}

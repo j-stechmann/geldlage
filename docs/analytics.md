@@ -29,17 +29,35 @@ All list values are allow-listed; sort keys are restricted to
 `amount_cents / payee / booking_date`. The client serializes the same filter
 state into query params ([frontend.md](frontend.md)).
 
-`todayLocal()` ([lib/analytics/date.ts](../lib/analytics/date.ts)) returns
+`todayLocal()` / `isoDateLocal()` ([lib/dates.ts](../lib/dates.ts)) return
 the local-calendar date — deliberately **not** `new Date().toISOString()`,
 which would shift month boundaries for non-UTC timezones.
+
+Both list endpoints (`/api/analytics` and `/api/transactions`) share date
+_validation_ (`parseDateRange` in [lib/api/query.ts](../lib/api/query.ts)):
+`dateFrom`/`dateTo` must be real ISO dates inside the single representable
+range `0000-01-01` … `9999-12-31` (derived from `MIN_ISO_DATE`/`MAX_ISO_DATE`,
+which also derive the engine's month-key bounds). A syntactically valid range
+is never rejected for its width — the FilterBar can produce any range a user
+picks, and how much series a span costs is the engine's concern (see below).
+An inverted range (`dateFrom > dateTo`) is accepted and yields an empty
+filtered list, matching the pre-existing behavior — the balance KPI is
+deliberately unfiltered and still resolves as of `dateTo`.
 
 ## Monthly cash flow
 
 One grouped SQL query: `month = substr(booking_date, 1, 7)` (the ISO TEXT
 format makes this trivial), `income = SUM(CASE WHEN amount_cents > 0 …)`,
 `expenses = SUM(-amount_cents WHERE amount_cents < 0)`. JavaScript zero-fills
-months between the first and last booking month so the chart has no gaps;
-`net = income − expenses` per month.
+months between the effective bounds (the requested dates, falling back to the
+first/last booking month) so the chart has no gaps; `net = income − expenses`
+per month. The zero-fill is bounded by `MAX_DATE_RANGE_MONTHS` (1200 months).
+A span above the cap — an explicit wide range, a one-sided request, or an
+unfiltered one, possibly with an outlier booking date — is not rejected: the
+engine emits only the months that actually have data instead of zero-filling
+across centuries. When it degrades, the average denominator (`monthsCounted`)
+is the populated full months the chart actually shows, not the synthetic span
+that was never materialized.
 
 ## Averages and savings rate
 

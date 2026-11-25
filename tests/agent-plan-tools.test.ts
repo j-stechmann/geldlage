@@ -323,6 +323,18 @@ describe("create_plan", () => {
     ).rejects.toThrow("unknown field: amounts")
   })
 
+  it("rejects prototype-chain keys as unknown fields", async () => {
+    const d = dayFromToday(1)
+    for (const key of ["constructor", "toString", "__proto__"]) {
+      await expect(
+        create_plan.execute(
+          { amount_cents: -100, dtstart: d, [key]: 1 },
+          ctx(userId)
+        )
+      ).rejects.toThrow(`unknown field: ${key}`)
+    }
+  })
+
   it("rejects another user's account/category references", async () => {
     const d = dayFromToday(1)
     await expect(

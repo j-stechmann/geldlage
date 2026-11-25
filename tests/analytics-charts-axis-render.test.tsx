@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, render, screen } from "@testing-library/react"
 import { TopCategoriesChart } from "@/components/analytics-charts"
 import type { AnalyticsResponse } from "@/components/analytics-kpis"
-import type { ForecastResult } from "@/components/planning/api"
+import type { ForecastResult } from "@/lib/contracts/planning"
 
 const captured = vi.hoisted(() => ({
   xAxis: [] as Array<Record<string, unknown>>,

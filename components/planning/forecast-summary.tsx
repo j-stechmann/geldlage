@@ -7,7 +7,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { germanDate, type ForecastResult } from "@/components/planning/api"
+import { germanDate } from "@/components/planning/api"
+import type { ForecastResult } from "@/lib/contracts/planning"
 import { euro } from "@/lib/money"
 
 /**

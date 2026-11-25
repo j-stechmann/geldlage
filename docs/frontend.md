@@ -167,7 +167,7 @@ lives on its own tab. Flow aggregates (cashflow, categories, transaction
 count) react to every filter including Status; balance is
 time-scoped by design: snapshots anchor an absolute booked account balance,
 so content filters (q/type/category/labelStatus/**status**) are ignored
-([lib/analytics/engine.ts](../lib/analytics/engine.ts),
+([lib/analytics/balance.ts](../lib/analytics/balance.ts),
 `buildTimeScopedWhere`).
 
 ### `/transactions`
@@ -224,13 +224,17 @@ in-memory override keeps the toggle working for the session. The table
 files split by concern: `components/transactions-table.tsx` is the slim
 orchestrator (state, query, toolbar, pagination),
 `components/transaction-row.tsx` renders the row pair (main row + detail
-row with `TxRow` as single DTO source),
+row, with `TxRow` an alias of the shared `TransactionRow` contract),
 `components/assign-label-dialog.tsx` is the category dialog.
 
 **URL-synced filters**: filter state round-trips through the query string
 (`filtersToParams`/`paramsToFilters` in
 [lib/filters.ts](../lib/filters.ts)), so filtered views are shareable and
-bookmarkable. The page keeps a synchronous local mirror of the URL filters so
+bookmarkable. Date params are validated on parse with the same
+`isValidIsoDate` predicate the list routes use, so a shape-valid but
+impossible date in a hand-edited or shared URL is ignored instead of being
+sent to an API that answers `400 invalid_date`. The page keeps a synchronous
+local mirror of the URL filters so
 rapid changes compose instead of racing async `router.push` commits; own
 URL updates are recognized via echo keys (timestamps of the query strings we
 produced) and must not clobber newer local state — external navigations

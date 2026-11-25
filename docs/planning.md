@@ -4,9 +4,27 @@ Future money, planned by hand: the `/plans` page manages **virtual plans**
 — recurring (full RFC 5545 RRULE) or one-off — and `/calendar` renders their
 occurrences next to real bookings, checks them off, and projects the balance
 on the dashboard. Implemented per
-[ADR-0035](adr/adr-0035-planned-transactions-rrule.md); the design invariant
-is _not touching a single line of the analytics/import/labelling core_:
-plans are virtual, matching is read-time, the forecast is its own endpoint.
+[ADR-0035](adr/adr-0035-planned-transactions-rrule.md); the design
+invariants are: plans stay virtual (no row ever enters `transactions`),
+matching is read-time, and the forecast is its own scope. Shared read
+implementations ([ADR-0037](adr/adr-0037-virtual-plans-shared-machinery.md))
+never change bank-truth data.
+
+## Shared machinery
+
+The virtuality invariant still holds, but the implementation now reuses the
+transaction read machinery wherever a concern is genuinely shared
+([ADR-0037](adr/adr-0037-virtual-plans-shared-machinery.md)): the wire DTOs
+live once in `lib/contracts/`; ISO date arithmetic in `lib/dates.ts`; the
+calendar window / digits-only account / pagination parsing in
+`lib/api/query.ts`; the snapshot anchor and time-scoped booked predicate in
+`lib/analytics/balance.ts` (the forecast and the balance KPI use the same
+implementation, while the analytics scopes stay separate); the greedy 1:1
+pairing skeleton in `lib/greedy.ts`; the plan field vocabulary in
+`lib/planning/fields.ts`; the counterparty/prefill mapping in
+`lib/transactions.ts` + `lib/planning/prefill.ts`; and the pager/debounce/
+category badge in the shared UI modules. Plan occurrences still never enter
+`transactions`, and the forecast remains the separate third scope.
 
 ## Data model
 
@@ -54,6 +72,12 @@ Indexes: `planned_transactions_user_status_idx` `(user_id, status)` and
   defaults `dtstart` to _now_ and would silently empty pre-today windows.
   Dates anchor at **noon UTC** (`Date.UTC(y, m-1, d, 12)`) so DST never
   shifts a day and month ends behave; ISO strings are read from UTC parts.
+  A non-date `dtstart` (legacy/direct-DB row; the column has no format CHECK)
+  yields no occurrences, and recurring starts before year 0100 are skipped
+  too: rrule's `Date.UTC` math remaps years 0–99 onto 1900–1999, so expanding
+  there would silently return the wrong century. The API floors `dtstart` at
+  1900 ([lib/planning/limits.ts](../lib/planning/limits.ts)); these guards
+  only cover corrupt rows and the unsaved dialog preview.
 - **Short months clamp to month end**: a positive monthly/yearly
   `BYMONTHDAY` anchor that a month cannot hold (29–31) fires on that
   month's **last day** instead of skipping the month — `BYMONTHDAY=31` gives
@@ -137,8 +161,10 @@ is left untouched; the forecast endpoint is deliberately separate.
   `(snapshot, today]`; no snapshot → Σ booked ≤ today, flagged
   `withoutSnapshot`. Account filter respected like the balance timeline.
   Same-snapshotDate batches (two accounts imported on one day) tie-break
-  deterministically — freshest import first (`createdAt`, then `id`,
-  `isLaterAnchor`), the identical rule the balance KPI applies; both scopes
+  deterministically — freshest import first (`snapshot_date`, then
+  `created_at`, then `id`, all descending in `latestAnchor`'s shared SQL in
+  `lib/analytics/balance.ts`), the identical rule the balance KPI applies;
+  both scopes
   also ignore snapshots dated **after** today (a future-dated Saldo line
   never anchors one scope while the other rejects it), so the KPI and the
   forecast can never pick different snapshots for the same user.
@@ -189,15 +215,15 @@ All routes `runtime = "nodejs"`, `dynamic = "force-dynamic"`, hand-rolled
 validation (error `{error: "code", message}`), session-scoped, CSRF on
 writes ([api.md](api.md)):
 
-| Route                                              | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `GET /api/plans`                                   | list + `nextDueDate` per plan; `q`/`status` filter (case-insensitive incl. non-ASCII, metacharacters literal), `page`/`pageSize` (≤ 100) page the table — without paging params the full list is returned for existing consumers, and `includeNextDue=0` skips the per-plan next-date walk for lookups that never read it                                                                                                                        |
-| `POST /api/plans`                                  | create; validates `amountCents ≠ 0`, `dtstart` ISO (not before 1900), RRULE allowlist + first occurrence within the bounded next-date ladder (five rungs, closing rung ≥ one Gregorian 400-year cycle — sparse-but-live rules whose next date falls inside it, e.g. a century-cadence `BYDAY`+`BYMONTHDAY` intersection, pass; rung ends clamp at the last storable ISO date `9999-12-31`), ownership of account/category                        |
-| `PATCH /api/plans/[id]`                            | partial update; dtstart/rule changes re-check occurrence productivity                                                                                                                                                                                                                                                                                                                                                                            |
-| `DELETE /api/plans/[id]`                           | delete (no other data references plans)                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `GET /api/plans/occurrences?from&to&accountId`     | expanded window + match states; window ≤ 400 days apart _and_ within ±60 months of today (rules expanded through rrule walk from dtstart occurrence-by-occurrence — no seek — so far windows cost CPU linear in that distance; the arithmetic clamp path starts at the window unless `COUNT` applies)                                                                                                                                            |
-| `GET /api/plans/forecast?months&accountId`         | projection envelope                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `GET /api/transactions/calendar?from&to&accountId` | compact bank rows (Gebucht **and** Nicht gebucht — pending rows carry a Buchungsdatum and show dashed/hollow) for the same window; counterparty = payee (Ausgang) / payer (Eingang); same far-window contract as /occurrences (window ≤ 400 days apart _and_ within ±60 months of today, so the two /calendar window reads fail together — at that distance the calendar answers with a navigation hint instead of the retry that can't succeed) |
+| Route                                              | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/plans`                                   | list + `nextDueDate` per plan; `q`/`status` filter (case-insensitive incl. non-ASCII, metacharacters literal), `page`/`pageSize` (≤ 100) page the table — without paging params the full list is returned for existing consumers, and `includeNextDue=0` skips the per-plan next-date walk for lookups that never read it                                                                                                                                                          |
+| `POST /api/plans`                                  | create; validates `amountCents ≠ 0`, `dtstart` ISO (not before 1900), RRULE allowlist + first occurrence within the bounded next-date ladder (five rungs, closing rung ≥ one Gregorian 400-year cycle — sparse-but-live rules whose next date falls inside it, e.g. a century-cadence `BYDAY`+`BYMONTHDAY` intersection, pass; rung ends clamp at the last storable ISO date `9999-12-31`), ownership of account/category                                                          |
+| `PATCH /api/plans/[id]`                            | partial update; dtstart/rule changes re-check occurrence productivity                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `DELETE /api/plans/[id]`                           | delete (no other data references plans)                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `GET /api/plans/occurrences?from&to&accountId`     | expanded window + match states; window ≤ 400 days apart _and_ within ±60 months of today (rules expanded through rrule walk from dtstart occurrence-by-occurrence — no seek — so far windows cost CPU linear in that distance; the arithmetic clamp path starts at the window unless `COUNT` applies; validation order is `from` ISO → `from` distance → `to` ISO/order → `to` distance → width, so a far `from` reports `window_too_far` even when `to` is malformed or inverted) |
+| `GET /api/plans/forecast?months&accountId`         | projection envelope                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `GET /api/transactions/calendar?from&to&accountId` | compact bank rows (Gebucht **and** Nicht gebucht — pending rows carry a Buchungsdatum and show dashed/hollow) for the same window; counterparty = payee (Ausgang) / payer (Eingang); same far-window contract as /occurrences (window ≤ 400 days apart _and_ within ±60 months of today, so the two /calendar window reads fail together — at that distance the calendar answers with a navigation hint instead of the retry that can't succeed)                                   |
 
 ## Agent access
 

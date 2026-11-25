@@ -8,6 +8,10 @@ export default defineConfig({
     // environmentMatchGlobs) — tests/agent-panel-ui.test.tsx et al.
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
     environment: "node",
+    // Pin a non-UTC zone so local-calendar assertions are meaningful on
+    // CI (Ubuntu defaults to UTC): Berlin local midnight is the previous
+    // UTC day.
+    env: { TZ: "Europe/Berlin" },
     setupFiles: ["tests/setup.ts"],
   },
   resolve: {

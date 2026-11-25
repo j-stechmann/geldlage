@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { mergeBalance } from "@/components/analytics-charts"
 import type { AnalyticsResponse } from "@/components/analytics-kpis"
-import type { ForecastResult } from "@/components/planning/api"
+import type { ForecastResult } from "@/lib/contracts/planning"
 
 /**
  * Connection-point regression (Prognose overlay on the balance timeline):

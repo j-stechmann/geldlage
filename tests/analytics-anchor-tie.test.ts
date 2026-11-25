@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest"
 import type { Db } from "@/lib/db"
 import { accounts, importBatches, transactions } from "@/lib/db/schema"
 import { computeAnalytics } from "@/lib/analytics/engine"
+import { latestAnchor } from "@/lib/analytics/balance"
 import { parseFilters } from "@/lib/analytics/queries"
 import { setupTestDb } from "./helpers"
 
@@ -86,6 +87,11 @@ describe("latestAnchor snapshotDate ties", () => {
     )
     // 18:00 batch (300k) + the booked drift after 2026-01-31
     expect(analytics.kpis.currentBalanceCents).toBe(300_000 - 50_000)
+    // pin the SQL ordering directly, not just the derived KPI
+    expect(latestAnchor(userId, undefined, "2026-02-15")).toMatchObject({
+      id: "batch-tie-a",
+      snapshotAmountCents: 300_000,
+    })
   })
 
   it("ties down to id when createdAt is equal, deterministically", () => {
@@ -109,6 +115,10 @@ describe("latestAnchor snapshotDate ties", () => {
     // same createdAt (default) → the higher id wins on both sides: engine
     // KPI and forecast anchor stay in agreement
     expect(analytics.kpis.currentBalanceCents).toBe(300_000)
+    expect(latestAnchor(userId, undefined, "2026-02-15")).toMatchObject({
+      id: "batch-tie-z",
+      snapshotAmountCents: 300_000,
+    })
   })
 })
 
