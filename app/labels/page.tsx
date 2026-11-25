@@ -55,6 +55,7 @@ function invalidateAll(queryClient: ReturnType<typeof useQueryClient>) {
   void queryClient.invalidateQueries({ queryKey: ["transactions"] })
   void queryClient.invalidateQueries({ queryKey: ["analytics"] })
   void queryClient.invalidateQueries({ queryKey: ["categories"] })
+  void queryClient.invalidateQueries({ queryKey: ["prediction"] })
 }
 
 function OriginBadge({ origin }: { origin: string }) {

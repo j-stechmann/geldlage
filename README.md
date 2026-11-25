@@ -7,9 +7,11 @@ rules, and analytics (balance, monthly cash flow, savings rate, top
 categories) that always reflect the filtered query results. Future money is
 planned on `/plans` — **geplante Transaktionen**, recurring (full RFC 5545
 RRULE) or one-off — and rendered on `/calendar` with a check-off against real
-bookings (erwartet/überfällig/gebucht) plus a balance/cashflow projection
-behind the "Geplant einblenden" dashboard toggle
-([ADR-0035](docs/adr/adr-0035-planned-transactions-rrule.md)).
+bookings (erwartet/überfällig/gebucht). The dashboard always shows a
+**two-month daily prediction** trained automatically on the user's own
+bookings (one model per account plus an all-accounts model), with plans added exactly and already-booked
+future rows carried in the balance projection
+([ADR-0038](docs/adr/adr-0038-automatic-daily-prediction.md)).
 
 | Dashboard                                                                                                | Imports                                                                             |
 | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |

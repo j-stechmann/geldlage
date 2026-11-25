@@ -8,15 +8,16 @@ month-windowing/balance math in JavaScript
 reflects the filtered query results — with one deliberate exception
 (balances, see below).
 
-**The planned overlay is deliberately NOT part of this engine.** Planned
-(geplante) transactions and the balance projection form a
-**third scope** ([ADR-0035](adr/adr-0035-planned-transactions-rrule.md),
-[planning.md](planning.md)) with its own endpoint
-(`GET /api/plans/forecast`): planned money never enters `computeAnalytics`
-results, and real booked money never enters the planned sums (it only moves
-the balance line). The dashboard's
-"Geplant einblenden" toggle fetches the forecast separately and merges it
-into the charts client-side (`mergeBalance`/`mergeCashflow` in
+**The daily prediction is deliberately NOT part of this engine.** It uses
+booked transactions and active plans as inputs but its output is a separate
+projection scope ([ADR-0038](adr/adr-0038-automatic-daily-prediction.md),
+[prediction.md](prediction.md)) served by `GET /api/predictions/forecast`.
+Predicted money never enters `computeAnalytics` results. Real booked money
+is the residual model’s training input, but it is never added on top of the
+predicted residual again; already-booked _future_ money only moves the
+starting balance / real-future part of the projection. The dashboard always fetches the two-month
+prediction separately and merges it into the charts client-side
+(`mergeBalance`/`mergeCashflow` in
 [components/analytics-charts.tsx](../components/analytics-charts.tsx)).
 
 ## Filters

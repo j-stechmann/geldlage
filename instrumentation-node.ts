@@ -11,6 +11,8 @@ export async function registerNode() {
   const { ensureSchema } = await import("@/lib/db")
   const { resetStuckBatches } = await import("@/lib/import/pipeline")
   const { startLabelWorker } = await import("@/lib/labeller/worker")
+  const { startPredictionScheduler } =
+    await import("@/lib/prediction/scheduler")
 
   warnIfPlaintext()
   logFilePermissionAdvice()
@@ -28,6 +30,13 @@ export async function registerNode() {
   // label worker resumes 'labeling' batches after a restart and drains
   // pending/failed rows; first tick shortly after boot (self-heal)
   startLabelWorker()
+  // automatic daily prediction models are repaired and refreshed in the
+  // background; the charts fall back to the daily baseline until ready
+  try {
+    startPredictionScheduler()
+  } catch (error) {
+    console.error("[startup] prediction scheduler failed:", error)
+  }
 }
 
 /**

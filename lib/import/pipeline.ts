@@ -24,6 +24,7 @@ import {
   type DbMatchRow,
 } from "@/lib/db/match"
 import { hasLabelableRows, pruneOrphanCategories } from "@/lib/labeller/service"
+import { notifyImportCommitted } from "@/lib/prediction/triggers"
 
 export type ImportStage =
   "parsing" | "importing" | "labeling" | "completed" | "failed"
@@ -207,6 +208,10 @@ async function runImportJob(
         `dedupe invariant violated: imported(${imported}) + duplicates(${duplicateCount}) + updated(${updatedCount}) !== total(${totalRows})`
       )
     }
+
+    // The prediction model reads booked rows, not labels, so it can refresh
+    // as soon as reconciliation has written the transactions.
+    notifyImportCommitted(userId, account.id)
 
     // ── stage: labeling (owned by the background worker) ────────────
     // the import job stops here; the label worker drains the batch and

@@ -1,5 +1,6 @@
 import type { AgentTool } from "@/lib/agent/types"
 import { createPlan } from "@/lib/planning/service"
+import { notifyPlanChanged } from "@/lib/prediction/triggers"
 import {
   assertArgsObject,
   planInputFromArgs,
@@ -79,6 +80,7 @@ export const create_plan = {
     const input = planInputFromArgs(assertArgsObject(args ?? null))
     try {
       const plan = createPlan(ctx.uid, input)
+      notifyPlanChanged(ctx.uid, plan.accountId)
       return { plan: planView(plan) }
     } catch (err) {
       rethrowPlanError(err)
