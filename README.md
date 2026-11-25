@@ -28,9 +28,12 @@ make dev   # offers the model download on first run, then starts everything
 ```
 
 `make dev` (and `make app`) also bring up the **dev OIDC provider** the login
-requires: a throwaway Authentik stack in Docker
+requires: a throwaway Authentik stack in Docker or rootless Podman
 ([compose.dev.yaml](compose.dev.yaml), `127.0.0.1:8081`), with the app's OIDC
-client provisioned automatically. Its credentials live in `compose.dev.env`
+client provisioned automatically. The engine is selected by `OIDC_CTL` /
+`OIDC_COMPOSE_CMD` (`Makefile`), so a rootless setup just needs
+`OIDC_CTL = podman` and `OIDC_COMPOSE_CMD = podman-compose` in the gitignored
+`Makefile.local`. Its credentials live in `compose.dev.env`
 (gitignored — created from `compose.dev.env.example` on first `make oidc`;
 login is `akadmin` / your `AUTHENTIK_BOOTSTRAP_PASSWORD`). The stack is bound
 to localhost only and must never be exposed to other network hosts.
